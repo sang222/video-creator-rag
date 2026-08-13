@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import re
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -165,8 +166,7 @@ class V2NarrationTimingRecoveryService:
         self._require_actor(actor)
         existing = self.session.scalar(
             select(V2NarrationTimingRecoveryAuthority).where(
-                V2NarrationTimingRecoveryAuthority.workflow_run_id
-                == workflow_run_id
+                V2NarrationTimingRecoveryAuthority.workflow_run_id == workflow_run_id
             )
         )
         if existing is not None:
@@ -242,8 +242,7 @@ class V2NarrationTimingRecoveryService:
         # journal replay even if current configuration later changes.
         existing_authority = self.session.scalar(
             select(V2NarrationTimingRecoveryAuthority).where(
-                V2NarrationTimingRecoveryAuthority.workflow_run_id
-                == workflow_run_id
+                V2NarrationTimingRecoveryAuthority.workflow_run_id == workflow_run_id
             )
         )
         if existing_authority is None:
@@ -360,9 +359,7 @@ class V2NarrationTimingRecoveryService:
             def capture(value: dict[str, Any]) -> None:
                 captured = dict(value)
                 payload = {
-                    "schema_version": (
-                        "vcos.v2-forced-alignment-recovery-response.v1"
-                    ),
+                    "schema_version": ("vcos.v2-forced-alignment-recovery-response.v1"),
                     "authority_id": str(authority.id),
                     "authority_hash": authority.authority_hash,
                     "forced_alignment_request_hash": request["request_hash"],
@@ -396,12 +393,10 @@ class V2NarrationTimingRecoveryService:
                 audio_duration_ms=scope.audio_duration_ms,
             )
             if (
-                getattr(execution, "request_hash", None)
-                != request["request_hash"]
+                getattr(execution, "request_hash", None) != request["request_hash"]
                 or getattr(execution, "provider_response_hash", None)
                 != captured_holder.get("content_hash")
-                or execution.evidence.content_hash
-                != captured_evidence.content_hash
+                or execution.evidence.content_hash != captured_evidence.content_hash
             ):
                 raise ValidationFailureError(
                     "V2_NARRATION_TIMING_RECOVERY_PROVIDER_PROOF_MISMATCH"
@@ -412,11 +407,18 @@ class V2NarrationTimingRecoveryService:
                     "V2_NARRATION_TIMING_RECOVERY_RESPONSE_NOT_CAPTURED"
                 )
 
-        self._validate_exact_alignment(evidence, normalized)
+        alignment_audit = self._validate_exact_alignment(
+            evidence,
+            normalized,
+            raw_response=dict(captured["response"]),
+        )
         evidence_payload = evidence.model_dump(mode="json")
         _persist_exact_json(evidence_path, evidence_payload)
         timing_seed = self._timing_seed(
-            scope=scope, normalized=normalized, evidence=evidence
+            scope=scope,
+            normalized=normalized,
+            evidence=evidence,
+            alignment_audit=alignment_audit,
         )
         timing_payload = timing_seed.model_dump(mode="json")
         _persist_exact_json(timing_path, timing_payload)
@@ -434,6 +436,7 @@ class V2NarrationTimingRecoveryService:
             "provider_request_id": evidence.provider_request_id,
             "timing_seed": timing_payload,
             "timing_seed_hash": timing_seed.content_hash,
+            "alignment_audit": alignment_audit,
             "usage_metadata": {
                 "provider": "elevenlabs_forced_alignment",
                 "provider_call_count": 1,
@@ -598,10 +601,7 @@ class V2NarrationTimingRecoveryService:
             or (require_blocked and run.state != "BLOCKED")
             or run.production_package_artifact_version_id is None
             or run.production_package_hash is None
-            or (
-                run.canonical_media_timeline_ref is not None
-                and authority is None
-            )
+            or (run.canonical_media_timeline_ref is not None and authority is None)
         ):
             raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_SCOPE_INVALID")
         ledgers = list(
@@ -637,8 +637,7 @@ class V2NarrationTimingRecoveryService:
                     == ControlledVerifierSettlementAuthority.settlement_qualification_run_id,
                 )
                 .where(
-                    ScriptQualificationRun.production_workflow_run_id
-                    == workflow_run_id
+                    ScriptQualificationRun.production_workflow_run_id == workflow_run_id
                 )
             ).all()
         )
@@ -671,10 +670,7 @@ class V2NarrationTimingRecoveryService:
             != run.production_package_artifact_version_id
             or ledger.production_package_hash != run.production_package_hash
             or ledger.input_hash != expected_media_input_hash
-            or (
-                ledger.state == "FAILED_UNCERTAIN"
-                and ledger.result_hash is not None
-            )
+            or (ledger.state == "FAILED_UNCERTAIN" and ledger.result_hash is not None)
             or (
                 ledger.state == "VERIFIED"
                 and not self._verified_ledger_matches_authority(ledger, authority)
@@ -694,25 +690,26 @@ class V2NarrationTimingRecoveryService:
             != handler_key_for(
                 ProductionLane(run.production_lane), ProductionWorkflowStage.MEDIA
             )
-            or (event.payload or {}).get("input_hash")
-            != expected_media_input_hash
+            or (event.payload or {}).get("input_hash") != expected_media_input_hash
             or event.last_error_code != ORIGINAL_FAILURE
             or dead_letter.reason_code != ORIGINAL_FAILURE
             or dead_letter.replay_state != "NOT_REPLAYABLE"
             or dead_letter.retry_eligible is not False
-            or root.authority_hash != content_hash(operator_recovery_authority_body(root))
+            or root.authority_hash
+            != content_hash(operator_recovery_authority_body(root))
             or settlement.authority_hash
             != content_hash(controlled_verifier_settlement_authority_body(settlement))
-            or resolve_replacement_qualification_leaf(
-                self.session, authority=root
-            ).id
+            or resolve_replacement_qualification_leaf(self.session, authority=root).id
             != qualification.id
         ):
             raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_LINEAGE_INVALID")
         package_version = self.session.get(
             ArtifactVersion, run.production_package_artifact_version_id
         )
-        if package_version is None or package_version.content_hash != run.production_package_hash:
+        if (
+            package_version is None
+            or package_version.content_hash != run.production_package_hash
+        ):
             raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_PACKAGE_INVALID")
         package = ProductionPackageService(self.session).validate_for_readiness(
             package_version.id
@@ -774,7 +771,9 @@ class V2NarrationTimingRecoveryService:
         effect_dir = self.adapter._effect_dir(ledger.command_id)
         tts_path = effect_dir / "elevenlabs-request-journal.json"
         request_raw = _load_json(tts_path)
-        request_identity = {key: value for key, value in request_raw.items() if key != "state"}
+        request_identity = {
+            key: value for key, value in request_raw.items() if key != "state"
+        }
         audio_relative = str(request_identity.get("output_relative_path") or "")
         audio_path = self.adapter._from_relative(audio_relative)
         duration = self._audio_duration(audio_path)
@@ -794,13 +793,17 @@ class V2NarrationTimingRecoveryService:
             "attempt_limit": 1,
         }
         if request_raw.get("state") != "SUBMITTED" or request_identity != exact_request:
-            raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_TTS_IDENTITY_INVALID")
+            raise ValidationFailureError(
+                "V2_NARRATION_TIMING_RECOVERY_TTS_IDENTITY_INVALID"
+            )
         if not (
             package.duration_contract.minimum_duration_ms
             <= duration
             <= package.duration_contract.maximum_duration_ms
         ):
-            raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_DURATION_INVALID")
+            raise ValidationFailureError(
+                "V2_NARRATION_TIMING_RECOVERY_DURATION_INVALID"
+            )
         return _RecoveryScope(
             run=run,
             ledger=ledger,
@@ -830,18 +833,14 @@ class V2NarrationTimingRecoveryService:
         self, authority: V2NarrationTimingRecoveryAuthority
     ) -> None:
         if authority.authority_hash != content_hash(_authority_body(authority)):
-            raise ValidationFailureError(
-                "V2_NARRATION_TIMING_RECOVERY_AUTHORITY_DRIFT"
-            )
+            raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_AUTHORITY_DRIFT")
         audio = self.adapter._from_relative(authority.audio_relative_path)
         if (
             _sha256_file(audio) != authority.audio_checksum_sha256
             or audio.stat().st_size != authority.audio_size_bytes
             or self._audio_duration(audio) != authority.audio_duration_ms
         ):
-            raise ValidationFailureError(
-                "V2_NARRATION_TIMING_RECOVERY_AUDIO_DRIFT"
-            )
+            raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_AUDIO_DRIFT")
 
     def _assert_authority_matches_scope(
         self,
@@ -870,7 +869,8 @@ class V2NarrationTimingRecoveryService:
             or authority.approved_script_hash != scope.approved_script_hash
             or authority.budget_reservation_id != scope.budget.id
             or authority.budget_reservation_ref != scope.budget.reservation_ref
-            or authority.tts_request_identity_hash != content_hash(scope.request_identity)
+            or authority.tts_request_identity_hash
+            != content_hash(scope.request_identity)
             or authority.tts_request_journal_ref != request_journal_ref
             or authority.tts_idempotency_key
             != str(scope.request_identity["idempotency_key"])
@@ -882,9 +882,7 @@ class V2NarrationTimingRecoveryService:
             or authority.audio_size_bytes != scope.audio_size_bytes
             or authority.audio_duration_ms != scope.audio_duration_ms
         ):
-            raise ValidationFailureError(
-                "V2_NARRATION_TIMING_RECOVERY_AUTHORITY_DRIFT"
-            )
+            raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_AUTHORITY_DRIFT")
 
     def _require_pristine_initial_scope(self, scope: _RecoveryScope) -> None:
         """Require the exact pre-0076 fork-free state before issuing authority."""
@@ -910,9 +908,7 @@ class V2NarrationTimingRecoveryService:
             self.session.scalars(
                 select(V2ProductionEffectLedger.id).where(
                     V2ProductionEffectLedger.workflow_run_id == scope.run.id,
-                    V2ProductionEffectLedger.stage.in_(
-                        {"RENDER", "QC", "ARCHIVE"}
-                    ),
+                    V2ProductionEffectLedger.stage.in_({"RENDER", "QC", "ARCHIVE"}),
                 )
             ).all()
         )
@@ -929,9 +925,7 @@ class V2NarrationTimingRecoveryService:
         downstream_events = [
             event
             for event in self.session.scalars(
-                select(DomainEvent).where(
-                    DomainEvent.workflow_run_id == scope.run.id
-                )
+                select(DomainEvent).where(DomainEvent.workflow_run_id == scope.run.id)
             ).all()
             if (
                 str((event.payload or {}).get("stage") or "")
@@ -987,18 +981,15 @@ class V2NarrationTimingRecoveryService:
             or command_receipt.command_id
             != command_id_for(workflow_run_id, ProductionWorkflowStage.MEDIA)
             or command_receipt.handler_version != RECOVERY_HANDLER_VERSION
-            or command_receipt.result_hash
-            != receipt.canonical_media_timeline_hash
-            or result_payload.get("timing_recovery_receipt_id")
-            != str(receipt.id)
+            or command_receipt.result_hash != receipt.canonical_media_timeline_hash
+            or result_payload.get("timing_recovery_receipt_id") != str(receipt.id)
             or result_payload.get("timing_recovery_receipt_hash")
             != receipt.receipt_hash
             or result_payload.get("recovered_media_domain_event_id")
             != str(authority.media_domain_event_id)
             or result_payload.get("recovered_media_dead_letter_job_id")
             != str(authority.media_dead_letter_job_id)
-            or authority_refs.get("video_project_id")
-            != str(authority.video_project_id)
+            or authority_refs.get("video_project_id") != str(authority.video_project_id)
             or authority_refs.get("canonical_media_timeline_hash")
             != receipt.canonical_media_timeline_hash
             or str(run.canonical_media_timeline_hash or "")
@@ -1040,9 +1031,9 @@ class V2NarrationTimingRecoveryService:
         """Serialize the recovery across commits and crash-released sessions."""
 
         lock_key = int.from_bytes(
-            hashlib.sha256(
-                f"v2-timing-recovery:{workflow_run_id}".encode()
-            ).digest()[:8],
+            hashlib.sha256(f"v2-timing-recovery:{workflow_run_id}".encode()).digest()[
+                :8
+            ],
             byteorder="big",
             signed=False,
         ) & ((1 << 63) - 1)
@@ -1056,9 +1047,7 @@ class V2NarrationTimingRecoveryService:
                 ).scalar_one()
             )
             if not acquired:
-                raise ValidationFailureError(
-                    "V2_NARRATION_TIMING_RECOVERY_IN_PROGRESS"
-                )
+                raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_IN_PROGRESS")
             yield
         finally:
             if acquired:
@@ -1120,7 +1109,9 @@ class V2NarrationTimingRecoveryService:
             and journal.get("forced_alignment_provider_call_count") == 1
         )
 
-    def _forced_alignment_client(self, capture: Callable[[dict[str, Any]], None]) -> Any:
+    def _forced_alignment_client(
+        self, capture: Callable[[dict[str, Any]], None]
+    ) -> Any:
         if self.client is not None:
             if hasattr(self.client, "response_capture"):
                 self.client.response_capture = capture
@@ -1148,7 +1139,8 @@ class V2NarrationTimingRecoveryService:
             or payload.get("authority_hash") != authority.authority_hash
             or payload.get("forced_alignment_request_hash") != request_hash
             or not isinstance(capture, dict)
-            or capture.get("content_hash") != content_hash(
+            or capture.get("content_hash")
+            != content_hash(
                 {key: value for key, value in capture.items() if key != "content_hash"}
             )
         ):
@@ -1162,30 +1154,155 @@ class V2NarrationTimingRecoveryService:
         }
 
     @staticmethod
-    def _validate_exact_alignment(evidence: Any, normalized: Any) -> None:
+    def _validate_exact_alignment(
+        evidence: Any,
+        normalized: Any,
+        *,
+        raw_response: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Prove exact text coverage without inventing zero-duration timing.
+
+        ElevenLabs can truthfully return characters whose rounded start and end
+        are equal.  ``CharacterAlignment`` deliberately cannot represent those
+        as timed characters.  The immutable response capture remains the
+        complete character-sequence authority, while downstream caption timing
+        uses the exact provider word boundaries.
+        """
+
+        raw_characters = raw_response.get("characters")
+        if not isinstance(raw_characters, list):
+            raise ValidationFailureError(
+                "V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED"
+            )
+        raw_timed: list[tuple[int, str, int, int]] = []
+        zero_duration_count = 0
+        previous_start = -1
+        for index, item in enumerate(raw_characters):
+            if not isinstance(item, dict):
+                raise ValidationFailureError(
+                    "V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED"
+                )
+            character = item.get("text")
+            try:
+                start_ms = ElevenLabsForcedAlignmentResponseParser._time_ms(
+                    item, "start"
+                )
+                end_ms = ElevenLabsForcedAlignmentResponseParser._time_ms(item, "end")
+            except (TypeError, ValueError):
+                raise ValidationFailureError(
+                    "V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED"
+                ) from None
+            if (
+                not isinstance(character, str)
+                or len(character) != 1
+                or index >= len(normalized.spoken_text)
+                or character != normalized.spoken_text[index]
+                or start_ms < previous_start
+                or start_ms < 0
+                or end_ms < start_ms
+                or end_ms > evidence.audio_duration_ms
+            ):
+                raise ValidationFailureError(
+                    "V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED"
+                )
+            previous_start = start_ms
+            if end_ms == start_ms:
+                zero_duration_count += 1
+            else:
+                raw_timed.append((index, character, start_ms, end_ms))
+
         characters = sorted(evidence.characters, key=lambda item: item.character_index)
+        parsed_timed = [
+            (item.character_index, item.character, item.start_ms, item.end_ms)
+            for item in characters
+        ]
         token_ids = [
             token_id
             for word in evidence.words
             for token_id in word.source_spoken_token_ids
         ]
+        expected_token_ids = [item.token_id for item in normalized.spoken_tokens]
+        previous_word_end = -1
+        word_timing_valid = True
+        for word in evidence.words:
+            if word.start_ms < previous_word_end or word.end_ms <= word.start_ms:
+                word_timing_valid = False
+                break
+            previous_word_end = word.end_ms
         if (
             evidence.verification_status != "PASS"
             or evidence.missing_tokens
             or evidence.extra_words
-            or token_ids != [item.token_id for item in normalized.spoken_tokens]
+            or token_ids != expected_token_ids
             or len(token_ids) != len(set(token_ids))
-            or [item.character_index for item in characters]
-            != list(range(len(normalized.spoken_text)))
-            or "".join(item.character for item in characters)
-            != normalized.spoken_text
+            or len(evidence.words) != len(normalized.spoken_tokens)
+            or any(
+                word.source_spoken_token_ids != [token.token_id]
+                for word, token in zip(
+                    evidence.words, normalized.spoken_tokens, strict=True
+                )
+            )
+            or not word_timing_valid
+            or len(raw_characters) != len(normalized.spoken_text)
+            or parsed_timed != raw_timed
         ):
             raise ValidationFailureError(
                 "V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED"
             )
+        return {
+            "schema_version": "vcos.v2-forced-alignment-recovery-audit.v1",
+            "exact_raw_character_sequence": True,
+            "raw_character_count": len(raw_characters),
+            "provider_timed_character_count": len(raw_timed),
+            "provider_zero_duration_character_count": zero_duration_count,
+            "zero_duration_character_timing_synthesized": False,
+            "exact_word_token_coverage": True,
+            "provider_word_count": len(evidence.words),
+            "canonical_spoken_token_count": len(normalized.spoken_tokens),
+            "caption_timing_source": "ELEVENLABS_FORCED_ALIGNMENT_WORD_BOUNDARIES",
+        }
 
     @staticmethod
-    def _timing_seed(*, scope: _RecoveryScope, normalized: Any, evidence: Any) -> NarrationTimingSeed:
+    def _timing_seed(
+        *,
+        scope: _RecoveryScope,
+        normalized: Any,
+        evidence: Any,
+        alignment_audit: dict[str, Any],
+    ) -> NarrationTimingSeed:
+        caption_words = list(re.finditer(r"\S+", normalized.spoken_text))
+        if len(caption_words) != len(evidence.words):
+            raise ValidationFailureError(
+                "V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED"
+            )
+        caption_timed_words: list[dict[str, Any]] = []
+        for index, (match, token, word) in enumerate(
+            zip(
+                caption_words,
+                normalized.spoken_tokens,
+                evidence.words,
+                strict=True,
+            ),
+            start=1,
+        ):
+            if not (
+                match.start() <= token.spoken_span.start
+                and token.spoken_span.end <= match.end()
+                and word.source_spoken_token_ids == [token.token_id]
+            ):
+                raise ValidationFailureError(
+                    "V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED"
+                )
+            caption_timed_words.append(
+                {
+                    "index": index,
+                    "text": match.group(),
+                    "start_ms": word.start_ms,
+                    "end_ms": word.end_ms,
+                    "provider_word_id": word.word_id,
+                    "source_spoken_token_ids": list(word.source_spoken_token_ids),
+                }
+            )
         payload = {
             "provider_key": "elevenlabs_forced_alignment_recovery",
             "provider_request_id": evidence.provider_request_id,
@@ -1211,6 +1328,8 @@ class V2NarrationTimingRecoveryService:
                 ),
                 "exact_character_coverage": True,
                 "exact_token_coverage": True,
+                "alignment_audit": dict(alignment_audit),
+                "caption_timed_words": caption_timed_words,
                 "interpolation_used": False,
                 "estimation_used": False,
             },
@@ -1261,9 +1380,7 @@ class V2NarrationTimingRecoveryService:
     def _script_text(script: ArtifactVersion) -> str:
         text = str((script.content or {}).get("narration_text") or "").strip()
         if not text:
-            raise ValidationFailureError(
-                "V2_NARRATION_TIMING_RECOVERY_SCRIPT_MISSING"
-            )
+            raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_SCRIPT_MISSING")
         return text
 
     @staticmethod
@@ -1273,38 +1390,76 @@ class V2NarrationTimingRecoveryService:
 
 def _authority_body(value: Any) -> dict[str, Any]:
     names = (
-        "id", "workflow_run_id", "video_project_id", "media_effect_ledger_id",
-        "media_domain_event_id", "media_dead_letter_job_id",
-        "root_replacement_authority_id", "verifier_settlement_authority_id",
-        "settlement_qualification_run_id", "production_package_artifact_version_id",
-        "production_package_hash", "script_artifact_version_id",
-        "script_content_hash", "approved_script_hash", "budget_reservation_id",
-        "budget_reservation_ref", "budget_authority_hash", "provider_policy_hash",
-        "tts_request_journal_ref", "tts_request_identity_hash", "tts_idempotency_key",
-        "audio_relative_path", "audio_checksum_sha256", "audio_size_bytes",
-        "audio_duration_ms", "original_failure_reason_code",
-        "forced_alignment_permission_confirmed", "max_tts_retries",
-        "max_forced_alignment_submissions", "schema_version", "recovery_reason",
-        "authorized_by_actor_type", "authorized_by_actor_id", "authorized_by_actor_role",
+        "id",
+        "workflow_run_id",
+        "video_project_id",
+        "media_effect_ledger_id",
+        "media_domain_event_id",
+        "media_dead_letter_job_id",
+        "root_replacement_authority_id",
+        "verifier_settlement_authority_id",
+        "settlement_qualification_run_id",
+        "production_package_artifact_version_id",
+        "production_package_hash",
+        "script_artifact_version_id",
+        "script_content_hash",
+        "approved_script_hash",
+        "budget_reservation_id",
+        "budget_reservation_ref",
+        "budget_authority_hash",
+        "provider_policy_hash",
+        "tts_request_journal_ref",
+        "tts_request_identity_hash",
+        "tts_idempotency_key",
+        "audio_relative_path",
+        "audio_checksum_sha256",
+        "audio_size_bytes",
+        "audio_duration_ms",
+        "original_failure_reason_code",
+        "forced_alignment_permission_confirmed",
+        "max_tts_retries",
+        "max_forced_alignment_submissions",
+        "schema_version",
+        "recovery_reason",
+        "authorized_by_actor_type",
+        "authorized_by_actor_id",
+        "authorized_by_actor_role",
         "created_at",
     )
-    raw = value if isinstance(value, dict) else {name: getattr(value, name) for name in names}
+    raw = (
+        value
+        if isinstance(value, dict)
+        else {name: getattr(value, name) for name in names}
+    )
     body = {name: _hash_value(raw[name]) for name in names if name != "id"}
     return {"authority_id": _hash_value(raw["id"]), **body}
 
 
 def _receipt_body(value: Any) -> dict[str, Any]:
     names = (
-        "id", "authority_id", "workflow_run_id", "media_effect_ledger_id",
-        "forced_alignment_request_hash", "forced_alignment_provider_response_hash",
+        "id",
+        "authority_id",
+        "workflow_run_id",
+        "media_effect_ledger_id",
+        "forced_alignment_request_hash",
+        "forced_alignment_provider_response_hash",
         "forced_alignment_provider_request_id",
         "forced_alignment_provider_request_id_availability",
-        "forced_alignment_evidence_hash", "recovered_timing_seed_hash",
-        "narration_receipt_hash", "canonical_media_timeline_hash",
-        "provider_call_count", "tts_retry_count", "schema_version", "recovery_state",
+        "forced_alignment_evidence_hash",
+        "recovered_timing_seed_hash",
+        "narration_receipt_hash",
+        "canonical_media_timeline_hash",
+        "provider_call_count",
+        "tts_retry_count",
+        "schema_version",
+        "recovery_state",
         "created_at",
     )
-    raw = value if isinstance(value, dict) else {name: getattr(value, name) for name in names}
+    raw = (
+        value
+        if isinstance(value, dict)
+        else {name: getattr(value, name) for name in names}
+    )
     body = {name: _hash_value(raw[name]) for name in names if name != "id"}
     return {"receipt_id": _hash_value(raw["id"]), **body}
 

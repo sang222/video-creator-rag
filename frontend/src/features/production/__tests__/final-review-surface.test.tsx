@@ -23,7 +23,22 @@ const localReview: FinalReview = {
     file_name: "final.mp4",
     player_url: `/final-review-candidates/${candidateId}/media`,
     thumbnail_url: `/final-review-candidates/${candidateId}/thumbnail`,
-    captions_label: "Chữ hiển thị trực tiếp trong khung hình",
+    captions_label: "Tệp phụ đề SRT rời đã xác minh trên Google Drive",
+    caption_sidecar: {
+      label: "Tệp phụ đề SRT rời đã xác minh trên Google Drive",
+      file_name: "canonical-captions.srt",
+      caption_ref: "artifact-version://caption/verified",
+      archive_object_ref: "drive://caption-file/canonical-captions.srt",
+      drive_web_view_url: "https://drive.google.com/file/d/caption-file/view",
+      checksum_sha256: "b".repeat(64),
+      caption_artifact_hash: "c".repeat(64),
+      subtitle_qc_ref: "artifact-version://subtitle-qc/verified",
+      subtitle_qc_hash: "d".repeat(64),
+      cloud_media_ref_id: "123e4567-e89b-12d3-a456-426614174003",
+      drive_file_id: "caption-file",
+      verification_state: "VERIFIED",
+      delivery_mode: "SIDECAR_ONLY"
+    },
     checksum_sha256: "a".repeat(64),
     duration_seconds: 12
   },
@@ -50,5 +65,11 @@ describe("FinalReviewSurface local archive", () => {
     );
     expect(screen.getByText("Cam kết với khán giả")).toBeInTheDocument();
     expect(screen.getByText("Thu hút đúng khán giả mục tiêu")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Mở tệp SRT sidecar trên Google Drive/i })
+    ).toHaveAttribute(
+      "href",
+      "https://drive.google.com/file/d/caption-file/view"
+    );
   });
 });

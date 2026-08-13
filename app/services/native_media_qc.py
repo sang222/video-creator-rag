@@ -188,6 +188,35 @@ class NativeMediaQC:
             scene_coverage = (
                 bool(frames) and all(frames) and len(fingerprints) == len(frames)
             )
+        native_plan_checks = _measure_native_explanatory_plan(output, expected)
+        native_visual_present: bool | None = None
+        native_visual_metrics: list[dict[str, Any]] = []
+        if expected.get("native_explanatory_visual_check_required"):
+            native_frames = [
+                _frame_bytes(
+                    self.ffmpeg,
+                    output,
+                    seconds=float(seconds),
+                    filtergraph="scale=160:90,format=gray",
+                )
+                for seconds in list(expected.get("native_visual_probe_seconds") or [])
+            ]
+            native_visual_metrics = [
+                _native_visual_detail_metrics(frame, width=160, height=90)
+                for frame in native_frames
+            ]
+            expected_scene_count = expected.get("native_explanatory_scene_count")
+            native_visual_present = bool(
+                isinstance(expected_scene_count, int)
+                and not isinstance(expected_scene_count, bool)
+                and expected_scene_count > 0
+                and len(native_frames) == expected_scene_count
+                and all(frame for frame in native_frames)
+                and all(
+                    metrics.get("detail_present") is True
+                    for metrics in native_visual_metrics
+                )
+            )
         checksum_sha256 = _sha256_file(output)
         drawtext_checks = _measure_drawtext_contract(output, expected)
         checks.update(
@@ -232,6 +261,9 @@ class NativeMediaQC:
                 "audio_presence": bool(audio),
                 "av_drift_ms": av_drift_ms,
                 "timeline_coverage": scene_coverage,
+                "native_explanatory_visual_present": native_visual_present,
+                "native_explanatory_visual_metrics": native_visual_metrics,
+                **native_plan_checks,
                 **drawtext_checks,
             }
         )
@@ -274,8 +306,19 @@ class NativeMediaQC:
             requirements["semantic_overlay_drawtext_count"] = int(
                 expected["semantic_overlay_drawtext_count"]
             )
+        if expected.get("native_explanatory_drawtext_count") is not None:
+            requirements["native_explanatory_drawtext_count"] = int(
+                expected["native_explanatory_drawtext_count"]
+            )
         if expected.get("scene_coverage_required"):
             requirements["timeline_coverage"] = True
+        if expected.get("native_explanatory_visual_check_required"):
+            requirements["native_explanatory_plan_attested"] = True
+            requirements["native_presentation_window_policy_attested"] = True
+            requirements["native_explanatory_visual_present"] = True
+            requirements["native_explanatory_scene_count"] = int(
+                expected["native_explanatory_scene_count"]
+            )
         for key, value in requirements.items():
             if value is not None and checks.get(key) != value:
                 failures.append("QC_" + key.upper())
@@ -337,6 +380,222 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _canonical_hash(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _measure_native_explanatory_plan(
+    output: Path, expected: dict[str, Any]
+) -> dict[str, Any]:
+    if not expected.get("native_explanatory_visual_check_required"):
+        return {}
+    checks: dict[str, Any] = {
+        "native_explanatory_plan_attested": False,
+        "native_explanatory_plan_checksum_sha256": None,
+        "native_explanatory_plan_hash": None,
+        "native_explanatory_scene_count": None,
+        "native_explanatory_visible_signature_count": None,
+        "native_presentation_window_policy_attested": False,
+        "native_presentation_window_policy_hash": None,
+    }
+    raw_path = expected.get("native_explanatory_plan_path")
+    expected_checksum = expected.get("native_explanatory_plan_checksum_sha256")
+    expected_plan_hash = expected.get("native_explanatory_plan_hash")
+    expected_scene_count = expected.get("native_explanatory_scene_count")
+    expected_window_policy_hash = expected.get("native_presentation_window_policy_hash")
+    if (
+        not isinstance(raw_path, str)
+        or not raw_path
+        or not _is_sha256(expected_checksum)
+        or not _is_sha256(expected_plan_hash)
+        or not isinstance(expected_scene_count, int)
+        or isinstance(expected_scene_count, bool)
+        or expected_scene_count <= 0
+        or not _is_sha256(expected_window_policy_hash)
+    ):
+        return checks
+    plan_path = Path(raw_path)
+    try:
+        resolved = plan_path.resolve(strict=True)
+        output_parent = output.parent.resolve(strict=True)
+        if (
+            plan_path.is_symlink()
+            or not resolved.is_file()
+            or resolved.parent != output_parent
+            or resolved.stat().st_size > 8 * 1024 * 1024
+        ):
+            return checks
+        raw = resolved.read_bytes()
+        actual_checksum = hashlib.sha256(raw).hexdigest()
+        checks["native_explanatory_plan_checksum_sha256"] = actual_checksum
+        if actual_checksum != expected_checksum:
+            return checks
+        payload = json.loads(raw)
+    except (OSError, RuntimeError, UnicodeDecodeError, json.JSONDecodeError):
+        return checks
+    if not isinstance(payload, dict):
+        return checks
+    content_hash = payload.get("content_hash")
+    body = {key: value for key, value in payload.items() if key != "content_hash"}
+    specs = payload.get("scene_specs")
+    window_policy = payload.get("presentation_window_policy")
+    if (
+        payload.get("schema_version") != "vcos.native-explanatory-render-plan.v1"
+        or not isinstance(specs, list)
+        or len(specs) != expected_scene_count
+        or content_hash != _canonical_hash(body)
+        or content_hash != expected_plan_hash
+        or not isinstance(window_policy, dict)
+        or window_policy.get("content_hash") != expected_window_policy_hash
+        or window_policy.get("content_hash")
+        != _canonical_hash(
+            {
+                key: value
+                for key, value in window_policy.items()
+                if key != "content_hash"
+            }
+        )
+    ):
+        return checks
+    scene_ids: list[str] = []
+    signatures: list[tuple[str, str, tuple[str, ...]]] = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            return checks
+        spec_body = {key: value for key, value in spec.items() if key != "content_hash"}
+        labels = spec.get("step_labels")
+        if (
+            spec.get("content_hash") != _canonical_hash(spec_body)
+            or not isinstance(spec.get("scene_id"), str)
+            or not isinstance(spec.get("headline_hash"), str)
+            or not isinstance(spec.get("composition"), str)
+            or not isinstance(labels, list)
+            or len(labels) != 3
+            or any(not isinstance(label, str) for label in labels)
+        ):
+            return checks
+        scene_ids.append(spec["scene_id"])
+        signatures.append(
+            (
+                spec["headline_hash"],
+                spec["composition"],
+                tuple(labels),
+            )
+        )
+    if len(scene_ids) != len(set(scene_ids)) or len(signatures) != len(set(signatures)):
+        return checks
+    windows = window_policy.get("windows")
+    canonical_duration_ms = window_policy.get("canonical_duration_ms")
+    maximum_hold_ms = window_policy.get("maximum_silence_hold_ms")
+    if (
+        window_policy.get("schema_version")
+        != "vcos.native-presentation-window-policy.v1"
+        or window_policy.get("binding_authority")
+        != "ELEVENLABS_FORCED_ALIGNMENT_WORD_BOUNDARIES"
+        or window_policy.get("presentation_policy")
+        != "HOLD_PRECEDING_SCENE_ACROSS_BOUNDED_SILENCE"
+        or window_policy.get("spoken_word_timing_unchanged") is not True
+        or window_policy.get("timing_synthesized") is not False
+        or not isinstance(canonical_duration_ms, int)
+        or isinstance(canonical_duration_ms, bool)
+        or canonical_duration_ms <= 0
+        or not isinstance(maximum_hold_ms, int)
+        or isinstance(maximum_hold_ms, bool)
+        or not 0 < maximum_hold_ms <= 2_000
+        or not isinstance(windows, list)
+        or len(windows) != expected_scene_count
+    ):
+        return checks
+    previous_presentation_end = 0
+    for index, (scene_id, window) in enumerate(zip(scene_ids, windows, strict=True)):
+        if not isinstance(window, dict):
+            return checks
+        try:
+            binding_start = int(window["binding_start_ms"])
+            binding_end = int(window["binding_end_ms"])
+            presentation_start = int(window["presentation_start_ms"])
+            presentation_end = int(window["presentation_end_ms"])
+            leading_hold = int(window["leading_silence_hold_ms"])
+            trailing_hold = int(window["trailing_silence_hold_ms"])
+        except (KeyError, TypeError, ValueError):
+            return checks
+        if (
+            window.get("scene_id") != scene_id
+            or presentation_start != previous_presentation_end
+            or binding_start < presentation_start
+            or binding_end <= binding_start
+            or presentation_end < binding_end
+            or leading_hold != (binding_start if index == 0 else 0)
+            or trailing_hold != presentation_end - binding_end
+            or not 0 <= leading_hold <= maximum_hold_ms
+            or not 0 <= trailing_hold <= maximum_hold_ms
+        ):
+            return checks
+        previous_presentation_end = presentation_end
+    if previous_presentation_end != canonical_duration_ms:
+        return checks
+    checks.update(
+        {
+            "native_explanatory_plan_attested": True,
+            "native_explanatory_plan_hash": content_hash,
+            "native_explanatory_scene_count": len(specs),
+            "native_explanatory_visible_signature_count": len(signatures),
+            "native_presentation_window_policy_attested": True,
+            "native_presentation_window_policy_hash": expected_window_policy_hash,
+        }
+    )
+    return checks
+
+
+def _native_visual_detail_metrics(
+    frame: bytes, *, width: int, height: int
+) -> dict[str, Any]:
+    expected_size = width * height
+    if not isinstance(frame, bytes) or len(frame) != expected_size:
+        return {
+            "detail_present": False,
+            "byte_count": len(frame) if isinstance(frame, bytes) else 0,
+        }
+    values = list(frame)
+    unique_luma = len(set(values))
+    luma_range = max(values) - min(values)
+    bright_ratio = sum(value >= 190 for value in values) / expected_size
+    edge_count = 0
+    edge_total = 0
+    for y in range(height):
+        row = y * width
+        for x in range(width - 1):
+            edge_total += 1
+            if abs(values[row + x + 1] - values[row + x]) >= 18:
+                edge_count += 1
+    for y in range(height - 1):
+        row = y * width
+        next_row = row + width
+        for x in range(width):
+            edge_total += 1
+            if abs(values[next_row + x] - values[row + x]) >= 18:
+                edge_count += 1
+    edge_ratio = edge_count / edge_total if edge_total else 0.0
+    detail_present = bool(
+        unique_luma >= 20 and luma_range >= 96 and edge_ratio >= 0.008
+    )
+    return {
+        "detail_present": detail_present,
+        "byte_count": expected_size,
+        "unique_luma_values": unique_luma,
+        "luma_range": luma_range,
+        "bright_pixel_ratio": round(bright_ratio, 6),
+        "edge_ratio": round(edge_ratio, 6),
+    }
+
+
 def _measure_drawtext_contract(
     output: Path, expected: dict[str, Any]
 ) -> dict[str, Any]:
@@ -357,13 +616,16 @@ def _measure_drawtext_contract(
         "drawtext_filtergraph_checksum_sha256": None,
         "drawtext_filter_count": None,
         "semantic_overlay_drawtext_count": None,
+        "native_explanatory_drawtext_count": None,
         "narration_drawtext_count": None,
     }
 
     raw_path = expected.get("drawtext_filtergraph_path")
     expected_checksum = expected.get("drawtext_filtergraph_checksum_sha256")
     authorized_hashes = expected.get("semantic_overlay_drawtext_filter_hashes")
+    native_hashes = expected.get("native_explanatory_drawtext_filter_hashes", [])
     expected_semantic_count = expected.get("semantic_overlay_drawtext_count")
+    expected_native_count = expected.get("native_explanatory_drawtext_count", 0)
     if (
         not isinstance(raw_path, str)
         or not raw_path
@@ -371,10 +633,18 @@ def _measure_drawtext_contract(
         or not isinstance(authorized_hashes, list)
         or any(not _is_sha256(value) for value in authorized_hashes)
         or len(set(authorized_hashes)) != len(authorized_hashes)
+        or not isinstance(native_hashes, list)
+        or any(not _is_sha256(value) for value in native_hashes)
+        or len(set(native_hashes)) != len(native_hashes)
+        or not set(native_hashes).issubset(set(authorized_hashes))
         or not isinstance(expected_semantic_count, int)
         or isinstance(expected_semantic_count, bool)
         or expected_semantic_count < 0
         or len(authorized_hashes) != expected_semantic_count
+        or not isinstance(expected_native_count, int)
+        or isinstance(expected_native_count, bool)
+        or expected_native_count < 0
+        or len(native_hashes) != expected_native_count
     ):
         return checks
 
@@ -408,16 +678,20 @@ def _measure_drawtext_contract(
     ]
     remaining_authorized = list(authorized_hashes)
     semantic_count = 0
+    native_count = 0
     for actual_hash in actual_hashes:
         if actual_hash in remaining_authorized:
             semantic_count += 1
             remaining_authorized.remove(actual_hash)
+            if actual_hash in native_hashes:
+                native_count += 1
 
     checks.update(
         {
             "drawtext_filtergraph_attested": True,
             "drawtext_filter_count": len(actual_hashes),
             "semantic_overlay_drawtext_count": semantic_count,
+            "native_explanatory_drawtext_count": native_count,
             "narration_drawtext_count": len(actual_hashes) - semantic_count,
         }
     )

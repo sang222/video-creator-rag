@@ -99,12 +99,31 @@ class ProductionProgressRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FinalReviewCaptionSidecarRead(BaseModel):
+    label: str
+    file_name: str
+    caption_ref: str
+    archive_object_ref: str
+    drive_web_view_url: str
+    checksum_sha256: str
+    caption_artifact_hash: str
+    subtitle_qc_ref: str
+    subtitle_qc_hash: str
+    cloud_media_ref_id: uuid.UUID
+    drive_file_id: str
+    verification_state: Literal["VERIFIED"]
+    delivery_mode: Literal["SIDECAR_ONLY"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class FinalReviewMediaRead(BaseModel):
     file_name: str
     player_url: str | None = None
     drive_web_view_url: str | None = None
     thumbnail_url: str | None = None
     captions_label: str | None = None
+    caption_sidecar: FinalReviewCaptionSidecarRead | None = None
     checksum_sha256: str
     duration_seconds: float
 

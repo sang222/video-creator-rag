@@ -25,6 +25,12 @@ export function FinalReviewSurface({
   const safePlayerUrl = safeReviewMediaUrl(review.media.player_url);
   const safeThumbnailUrl = safeReviewMediaUrl(review.media.thumbnail_url);
   const safeDriveUrl = safeHttpsUrl(review.media.drive_web_view_url);
+  const captionSidecar = review.media.caption_sidecar;
+  const safeCaptionDriveUrl =
+    captionSidecar?.verification_state === "VERIFIED" &&
+    captionSidecar.delivery_mode === "SIDECAR_ONLY"
+      ? safeHttpsUrl(captionSidecar.drive_web_view_url)
+      : null;
 
   return (
     <section className="space-y-4">
@@ -115,6 +121,19 @@ export function FinalReviewSurface({
             <p className="mt-2 text-sm text-muted-foreground">
               {formatDuration(review.media.duration_seconds)}
             </p>
+            {captionSidecar && safeCaptionDriveUrl ? (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  {captionSidecar.file_name} · checksum {captionSidecar.checksum_sha256.slice(0, 12)}…
+                </p>
+                <Button asChild className="w-full" variant="secondary">
+                  <a href={safeCaptionDriveUrl} rel="noreferrer" target="_blank">
+                    Mở tệp SRT sidecar trên Google Drive
+                    <ExternalLink size={16} aria-hidden="true" />
+                  </a>
+                </Button>
+              </div>
+            ) : null}
           </Panel>
         </div>
       </div>

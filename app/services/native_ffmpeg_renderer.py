@@ -29,7 +29,7 @@ from app.services.native_render_plan import stable_hash
 
 FFMPEG_FULL_DEFAULT = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
 FFPROBE_FULL_DEFAULT = "/opt/homebrew/opt/ffmpeg-full/bin/ffprobe"
-COMMAND_BUILDER_VERSION = "native-ffmpeg-command-builder/1.1.0"
+COMMAND_BUILDER_VERSION = "native-ffmpeg-command-builder/1.2.0"
 _RENDER_LOCK = threading.Lock()
 IMG_CANARY_OVERLAY_PANEL_RGB = "08111f"
 IMG_CANARY_OVERLAY_PANEL_OPACITY = 1.0
@@ -42,6 +42,15 @@ _V2_SEMANTIC_OVERLAY_TYPES = frozenset(
         "TITLE_CARD",
     }
 )
+_V2_NATIVE_VISUAL_COMPOSITIONS = frozenset(
+    {
+        "EVIDENCE_TO_STRUCTURE",
+        "DECISION_FLOW",
+        "BOUNDARY_COMPARISON",
+        "CONCEPT_FLOW",
+    }
+)
+_V2_NATIVE_MAX_PRESENTATION_HOLD_MS = 2_000
 
 
 def srgb_hex_relative_luminance(value: str) -> float:
@@ -172,6 +181,190 @@ def _v2_semantic_overlays(
         seen.add(overlay["overlay_id"])
         overlays.append(overlay)
     return sorted(overlays, key=lambda item: (item["scene_id"], item["overlay_id"]))
+
+
+def _v2_native_explanatory_specs(
+    manifest: CompiledNativeRenderManifest,
+) -> list[dict[str, object]]:
+    """Validate the authority-bound native visual plan for every V2 scene."""
+
+    required = {
+        "schema_version",
+        "scene_id",
+        "composition",
+        "visual_function_hint",
+        "headline",
+        "headline_derivation",
+        "headline_hash",
+        "semantic_intent_hash",
+        "narration_text_hash",
+        "step_labels",
+        "information_unit_ids",
+        "source_ref",
+        "source_hash",
+        "factual_ui_representation",
+        "caption_source",
+        "renderer_vocabulary_version",
+        "content_hash",
+    }
+    specs: list[dict[str, object]] = []
+    seen_scene_ids: set[str] = set()
+    for scene in manifest.compiled_scenes:
+        scene_id = str(scene.get("scene_id") or "")
+        raw = scene.get("native_visual_spec")
+        if not scene_id or scene_id in seen_scene_ids or not isinstance(raw, dict):
+            raise ValueError("V2_NATIVE_EXPLANATORY_VISUAL_REQUIRED")
+        spec = dict(raw)
+        body = {key: value for key, value in spec.items() if key != "content_hash"}
+        headline = spec.get("headline")
+        labels = spec.get("step_labels")
+        hashes = (
+            "headline_hash",
+            "semantic_intent_hash",
+            "narration_text_hash",
+            "source_hash",
+            "content_hash",
+        )
+        if (
+            set(spec) != required
+            or spec.get("schema_version") != "vcos.native-explanatory-scene.v1"
+            or spec.get("scene_id") != scene_id
+            or spec.get("composition") not in _V2_NATIVE_VISUAL_COMPOSITIONS
+            or not isinstance(headline, str)
+            or not 1 <= len(headline) <= 116
+            or spec.get("headline_derivation") != "QUALIFIED_PROPOSITION_PREFIX_MAX_116"
+            or spec.get("headline_hash")
+            != hashlib.sha256(headline.encode("utf-8")).hexdigest()
+            or scene.get("narration_text_hash") != spec.get("narration_text_hash")
+            or spec.get("headline_hash") == spec.get("narration_text_hash")
+            or not isinstance(labels, list)
+            or len(labels) != 3
+            or any(
+                not isinstance(label, str) or not 1 <= len(label) <= 20
+                for label in labels
+            )
+            or not isinstance(spec.get("information_unit_ids"), list)
+            or not spec["information_unit_ids"]
+            or spec.get("factual_ui_representation") is not False
+            or spec.get("caption_source") is not False
+            or spec.get("renderer_vocabulary_version") != "vcos.native-explanatory-v1"
+            or not isinstance(spec.get("source_ref"), str)
+            or not str(spec["source_ref"]).startswith("qualified-information-unit://")
+            or any(
+                not isinstance(spec.get(key), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", str(spec[key]))
+                for key in hashes
+            )
+            or spec.get("content_hash") != stable_hash(body)
+        ):
+            raise ValueError("V2_NATIVE_EXPLANATORY_VISUAL_INVALID")
+        seen_scene_ids.add(scene_id)
+        specs.append(spec)
+    if len(specs) != len(manifest.compiled_scenes):
+        raise ValueError("V2_NATIVE_EXPLANATORY_VISUAL_COVERAGE_INVALID")
+    return specs
+
+
+def _v2_native_presentation_window_policy(
+    manifest: CompiledNativeRenderManifest,
+) -> dict[str, object]:
+    """Cover bounded provider-authored silence without changing word timing.
+
+    Narration bindings remain the immutable semantic timing authority.  The
+    presentation window simply holds the preceding explanatory scene across a
+    bounded silence gap; the first scene is visible during bounded leading
+    silence and the last scene through the canonical audio endpoint.
+    """
+
+    scenes = list(manifest.compiled_scenes)
+    canonical_duration_ms = int(manifest.canonical_duration_ms or 0)
+    if not scenes or canonical_duration_ms <= 0:
+        raise ValueError("V2_NATIVE_PRESENTATION_WINDOW_INVALID")
+    parsed: list[tuple[str, int, int]] = []
+    seen: set[str] = set()
+    previous_end = -1
+    for scene in scenes:
+        try:
+            scene_id = str(scene["scene_id"])
+            start_ms = int(scene["start_ms"])
+            end_ms = int(scene["end_ms"])
+            duration_ms = int(scene["duration_ms"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("V2_NATIVE_PRESENTATION_WINDOW_INVALID") from None
+        if (
+            not scene_id
+            or scene_id in seen
+            or start_ms < 0
+            or end_ms <= start_ms
+            or end_ms - start_ms != duration_ms
+            or start_ms < previous_end
+            or end_ms > canonical_duration_ms
+        ):
+            raise ValueError("V2_NATIVE_PRESENTATION_WINDOW_INVALID")
+        parsed.append((scene_id, start_ms, end_ms))
+        seen.add(scene_id)
+        previous_end = end_ms
+
+    windows: list[dict[str, object]] = []
+    for index, (scene_id, binding_start_ms, binding_end_ms) in enumerate(parsed):
+        presentation_start_ms = 0 if index == 0 else binding_start_ms
+        presentation_end_ms = (
+            parsed[index + 1][1] if index + 1 < len(parsed) else canonical_duration_ms
+        )
+        leading_hold_ms = binding_start_ms if index == 0 else 0
+        trailing_hold_ms = presentation_end_ms - binding_end_ms
+        if (
+            leading_hold_ms < 0
+            or leading_hold_ms > _V2_NATIVE_MAX_PRESENTATION_HOLD_MS
+            or trailing_hold_ms < 0
+            or trailing_hold_ms > _V2_NATIVE_MAX_PRESENTATION_HOLD_MS
+            or presentation_end_ms <= presentation_start_ms
+        ):
+            raise ValueError("V2_NATIVE_PRESENTATION_HOLD_OUTSIDE_POLICY")
+        windows.append(
+            {
+                "scene_id": scene_id,
+                "binding_start_ms": binding_start_ms,
+                "binding_end_ms": binding_end_ms,
+                "presentation_start_ms": presentation_start_ms,
+                "presentation_end_ms": presentation_end_ms,
+                "leading_silence_hold_ms": leading_hold_ms,
+                "trailing_silence_hold_ms": trailing_hold_ms,
+            }
+        )
+    if (
+        windows[0]["presentation_start_ms"] != 0
+        or windows[-1]["presentation_end_ms"] != canonical_duration_ms
+        or any(
+            windows[index]["presentation_end_ms"]
+            != windows[index + 1]["presentation_start_ms"]
+            for index in range(len(windows) - 1)
+        )
+    ):
+        raise ValueError("V2_NATIVE_PRESENTATION_WINDOW_COVERAGE_INVALID")
+    body: dict[str, object] = {
+        "schema_version": "vcos.native-presentation-window-policy.v1",
+        "canonical_duration_ms": canonical_duration_ms,
+        "maximum_silence_hold_ms": _V2_NATIVE_MAX_PRESENTATION_HOLD_MS,
+        "binding_authority": "ELEVENLABS_FORCED_ALIGNMENT_WORD_BOUNDARIES",
+        "presentation_policy": "HOLD_PRECEDING_SCENE_ACROSS_BOUNDED_SILENCE",
+        "spoken_word_timing_unchanged": True,
+        "timing_synthesized": False,
+        "windows": windows,
+    }
+    return {**body, "content_hash": stable_hash(body)}
+
+
+def _wrap_v2_native_headline(value: str) -> str:
+    lines = textwrap.wrap(
+        value,
+        width=42,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    if not lines or len(lines) > 3:
+        raise ValueError("V2_NATIVE_EXPLANATORY_HEADLINE_LAYOUT_INVALID")
+    return "\n".join(lines)
 
 
 def _command_hash_payload(command: FFmpegCommandManifest) -> dict:
@@ -744,12 +937,11 @@ class FFmpegCommandBuilder:
         ):
             raise ValueError("V2_NATIVE_PRODUCTION_MANIFEST_REQUIRED")
         scenes = list(manifest.compiled_scenes)
-        if (
-            not scenes
-            or max(int(scene["end_ms"]) for scene in scenes)
-            != manifest.canonical_duration_ms
-        ):
-            raise ValueError("V2_NATIVE_PRODUCTION_TIMELINE_INVALID")
+        presentation_policy = _v2_native_presentation_window_policy(manifest)
+        presentation_by_scene = {
+            str(window["scene_id"]): window
+            for window in list(presentation_policy["windows"])
+        }
 
         work = _inside(self.root, Path("runs") / run_key)
         work.mkdir(parents=True, exist_ok=True)
@@ -760,6 +952,10 @@ class FFmpegCommandBuilder:
         fps = int(manifest.normalized_canvas.get("fps", 30))
         duration_seconds = manifest.canonical_duration_ms / 1000.0
         semantic_overlays = _v2_semantic_overlays(manifest)
+        native_visual_specs = _v2_native_explanatory_specs(manifest)
+        native_visual_by_scene = {
+            str(spec["scene_id"]): spec for spec in native_visual_specs
+        }
         if (
             manifest.normalized_caption.get("mode") != "SIDECAR_SRT_ONLY"
             or manifest.normalized_caption.get("render_consumes_caption_cues")
@@ -769,7 +965,7 @@ class FFmpegCommandBuilder:
             is not False
         ):
             raise ValueError("V2_NATIVE_CAPTION_COMPOSITION_FORBIDDEN")
-        if semantic_overlays:
+        if semantic_overlays or native_visual_specs:
             available_filters = _available_filters(self.ffmpeg)
             if "drawtext" not in available_filters:
                 raise ValueError("V2_NATIVE_DRAWTEXT_FILTER_REQUIRED")
@@ -780,19 +976,26 @@ class FFmpegCommandBuilder:
         overlay_size = max(22, round(min(width, height) * 0.033))
         generated_text_files: list[str] = []
         semantic_overlay_drawtext_filter_hashes: list[str] = []
+        native_explanatory_drawtext_filter_hashes: list[str] = []
         graph = "[0:v]format=yuv420p"
         palette = ("17324d", "31435f", "304d46", "4b3b5f", "563f35", "29465b")
         probe_seconds: list[float] = []
         scene_windows: dict[str, tuple[float, float]] = {}
         for index, scene in enumerate(scenes):
-            start = int(scene["start_ms"]) / 1000.0
-            end = int(scene["end_ms"]) / 1000.0
+            scene_id = str(scene.get("scene_id") or "")
+            window = presentation_by_scene.get(scene_id)
+            if window is None:
+                raise ValueError("V2_NATIVE_PRESENTATION_WINDOW_COVERAGE_INVALID")
+            start = int(window["presentation_start_ms"]) / 1000.0
+            end = int(window["presentation_end_ms"]) / 1000.0
             if start < 0 or end <= start or end > duration_seconds + 0.001:
                 raise ValueError("V2_NATIVE_SCENE_TIMING_INVALID")
-            scene_id = str(scene.get("scene_id") or "")
             if not scene_id or scene_id in scene_windows:
                 raise ValueError("V2_NATIVE_SCENE_IDENTITY_INVALID")
             scene_windows[scene_id] = (start, end)
+            native_spec = native_visual_by_scene.get(scene_id)
+            if native_spec is None:
+                raise ValueError("V2_NATIVE_EXPLANATORY_VISUAL_COVERAGE_INVALID")
             enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
             color = str(scene.get("background_rgb") or palette[index % len(palette)])
             if len(color) != 6 or any(
@@ -806,13 +1009,95 @@ class FFmpegCommandBuilder:
                 f"w={round(width * 0.88)}:h={round(height * 0.78)}:"
                 f"color=0x08111f@0.82:t=fill:enable='{enable}'"
             )
+            composition_palette = {
+                "EVIDENCE_TO_STRUCTURE": ("2f80ed", "56ccf2", "27ae60"),
+                "DECISION_FLOW": ("6c63ff", "f2c94c", "eb5757"),
+                "BOUNDARY_COMPARISON": ("2d9cdb", "bb6bd9", "f2994a"),
+                "CONCEPT_FLOW": ("56ccf2", "6fcf97", "9b51e0"),
+            }
+            accents = composition_palette[str(native_spec["composition"])]
+            node_y = round(height * 0.57)
+            node_height = round(height * 0.22)
+            node_width = round(width * 0.20)
+            node_xs = [round(width * value) for value in (0.10, 0.40, 0.70)]
+            connector_y = node_y + round(node_height * 0.48)
+            for node_index, node_x in enumerate(node_xs):
+                graph += (
+                    f",drawbox=x={node_x}:y={node_y}:w={node_width}:h={node_height}:"
+                    f"color=0x{accents[node_index]}@0.26:t=fill:enable='{enable}'"
+                    f",drawbox=x={node_x}:y={node_y}:w={node_width}:h={node_height}:"
+                    f"color=0x{accents[node_index]}@0.92:t=4:enable='{enable}'"
+                    f",drawbox=x={node_x + round(node_width * 0.08)}:"
+                    f"y={node_y + round(node_height * 0.22)}:"
+                    f"w={round(node_width * 0.84)}:h=5:"
+                    f"color=0x{accents[node_index]}@0.92:t=fill:enable='{enable}'"
+                )
+            for left_x, right_x in zip(node_xs, node_xs[1:]):
+                connector_x = left_x + node_width
+                connector_width = right_x - connector_x
+                graph += (
+                    f",drawbox=x={connector_x}:y={connector_y}:"
+                    f"w={connector_width}:h=6:color=white@0.70:t=fill:"
+                    f"enable='{enable}'"
+                )
+            progress_width = max(
+                12,
+                round((width * 0.80) * (index + 1) / len(scenes)),
+            )
+            graph += (
+                f",drawbox=x={round(width * 0.10)}:y={round(height * 0.12)}:"
+                f"w={round(width * 0.80)}:h=5:color=white@0.18:t=fill:"
+                f"enable='{enable}'"
+                f",drawbox=x={round(width * 0.10)}:y={round(height * 0.12)}:"
+                f"w={progress_width}:h=5:color=0x{accents[1]}@0.95:t=fill:"
+                f"enable='{enable}'"
+            )
+
+            headline_path = _inside(
+                self.root, work / f"native-headline-{index + 1:03d}.txt"
+            )
+            _write_text_atomic(
+                headline_path,
+                _wrap_v2_native_headline(str(native_spec["headline"])) + "\n",
+            )
+            generated_text_files.append(str(headline_path))
+            headline_filter = (
+                f"drawtext=fontfile='{font_ref}':"
+                f"textfile='{_filter_path(headline_path)}':expansion=none:"
+                f"fontcolor=white:fontsize={max(32, round(height * 0.043))}:"
+                f"line_spacing=14:x={round(width * 0.10)}:y={round(height * 0.20)}:"
+                f"enable='{enable}'"
+            )
+            graph += f",{headline_filter}"
+            native_explanatory_drawtext_filter_hashes.append(
+                hashlib.sha256(headline_filter.encode("utf-8")).hexdigest()
+            )
+            for label_index, (node_x, label) in enumerate(
+                zip(node_xs, list(native_spec["step_labels"]), strict=True),
+                start=1,
+            ):
+                label_path = _inside(
+                    self.root,
+                    work / f"native-step-{index + 1:03d}-{label_index}.txt",
+                )
+                _write_text_atomic(label_path, str(label) + "\n")
+                generated_text_files.append(str(label_path))
+                label_filter = (
+                    f"drawtext=fontfile='{font_ref}':"
+                    f"textfile='{_filter_path(label_path)}':expansion=none:"
+                    f"fontcolor=white:fontsize={max(22, round(height * 0.027))}:"
+                    f"x={node_x}+({node_width}-text_w)/2:"
+                    f"y={node_y}+({node_height}-text_h)/2:enable='{enable}'"
+                )
+                graph += f",{label_filter}"
+                native_explanatory_drawtext_filter_hashes.append(
+                    hashlib.sha256(label_filter.encode("utf-8")).hexdigest()
+                )
             if len(probe_seconds) < 4:
                 probe_seconds.append(round(start + (end - start) / 2, 3))
         for index, overlay in enumerate(semantic_overlays, start=1):
             start, end = scene_windows[overlay["scene_id"]]
-            text_path = _inside(
-                self.root, work / f"semantic-overlay-{index:03d}.txt"
-            )
+            text_path = _inside(self.root, work / f"semantic-overlay-{index:03d}.txt")
             _write_text_atomic(text_path, overlay["text"] + "\n")
             generated_text_files.append(str(text_path))
             text_ref = _filter_path(text_path)
@@ -831,6 +1116,30 @@ class FFmpegCommandBuilder:
         graph += "[v]"
         _write_text_atomic(filtergraph, graph + "\n")
         filtergraph_checksum = _sha256_file(filtergraph)
+        native_plan_body = {
+            "schema_version": "vcos.native-explanatory-render-plan.v1",
+            "compiled_manifest_hash": manifest.manifest_hash,
+            "scene_specs": native_visual_specs,
+            "presentation_window_policy": presentation_policy,
+        }
+        native_plan = {
+            **native_plan_body,
+            "content_hash": stable_hash(native_plan_body),
+        }
+        native_plan_path = _inside(
+            self.root, work / "native-explanatory-render-plan.json"
+        )
+        _write_text_atomic(
+            native_plan_path,
+            json.dumps(
+                native_plan,
+                sort_keys=True,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+        )
+        native_plan_checksum = _sha256_file(native_plan_path)
 
         part = str(output) + ".part.mp4"
         normalized_audio = dict(manifest.normalized_audio)
@@ -844,9 +1153,8 @@ class FFmpegCommandBuilder:
             or audio_mix.get("strategy") != audio_strategy
             or audio_mix.get("audio_asset_ref") != audio_asset_ref
             or audio_mix.get("audio_checksum") != canonical_audio_checksum
-            or audio_mix.get("narration_present") is not normalized_audio.get(
-                "narration_present"
-            )
+            or audio_mix.get("narration_present")
+            is not normalized_audio.get("narration_present")
         ):
             raise ValueError("V2_NATIVE_AUDIO_AUTHORITY_MISMATCH")
         if audio_strategy in {
@@ -936,20 +1244,48 @@ class FFmpegCommandBuilder:
             "scene_probe_seconds": probe_seconds,
             "subtitle_stream_count": 0,
             "narration_drawtext_count": 0,
-            "semantic_overlay_drawtext_count": len(semantic_overlays),
+            "native_explanatory_drawtext_count": len(
+                native_explanatory_drawtext_filter_hashes
+            ),
+            "semantic_overlay_drawtext_count": (
+                len(semantic_overlay_drawtext_filter_hashes)
+                + len(native_explanatory_drawtext_filter_hashes)
+            ),
             "drawtext_filtergraph_path": str(filtergraph),
             "drawtext_filtergraph_checksum_sha256": filtergraph_checksum,
             "semantic_overlay_drawtext_filter_hashes": (
-                semantic_overlay_drawtext_filter_hashes
+                native_explanatory_drawtext_filter_hashes
+                + semantic_overlay_drawtext_filter_hashes
             ),
+            "native_explanatory_drawtext_filter_hashes": (
+                native_explanatory_drawtext_filter_hashes
+            ),
+            "native_explanatory_plan_path": str(native_plan_path),
+            "native_explanatory_plan_checksum_sha256": native_plan_checksum,
+            "native_explanatory_plan_hash": native_plan["content_hash"],
+            "native_explanatory_scene_count": len(native_visual_specs),
+            "native_explanatory_visual_check_required": True,
+            "native_presentation_window_policy_hash": presentation_policy[
+                "content_hash"
+            ],
+            "native_visual_probe_seconds": [
+                round(
+                    int(window["presentation_start_ms"]) / 1000.0
+                    + (
+                        int(window["presentation_end_ms"])
+                        - int(window["presentation_start_ms"])
+                    )
+                    / 2000.0,
+                    3,
+                )
+                for window in list(presentation_policy["windows"])
+            ],
             "faststart": True,
         }
         generated_file_checksums = {
             str(filtergraph): filtergraph_checksum,
-            **{
-                path: _sha256_file(Path(path))
-                for path in generated_text_files
-            },
+            str(native_plan_path): native_plan_checksum,
+            **{path: _sha256_file(Path(path)) for path in generated_text_files},
         }
         if input_files:
             generated_file_checksums[input_files[0]] = str(canonical_audio_checksum)
@@ -975,8 +1311,12 @@ class FFmpegCommandBuilder:
             "canonical_media_timeline_hash": manifest.canonical_media_timeline_hash,
             "canonical_audio_asset_ref": manifest.canonical_audio_asset_ref,
             "canonical_duration_ms": manifest.canonical_duration_ms,
-            "canonical_caption_compilation_ref": None,
-            "canonical_caption_compilation_hash": None,
+            "canonical_caption_compilation_ref": (
+                manifest.canonical_caption_compilation_ref
+            ),
+            "canonical_caption_compilation_hash": (
+                manifest.canonical_caption_compilation_hash
+            ),
         }
         command = FFmpegCommandManifest(
             **core,

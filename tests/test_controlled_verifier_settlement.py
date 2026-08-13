@@ -31,6 +31,7 @@ from app.contracts.production_workflow import (
     WorkflowAuthorityRefs,
     WorkflowStageResult,
 )
+from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.contracts.vcos_v2 import ProductionLane
 from app.contracts.script_qualification import (
     QualifiedScriptOutputV2,
@@ -59,10 +60,11 @@ from app.db.models.script_qualification import (
     ScriptQualificationProviderResponseSnapshot,
     ScriptQualificationReceipt,
 )
-from app.db.models.workflow import Artifact, ArtifactVersion
+from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.config_registry import content_hash
 from app.services.launch_cadence import LongFormCadenceService
 from app.services.m5 import IdeaMarketPreflightService, ResourceResolverService
+from app.services.operator_cockpit import OperatorCockpitService
 from app.services.production_publish import ProductionPublishService
 from app.services.production_workflow import PostReadinessProductionGatewayDescriptor
 from app.services.production_package import ProductionPackageService
@@ -94,6 +96,12 @@ from app.services.v2_provider_production import (
     PackageBoundV2StageGateway,
     _normalized_destination,
 )
+from app.services.v2_drive_archive import (
+    V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE,
+    V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA,
+    V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY,
+)
+from app.services.workflow import ArtifactService
 import app.services.v2_support_authority as v2_support_authority
 from app.workers.production_workflow import ProductionWorkflowWorker
 from tests.qualification.conftest import QualificationFactory
@@ -110,12 +118,8 @@ from tests.test_long_form_launch_cadence import (
 )
 
 
-_PARAPHRASE_CLAIM_2 = (
-    "Function calling connects a model to external tools and APIs."
-)
-_EXACT_CLAIM_2 = (
-    "Function calling lets you connect models to external tools and APIs."
-)
+_PARAPHRASE_CLAIM_2 = "Function calling connects a model to external tools and APIs."
+_EXACT_CLAIM_2 = "Function calling lets you connect models to external tools and APIs."
 _PARAPHRASE_CLAIM_3 = (
     "The documented examples include actions such as scheduling an appointment, "
     "creating an invoice, or sending an email."
@@ -220,7 +224,7 @@ def _install_ready_finalization_authorities(monkeypatch) -> None:
 
 
 class _LocalReviewOnlyPostReadinessGateway:
-    """Local authority producer for destination-bound workflow boundary tests."""
+    """Offline producer with a realistic remote-Drive final authority."""
 
     descriptor = PostReadinessProductionGatewayDescriptor(
         gateway_id="review-only-boundary",
@@ -309,20 +313,147 @@ class _LocalReviewOnlyPostReadinessGateway:
         assert destination_version is not None
         destination = _normalized_destination(destination_version.content)
         archive_hash = self._hash(context, "archive-receipt")
-        object_ref = f"local-authority://archive/{run.render_output_checksum}"
+        duration_ms = package.duration_contract.target_duration_ms
+        drive_file_id = f"review-only-{run.render_output_checksum}"
+        object_ref = f"drive://{drive_file_id}/final.mp4"
         cloud = CloudMediaRef(
             company_id=run.company_id,
             channel_workspace_id=run.channel_workspace_id,
             video_project_id=run.video_project_id,
             media_type="LONG_FORM_FINAL",
-            storage_provider="VCOS_LOCAL_ARCHIVE",
-            drive_file_id=f"local-{run.render_output_checksum}",
-            web_view_link=object_ref,
+            storage_provider="GOOGLE_DRIVE",
+            drive_file_id=drive_file_id,
+            web_view_link=(f"https://drive.google.com/file/d/{drive_file_id}/view"),
+            mime_type="video/mp4",
+            file_name="final.mp4",
+            size_bytes=1024,
             checksum_sha256=run.render_output_checksum,
+            local_source_path_hash=run.render_output_checksum,
             upload_status="VERIFIED",
             verification_status="CHECKSUM_VERIFIED",
+            source_refs=[
+                {
+                    "type": "v2_render_output",
+                    "workflow_run_id": str(run.id),
+                    "render_output_ref": run.render_output_ref,
+                    "render_output_checksum": run.render_output_checksum,
+                    "production_package_artifact_version_id": str(
+                        run.production_package_artifact_version_id
+                    ),
+                    "production_package_hash": run.production_package_hash,
+                }
+            ],
+            technical_appendix={
+                "drive_file_id_verified": True,
+                "size_verified": True,
+                "checksum_verified": True,
+                "measured_render_duration_ms": duration_ms,
+                "v2_remote_archive": True,
+            },
         )
         context.session.add(cloud)
+        context.session.flush()
+        caption_checksum = self._hash(context, "canonical-caption-sidecar")
+        caption_ref = f"artifact-version://caption/{caption_checksum}"
+        caption_artifact_hash = self._hash(context, "caption-artifact")
+        subtitle_qc_ref = f"artifact-version://subtitle-qc/{caption_checksum}"
+        subtitle_qc_hash = self._hash(context, "subtitle-qc")
+        caption_file_id = f"review-only-caption-{caption_checksum}"
+        caption_object_ref = f"drive://{caption_file_id}/canonical-captions.srt"
+        caption_cloud = CloudMediaRef(
+            company_id=run.company_id,
+            channel_workspace_id=run.channel_workspace_id,
+            video_project_id=run.video_project_id,
+            media_type="CAPTION",
+            storage_provider="GOOGLE_DRIVE",
+            drive_file_id=caption_file_id,
+            web_view_link=(f"https://drive.google.com/file/d/{caption_file_id}/view"),
+            mime_type="application/x-subrip",
+            file_name="canonical-captions.srt",
+            size_bytes=512,
+            checksum_sha256=caption_checksum,
+            local_source_path_hash=caption_checksum,
+            upload_status="VERIFIED",
+            verification_status="CHECKSUM_VERIFIED",
+            source_refs=[
+                {
+                    "type": "v2_caption_sidecar",
+                    "workflow_run_id": str(run.id),
+                    "caption_ref": caption_ref,
+                    "caption_checksum": caption_checksum,
+                    "caption_artifact_hash": caption_artifact_hash,
+                    "subtitle_qc_ref": subtitle_qc_ref,
+                    "subtitle_qc_hash": subtitle_qc_hash,
+                }
+            ],
+            technical_appendix={
+                "drive_file_id_verified": True,
+                "size_verified": True,
+                "checksum_verified": True,
+                "v2_caption_sidecar": True,
+                "caption_ref": caption_ref,
+                "caption_artifact_hash": caption_artifact_hash,
+                "subtitle_qc_ref": subtitle_qc_ref,
+                "subtitle_qc_hash": subtitle_qc_hash,
+            },
+        )
+        context.session.add(caption_cloud)
+        context.session.flush()
+        lineage_content = {
+            "schema_version": V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA,
+            "workflow_run_id": str(run.id),
+            "archive_command_id": context.command_id,
+            "provider_operation_id": f"v2:{run.video_project_id}:archive",
+            "video_project_id": str(run.video_project_id),
+            "production_package_artifact_version_id": str(
+                run.production_package_artifact_version_id
+            ),
+            "production_package_hash": run.production_package_hash,
+            "duration_contract": package.duration_contract.model_dump(mode="json"),
+            "canonical_media_timeline_hash": run.canonical_media_timeline_hash,
+            "native_render_plan_hash": run.native_render_plan_hash,
+            "render_output_ref": run.render_output_ref,
+            "render_output_checksum": run.render_output_checksum,
+            "measured_render_duration_ms": duration_ms,
+            "technical_qc_hash": run.technical_qc_receipt_hash,
+            "creative_qc_hash": run.creative_qc_receipt_hash,
+            "archive_receipt_hash": archive_hash,
+            "archive_state": "VERIFIED",
+            "cloud_media_ref_id": str(cloud.id),
+            "archive_object_ref": object_ref,
+            "storage_provider": "GOOGLE_DRIVE",
+            "caption_ref": caption_ref,
+            "caption_checksum": caption_checksum,
+            "caption_artifact_hash": caption_artifact_hash,
+            "subtitle_qc_ref": subtitle_qc_ref,
+            "subtitle_qc_hash": subtitle_qc_hash,
+            "caption_cloud_media_ref_id": str(caption_cloud.id),
+            "caption_archive_object_ref": caption_object_ref,
+            "invokes_mr1": False,
+            "automatic_publish": False,
+            "external_effect_performed": True,
+        }
+        lineage_artifact = ArtifactService(context.session).create_artifact(
+            data=ArtifactCreate(
+                video_project_id=run.video_project_id,
+                artifact_type=V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE,
+                status="approved",
+                created_by_user_id=destination_version.created_by_user_id,
+            ),
+            correlation_id=f"review-only-drive-lineage-{context.command_id}",
+            trusted_authority_write=True,
+        )
+        lineage = ArtifactService(context.session).create_artifact_version(
+            data=ArtifactVersionCreate(
+                artifact_id=lineage_artifact.id,
+                content=lineage_content,
+                status="approved",
+                created_by_user_id=destination_version.created_by_user_id,
+            ),
+            correlation_id=f"review-only-drive-version-{context.command_id}",
+            trusted_authority_write=True,
+        )
+        lineage_artifact.status = "approved"
         context.session.flush()
         media = FinalMediaRef(
             company_id=run.company_id,
@@ -335,18 +466,19 @@ class _LocalReviewOnlyPostReadinessGateway:
             duration_contract=package.duration_contract.model_dump(mode="json"),
             media_type="LONG_FORM_FINAL",
             file_ref=object_ref,
-            duration_seconds=Decimal("360"),
+            duration_seconds=Decimal(duration_ms) / Decimal(1000),
             aspect_ratio="16:9",
             resolution="1920x1080",
-            provider_key="v2-local-authority-test",
+            provider_key=V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY,
             provider_type="MEDIA_STORAGE",
             checksum_sha256=run.render_output_checksum,
             cloud_media_ref_id=cloud.id,
+            lineage_artifact_version_id=lineage.id,
         )
         context.session.add(media)
         context.session.flush()
         return WorkflowStageResult(
-            result_type="local_verified_archive",
+            result_type="offline_remote_drive_verified_archive",
             result_id=media.id,
             result_ref=object_ref,
             result_hash=archive_hash,
@@ -479,21 +611,20 @@ def _live_shaped_v2_payload(run, *, repaired: bool = False) -> dict:
             if global_ordinal in special:
                 sentence = special[global_ordinal]
             else:
-                variant = (
-                    "repaired"
-                    if repaired and section_index == 1
-                    else "original"
+                variant = "repaired" if repaired and section_index == 1 else "original"
+                sentence = (
+                    " ".join(
+                        [
+                            f"{variant}section{section_index}",
+                            f"sentence{global_ordinal}",
+                            *[
+                                f"s{section_index}n{global_ordinal}token{token}"
+                                for token in range(1, 19)
+                            ],
+                        ]
+                    )
+                    + "."
                 )
-                sentence = " ".join(
-                    [
-                        f"{variant}section{section_index}",
-                        f"sentence{global_ordinal}",
-                        *[
-                            f"s{section_index}n{global_ordinal}token{token}"
-                            for token in range(1, 19)
-                        ],
-                    ]
-                ) + "."
             if global_ordinal == 1:
                 claim_1_text = sentence
             sentences.append(sentence)
@@ -510,9 +641,7 @@ def _live_shaped_v2_payload(run, *, repaired: bool = False) -> dict:
                 "ordinal": coverage["ordinal"],
                 "purpose": coverage["section_delta"],
                 "narration": " ".join(sentences),
-                "required_assignment_unit_refs": coverage[
-                    "primary_requirement_ids"
-                ],
+                "required_assignment_unit_refs": coverage["primary_requirement_ids"],
                 "expected_claim_refs": expected_claim_refs,
             }
         )
@@ -545,9 +674,7 @@ def _live_shaped_verifier(run) -> SemanticVerificationOutput:
     # not duplicated from the expected sentence numbering in this test.
     qualification = ScriptQualificationService(run._sa_instance_state.session)
     materialized = qualification.draft_from_run(run)
-    inventory = qualification._canonical_sentence_inventory(materialized)[
-        "sentences"
-    ]
+    inventory = qualification._canonical_sentence_inventory(materialized)["sentences"]
     assert len(inventory) == 67
     by_id = {item["sentence_id"]: item for item in inventory}
     evidence_span_id = run.factual_evidence_pack["spans"][0]["evidence_span_id"]
@@ -586,18 +713,12 @@ def _live_shaped_verifier(run) -> SemanticVerificationOutput:
     requirement_spans: dict[str, list[str]] = {}
     starts = [1, 24, 46]
     for section, start in zip(coverage_sections, starts, strict=True):
-        for offset, requirement_id in enumerate(
-            section["primary_requirement_ids"]
-        ):
-            requirement_spans[requirement_id] = [
-                f"sentence-{start + offset:04d}"
-            ]
+        for offset, requirement_id in enumerate(section["primary_requirement_ids"]):
+            requirement_spans[requirement_id] = [f"sentence-{start + offset:04d}"]
     requirement_spans["question"] = ["sentence-0004", "sentence-0063"]
     requirement_spans["self-containment"] = ["sentence-0063"]
     fulfillment = []
-    for requirement in (run.script_assignment or {})[
-        "required_requirement_units"
-    ]:
+    for requirement in (run.script_assignment or {})["required_requirement_units"]:
         requirement_id = requirement["requirement_id"]
         fulfillment.append(
             {
@@ -647,7 +768,9 @@ def _live_shaped_verifier(run) -> SemanticVerificationOutput:
     )
 
 
-def _verifier_copy(verifier: SemanticVerificationOutput, mutate) -> SemanticVerificationOutput:
+def _verifier_copy(
+    verifier: SemanticVerificationOutput, mutate
+) -> SemanticVerificationOutput:
     payload = verifier.model_dump(mode="json")
     mutate(payload)
     return SemanticVerificationOutput.model_validate(payload)
@@ -663,9 +786,7 @@ def _blocked_live_shaped_source(
         "_v2_payload",
         _live_shaped_v2_payload,
     )
-    lineage = _build_continuation_lineage(
-        session, qualification_factory, monkeypatch
-    )
+    lineage = _build_continuation_lineage(session, qualification_factory, monkeypatch)
     source = lineage.child
     verifier = _live_shaped_verifier(source)
     attempt, snapshot = _completed_attempt_with_snapshot(
@@ -683,9 +804,7 @@ def _blocked_live_shaped_source(
     qualification = ScriptQualificationService(session)
     draft = qualification.draft_from_run(source)
     structural = qualification._structural_receipt(source, draft)
-    receipts = qualification._semantic_receipts(
-        source, draft, verifier, structural
-    )
+    receipts = qualification._semantic_receipts(source, draft, verifier, structural)
     assert receipts["structural"]["status"] == "PASS"
     assert receipts["inventory"]["reason_codes"] == [
         "SCRIPT_WRITER_CLAIM_SPAN_MISMATCH"
@@ -709,9 +828,7 @@ def _blocked_live_shaped_source(
     settlement_now = source.logical_deadline_at + timedelta(seconds=1)
     ScriptQualificationRecoveryService(
         session, now=lambda: settlement_now
-    ).settle_deterministic_block(
-        source, reason_code="SCRIPT_QUALIFICATION_BLOCKED"
-    )
+    ).settle_deterministic_block(source, reason_code="SCRIPT_QUALIFICATION_BLOCKED")
     source_receipt = session.scalar(
         select(ScriptQualificationReceipt).where(
             ScriptQualificationReceipt.script_qualification_run_id == source.id
@@ -750,8 +867,7 @@ def test_policy_v3_applies_only_exact_anchor_and_frozen_ownership_projection(
     )
 
     assert all(
-        receipt["status"] in {"PASS", "PASS_EMPTY"}
-        for receipt in receipts.values()
+        receipt["status"] in {"PASS", "PASS_EMPTY"} for receipt in receipts.values()
     )
     assert projection["schema_version"]
     assert projection["policy_version"] == CONTROLLED_VERIFIER_SETTLEMENT_POLICY
@@ -764,9 +880,7 @@ def test_policy_v3_applies_only_exact_anchor_and_frozen_ownership_projection(
             "writer_declared_claim_id": "claim-002",
             "anchor_observed_claim_id": "sentence-0055",
             "evidence_span_ids": [
-                lineage.child.factual_evidence_pack["spans"][0][
-                    "evidence_span_id"
-                ]
+                lineage.child.factual_evidence_pack["spans"][0]["evidence_span_id"]
             ],
             "semantic_relation": "ENTAILED",
         },
@@ -775,9 +889,7 @@ def test_policy_v3_applies_only_exact_anchor_and_frozen_ownership_projection(
             "writer_declared_claim_id": "claim-003",
             "anchor_observed_claim_id": "sentence-0060",
             "evidence_span_ids": [
-                lineage.child.factual_evidence_pack["spans"][0][
-                    "evidence_span_id"
-                ]
+                lineage.child.factual_evidence_pack["spans"][0]["evidence_span_id"]
             ],
             "semantic_relation": "ENTAILED",
         },
@@ -845,9 +957,7 @@ def test_policy_v3_rejects_unsafe_semantic_projection(
             run=lineage.child,
             draft=lineage.draft,
             verifier=unsafe,
-            source_verifier_output_hash=content_hash(
-                unsafe.model_dump(mode="json")
-            ),
+            source_verifier_output_hash=content_hash(unsafe.model_dump(mode="json")),
         )
 
 
@@ -922,9 +1032,7 @@ def _source_snapshot(lineage) -> dict:
         "state": source.state,
         "failure_receipt": deepcopy(source.failure_receipt),
         "result_receipts": deepcopy(source.result_receipts),
-        "terminal_settlement_receipt": deepcopy(
-            source.terminal_settlement_receipt
-        ),
+        "terminal_settlement_receipt": deepcopy(source.terminal_settlement_receipt),
         "script_payload": deepcopy(source.script_payload),
         "canonical_script_artifact_id": source.canonical_script_artifact_id,
         "derived_canonical_script_hash": source.derived_canonical_script_hash,
@@ -979,8 +1087,13 @@ def test_zero_provider_settlement_is_append_only_idempotent_and_consumable(
     assert child.supersedes_qualification_run_id == lineage.child.id
     assert child.state == "QUALIFIED"
     assert child.script_payload == lineage.child.script_payload
-    assert child.canonical_script_artifact_id != lineage.child.canonical_script_artifact_id
-    assert child.derived_canonical_script_hash == lineage.child.derived_canonical_script_hash
+    assert (
+        child.canonical_script_artifact_id != lineage.child.canonical_script_artifact_id
+    )
+    assert (
+        child.derived_canonical_script_hash
+        == lineage.child.derived_canonical_script_hash
+    )
     # Settlement explicitly reclassifies the trusted local producer while
     # preserving every original provider-bound field and hash.
     assert {
@@ -999,25 +1112,31 @@ def test_zero_provider_settlement_is_append_only_idempotent_and_consumable(
         "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT"
     )
     assert {
-        key: child.verifier_receipt[key]
-        for key in lineage.child.verifier_receipt
+        key: child.verifier_receipt[key] for key in lineage.child.verifier_receipt
     } == lineage.child.verifier_receipt
     assert child.script_assignment_hash == lineage.child.script_assignment_hash
     assert child.factual_evidence_pack_hash == lineage.child.factual_evidence_pack_hash
     assert child.runtime_contract_hash == lineage.child.runtime_contract_hash
     assert child.assignment_resolution_hash == lineage.child.assignment_resolution_hash
-    assert db_session.scalar(
-        select(func.count(ScriptQualificationBackgroundAttempt.id))
-    ) == attempt_count
-    assert db_session.scalar(
-        select(func.count(ScriptQualificationProviderResponseSnapshot.id))
-    ) == snapshot_count
-    assert db_session.scalar(
-        select(func.count(ScriptQualificationBackgroundAttempt.id)).where(
-            ScriptQualificationBackgroundAttempt.script_qualification_run_id
-            == child.id
+    assert (
+        db_session.scalar(select(func.count(ScriptQualificationBackgroundAttempt.id)))
+        == attempt_count
+    )
+    assert (
+        db_session.scalar(
+            select(func.count(ScriptQualificationProviderResponseSnapshot.id))
         )
-    ) == 0
+        == snapshot_count
+    )
+    assert (
+        db_session.scalar(
+            select(func.count(ScriptQualificationBackgroundAttempt.id)).where(
+                ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                == child.id
+            )
+        )
+        == 0
+    )
 
     authority = db_session.scalar(
         select(ControlledVerifierSettlementAuthority).where(
@@ -1048,7 +1167,9 @@ def test_zero_provider_settlement_is_append_only_idempotent_and_consumable(
     )
     assert child.writer_receipt["provider_submission_count_for_settlement"] == 0
     assert child.verifier_receipt["settlement_authority_id"] == str(authority.id)
-    assert child.verifier_receipt["settlement_authority_hash"] == authority.authority_hash
+    assert (
+        child.verifier_receipt["settlement_authority_hash"] == authority.authority_hash
+    )
     assert child.verifier_receipt["settlement_source_qualification_run_id"] == str(
         lineage.child.id
     )
@@ -1075,9 +1196,10 @@ def test_zero_provider_settlement_is_append_only_idempotent_and_consumable(
     assert authority.authority_hash == content_hash(
         controlled_verifier_settlement_authority_body(authority)
     )
-    assert authority.derived_projection_hash == authority.derived_projection[
-        "content_hash"
-    ]
+    assert (
+        authority.derived_projection_hash
+        == authority.derived_projection["content_hash"]
+    )
     assert authority.derived_projection_hash == content_hash(
         {
             key: value
@@ -1085,9 +1207,10 @@ def test_zero_provider_settlement_is_append_only_idempotent_and_consumable(
             if key != "content_hash"
         }
     )
-    assert db_session.scalar(
-        select(func.count(ControlledVerifierSettlementAuthority.id))
-    ) == 1
+    assert (
+        db_session.scalar(select(func.count(ControlledVerifierSettlementAuthority.id)))
+        == 1
+    )
 
     resolved = resolve_replacement_qualification_leaf(
         db_session, authority=lineage.root_lineage.authority
@@ -1222,9 +1345,7 @@ def test_settlement_finalization_uses_distinct_publish_context_without_rebinding
     )
     assert publish_preflight is not None
     publish_blob = publish_preflight.evidence_blob
-    publish_context_id = uuid.UUID(
-        publish_blob["evaluation_context_pack_snapshot_id"]
-    )
+    publish_context_id = uuid.UUID(publish_blob["evaluation_context_pack_snapshot_id"])
     publish_context = db_session.get(ContextPackSnapshot, publish_context_id)
     assert publish_context is not None
     assert publish_context.id != original_context_id
@@ -1237,15 +1358,14 @@ def test_settlement_finalization_uses_distinct_publish_context_without_rebinding
     assert publish_context.policy_snapshot_id == candidate.policy_snapshot_id
     assert publish_blob["evaluation_context_pack_hash"] == publish_context.pack_hash
     assert publish_blob["evaluation_context_pack_purpose"] == "AUTHORITY_REVIEW"
-    assert publish_blob["source_context_pack_snapshot_id"] == str(
-        original_context_id
-    )
+    assert publish_blob["source_context_pack_snapshot_id"] == str(original_context_id)
     assert publish_blob["source_context_pack_hash"] == original_pack_hash
     assert publish_context.pack_content["niche_contract_digest"][
         "editorial_slot_id"
     ] == str(admission.editorial_calendar_slot_id)
-    assert publish_blob["niche_contract_digest_hash"] == (
-        publish_context.pack_content["niche_contract_digest"]["content_hash"]
+    assert (
+        publish_blob["niche_contract_digest_hash"]
+        == (publish_context.pack_content["niche_contract_digest"]["content_hash"])
     )
     assert original_context.editorial_calendar_slot_id != (
         publish_context.editorial_calendar_slot_id
@@ -1263,8 +1383,7 @@ def test_settlement_finalization_uses_distinct_publish_context_without_rebinding
             {"id": item["id"]} for item in publish_blob["claim_evidence_refs"]
         ],
         market_demand_evidence_refs=[
-            {"id": item["id"]}
-            for item in publish_blob["market_demand_evidence_refs"]
+            {"id": item["id"]} for item in publish_blob["market_demand_evidence_refs"]
         ],
     )
     # An exact PUBLISH context must not mask corruption in the independently
@@ -1339,9 +1458,7 @@ def test_settlement_real_support_seals_exact_pending_destination_for_review_only
     )
     assert candidate is not None
     channel = lineage.historical.scope.channel
-    original_governance = deepcopy(
-        (channel.metadata_ or {})["destination_governance"]
-    )
+    original_governance = deepcopy((channel.metadata_ or {})["destination_governance"])
     original_active_ref = original_governance["active_binding_ref"]
     original_binding = next(
         item
@@ -1448,7 +1565,9 @@ def test_settlement_real_support_seals_exact_pending_destination_for_review_only
     )
     assert (
         db_session.scalar(
-            select(func.count()).select_from(ProviderAttempt).where(
+            select(func.count())
+            .select_from(ProviderAttempt)
+            .where(
                 ProviderAttempt.target_id.in_([workflow.id, workflow.video_project_id])
             )
         )
@@ -1482,26 +1601,29 @@ def test_settlement_real_support_seals_exact_pending_destination_for_review_only
     assert destination_content["publish_execution_allowed"] is False
     assert destination_content["automatic_publish"] is False
     raw_binding = destination_content["destination_binding"]
-    wrapped_authority = destination_content[
-        "final_review_only_destination_authority"
-    ]
+    wrapped_authority = destination_content["final_review_only_destination_authority"]
     normalized_destination = _normalized_destination(destination_content)
     assert raw_binding["content_hash"] == original_binding["content_hash"]
     assert destination_content["destination_model_hash"] == raw_binding["content_hash"]
-    assert destination_content["destination_binding_hash"] == (
-        wrapped_authority["content_hash"]
+    assert (
+        destination_content["destination_binding_hash"]
+        == (wrapped_authority["content_hash"])
     )
-    assert destination_content["destination_authority_hash"] == (
-        wrapped_authority["content_hash"]
+    assert (
+        destination_content["destination_authority_hash"]
+        == (wrapped_authority["content_hash"])
     )
-    assert normalized_destination["destination_model_hash"] == (
-        raw_binding["content_hash"]
+    assert (
+        normalized_destination["destination_model_hash"]
+        == (raw_binding["content_hash"])
     )
-    assert normalized_destination["destination_binding_hash"] == (
-        wrapped_authority["content_hash"]
+    assert (
+        normalized_destination["destination_binding_hash"]
+        == (wrapped_authority["content_hash"])
     )
-    assert normalized_destination["destination_authority_hash"] == (
-        wrapped_authority["content_hash"]
+    assert (
+        normalized_destination["destination_authority_hash"]
+        == (wrapped_authority["content_hash"])
     )
     for key in (
         "settlement_authority_id",
@@ -1520,21 +1642,14 @@ def test_settlement_real_support_seals_exact_pending_destination_for_review_only
             match="V2_PROVIDER_FINAL_REVIEW_ONLY_INVALID",
         ):
             _normalized_destination(tampered_destination)
-    assert package.destination_binding_ref.content_hash == destination_version.content_hash
+    assert (
+        package.destination_binding_ref.content_hash == destination_version.content_hash
+    )
     assert (channel.metadata_ or {})["destination_governance"] == original_governance
 
-    # The post-readiness fixture supplies only local deterministic media
-    # authorities.  Destination/package validation and candidate construction
-    # remain the real production services, with no provider execution.
-    monkeypatch.setattr(
-        "app.services.v2_drive_archive.require_v2_google_drive_final_media",
-        lambda *_args, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        ProductionPublishService,
-        "_require_final_media_authority",
-        lambda *_args, **_kwargs: None,
-    )
+    # The post-readiness fixture creates checksum-verified Drive-shaped
+    # authorities entirely offline. Destination/package/final-media validation
+    # and candidate construction remain the real production services.
     # Hand off a clean transaction boundary before the worker opens separate
     # stage sessions against the same immutable artifact lineage.
     db_session.commit()
@@ -1564,11 +1679,12 @@ def test_settlement_real_support_seals_exact_pending_destination_for_review_only
     assert final_lineage["publish_execution_allowed"] is False
     assert final_lineage["automatic_publish"] is False
     assert final_lineage["destination_model_hash"] == raw_binding["content_hash"]
-    assert final_lineage["destination_binding_hash"] == (
-        wrapped_authority["content_hash"]
+    assert (
+        final_lineage["destination_binding_hash"] == (wrapped_authority["content_hash"])
     )
-    assert final_lineage["destination_authority_hash"] == (
-        wrapped_authority["content_hash"]
+    assert (
+        final_lineage["destination_authority_hash"]
+        == (wrapped_authority["content_hash"])
     )
     assert final_lineage["controlled_recovery_authority_id"] == str(
         lineage.root_lineage.authority.id
@@ -1579,9 +1695,91 @@ def test_settlement_real_support_seals_exact_pending_destination_for_review_only
     assert final_lineage["settlement_authority_id"] == str(settlement.id)
     assert final_lineage["settlement_authority_hash"] == settlement.authority_hash
     assert final_lineage["settlement_qualification_run_id"] == str(child.id)
-    assert final_lineage["settlement_provenance_hash"] == destination[
-        "settlement_provenance_hash"
-    ]
+    assert (
+        final_lineage["settlement_provenance_hash"]
+        == destination["settlement_provenance_hash"]
+    )
+    caption_metadata = final_candidate.publish_metadata_snapshot["caption_sidecar"]
+    provider_plan_version = db_session.get(
+        ArtifactVersion,
+        package.provider_execution_plan_ref.artifact_version_id,
+    )
+    assert provider_plan_version is not None
+    assert (
+        "caption_sidecar"
+        not in (
+            provider_plan_version.content["final_review"]["publish_metadata_snapshot"]
+        )
+    )
+    assert caption_metadata["schema_version"] == "vcos.v2-drive-caption-review.v1"
+    assert caption_metadata["delivery_mode"] == "SIDECAR_ONLY"
+    assert caption_metadata["archive_verification_state"] == "VERIFIED"
+    assert caption_metadata["storage_provider"] == "GOOGLE_DRIVE"
+    assert caption_metadata["file_name"] == "canonical-captions.srt"
+    assert caption_metadata["caption_archive_object_ref"].endswith(
+        "/canonical-captions.srt"
+    )
+    assert caption_metadata["caption_drive_web_view_url"].startswith(
+        "https://drive.google.com/file/d/"
+    )
+    for field in (
+        "caption_checksum_sha256",
+        "caption_artifact_hash",
+        "subtitle_qc_hash",
+    ):
+        assert len(caption_metadata[field]) == 64
+    assert caption_metadata["caption_ref"].startswith("artifact-version://caption/")
+    assert caption_metadata["subtitle_qc_ref"].startswith(
+        "artifact-version://subtitle-qc/"
+    )
+    final_project = db_session.get(VideoProject, workflow.video_project_id)
+    assert final_project is not None
+    review = OperatorCockpitService(db_session)._final_review(
+        project=final_project,
+        run=workflow,
+        channel=channel,
+        candidate=final_candidate,
+        decision=None,
+        series_plan=None,
+        series_run=None,
+    )
+    assert review.media.caption_sidecar is not None
+    assert review.media.caption_sidecar.delivery_mode == "SIDECAR_ONLY"
+    assert review.media.caption_sidecar.verification_state == "VERIFIED"
+    assert (
+        review.media.caption_sidecar.drive_web_view_url
+        == caption_metadata["caption_drive_web_view_url"]
+    )
+    assert (
+        review.media.caption_sidecar.checksum_sha256
+        == caption_metadata["caption_checksum_sha256"]
+    )
+    assert review.media.captions_label == caption_metadata["label"]
+    sealed_publish_metadata = deepcopy(final_candidate.publish_metadata_snapshot)
+    final_candidate_id = final_candidate.id
+    db_session.expunge(final_candidate)
+    final_candidate.publish_metadata_snapshot = {
+        **sealed_publish_metadata,
+        "caption_sidecar": {
+            **caption_metadata,
+            "caption_checksum_sha256": "0" * 64,
+        },
+    }
+    with pytest.raises(
+        ValidationFailureError,
+        match="FINAL_REVIEW_CAPTION_SIDECAR_AUTHORITY_MISMATCH",
+    ):
+        OperatorCockpitService(db_session)._final_review(
+            project=final_project,
+            run=workflow,
+            channel=channel,
+            candidate=final_candidate,
+            decision=None,
+            series_plan=None,
+            series_run=None,
+        )
+    final_candidate = db_session.get(FinalReviewCandidate, final_candidate_id)
+    assert final_candidate is not None
     assert (channel.metadata_ or {})["destination_governance"] == original_governance
     assert (
         db_session.scalar(select(func.count()).select_from(ProviderAttempt))
@@ -1770,9 +1968,9 @@ def test_destination_authority_preserves_verified_mode_and_rejects_tamper(
 
     original_metadata = deepcopy(scope.channel.metadata_)
     tampered_metadata = deepcopy(original_metadata)
-    tampered_metadata["destination_governance"]["bindings"][0][
-        "channel_handle"
-    ] = "@tampered-without-rehash"
+    tampered_metadata["destination_governance"]["bindings"][0]["channel_handle"] = (
+        "@tampered-without-rehash"
+    )
     scope.channel.metadata_ = tampered_metadata
     with pytest.raises(
         ValidationFailureError,

@@ -133,6 +133,21 @@ export type FinalReview = {
     drive_web_view_url?: string | null;
     thumbnail_url?: string | null;
     captions_label?: string | null;
+    caption_sidecar?: {
+      label: string;
+      file_name: string;
+      caption_ref: string;
+      archive_object_ref: string;
+      drive_web_view_url: string;
+      checksum_sha256: string;
+      caption_artifact_hash: string;
+      subtitle_qc_ref: string;
+      subtitle_qc_hash: string;
+      cloud_media_ref_id: string;
+      drive_file_id: string;
+      verification_state: "VERIFIED";
+      delivery_mode: "SIDECAR_ONLY";
+    } | null;
     checksum_sha256: string;
     duration_seconds: number;
   };

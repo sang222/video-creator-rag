@@ -401,15 +401,17 @@ class PackageBoundV2StageGateway:
         )
         if archive_operation.execution_mode != V2_REAL_PRODUCTION_MODE:
             raise ValidationFailureError("V2_QUALIFICATION_FINAL_REVIEW_FORBIDDEN")
+        verified_drive_archive = None
         if archive_operation.adapter_key in {
             "v2-google-drive-archive",
             "v2-google-drive-remote",
         }:
             from app.services.v2_drive_archive import (
                 require_v2_google_drive_final_media,
+                v2_drive_caption_sidecar_review_metadata,
             )
 
-            require_v2_google_drive_final_media(
+            verified_drive_archive = require_v2_google_drive_final_media(
                 context.session,
                 project_id=run.video_project_id,
                 final_media_id=_required_run_uuid(
@@ -430,6 +432,13 @@ class PackageBoundV2StageGateway:
         if final_review.get("target_surface", "LONG_FORM") != "LONG_FORM":
             raise ValidationFailureError("V2_PROVIDER_LONG_FORM_SURFACE_REQUIRED")
         target_surface = "LONG_FORM"
+        publish_metadata_snapshot = _required_mapping(
+            final_review, "publish_metadata_snapshot"
+        )
+        if verified_drive_archive is not None:
+            publish_metadata_snapshot["caption_sidecar"] = (
+                v2_drive_caption_sidecar_review_metadata(verified_drive_archive)
+            )
         target_market_lineage = _required_mapping(final_review, "target_market_lineage")
         target_market_lineage.update(
             {
@@ -453,9 +462,7 @@ class PackageBoundV2StageGateway:
                     "controlled_recovery_authority_hash": destination[
                         "controlled_recovery_authority_hash"
                     ],
-                    "settlement_authority_id": destination[
-                        "settlement_authority_id"
-                    ],
+                    "settlement_authority_id": destination["settlement_authority_id"],
                     "settlement_authority_hash": destination[
                         "settlement_authority_hash"
                     ],
@@ -547,9 +554,7 @@ class PackageBoundV2StageGateway:
             target_platform=destination["platform"],
             target_surface=target_surface,
             target_market_lineage=target_market_lineage,
-            publish_metadata_snapshot=_required_mapping(
-                final_review, "publish_metadata_snapshot"
-            ),
+            publish_metadata_snapshot=publish_metadata_snapshot,
             disclosure_snapshot=dict(final_review.get("disclosure_snapshot") or {}),
         )
 
@@ -921,7 +926,8 @@ def _normalized_destination(content: Any) -> dict[str, Any]:
         ).strip()
         verification_state = str(payload.get("verification_state") or "").upper()
         verified_evidence = verification_state == "VERIFIED" or (
-            bool(payload.get("verified_at")) and bool(payload.get("verification_method"))
+            bool(payload.get("verified_at"))
+            and bool(payload.get("verification_method"))
         )
         if (
             status != "VERIFIED"
@@ -1090,9 +1096,7 @@ def _normalized_destination(content: Any) -> dict[str, Any]:
                 ),
                 "settlement_authority_id": settlement_authority_id,
                 "settlement_authority_hash": settlement_authority_hash,
-                "settlement_qualification_run_id": (
-                    settlement_qualification_run_id
-                ),
+                "settlement_qualification_run_id": (settlement_qualification_run_id),
                 "settlement_provenance_hash": settlement_provenance_hash,
             }
             if status == "PENDING_PLATFORM_ID"

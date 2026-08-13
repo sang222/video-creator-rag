@@ -118,6 +118,7 @@ _CREATIVE_GATES = (
     "PackageScriptCoverageGate",
     "VisualPlanBindingGate",
     "TimelineCoverageGate",
+    "NativeExplanatoryVisualGate",
     "NonBlackOutputGate",
     "FinalDurationConsistencyGate",
     "AudioStrategyTruthfulnessGate",
@@ -1374,6 +1375,30 @@ class V2LocalNativeProductionAdapter:
             else set()
         )
         scenes = list(timeline.get("scenes") or [])
+        native_visual_specs = [
+            scene.get("native_visual_spec")
+            for scene in scenes
+            if isinstance(scene, dict)
+        ]
+        native_visual_signatures = [
+            (
+                spec.get("headline_hash"),
+                spec.get("composition"),
+                tuple(spec.get("step_labels") or []),
+            )
+            for spec in native_visual_specs
+            if isinstance(spec, dict)
+        ]
+        native_visual_authority_valid = (
+            bool(scenes)
+            and all(
+                _native_visual_spec_matches_scene(scene)
+                for scene in scenes
+                if isinstance(scene, dict)
+            )
+            and len(native_visual_specs) == len(scenes)
+            and len(native_visual_signatures) == len(set(native_visual_signatures))
+        )
         checks = {
             "PackageScriptCoverageGate": bool(scenes)
             and all(
@@ -1402,6 +1427,16 @@ class V2LocalNativeProductionAdapter:
                 for scene in scenes
             ),
             "TimelineCoverageGate": (native_qc.checks.get("timeline_coverage") is True),
+            "NativeExplanatoryVisualGate": (
+                native_visual_authority_valid
+                and native_qc.checks.get("native_explanatory_plan_attested") is True
+                and native_qc.checks.get("native_explanatory_visual_present") is True
+                and native_qc.checks.get("native_explanatory_scene_count")
+                == len(scenes)
+                and native_qc.checks.get("native_explanatory_drawtext_count", 0)
+                >= len(scenes)
+                and native_qc.checks.get("narration_drawtext_count") == 0
+            ),
             "NonBlackOutputGate": (native_qc.checks.get("black_output_absent") is True),
             "FinalDurationConsistencyGate": abs(
                 round(float(native_qc.checks.get("duration") or 0) * 1000)
@@ -2529,18 +2564,40 @@ def _cross_modal_timeline_projection(
     binding_by_unit = {
         binding.narration_unit_id: binding for binding in bindings.bindings
     }
+    unit_groups: list[list[Any]] = []
+    for unit in compilation.narration_units:
+        if (
+            unit_groups
+            and unit_groups[-1][-1].information_unit_ids == unit.information_unit_ids
+            and unit_groups[-1][-1].semantic_intent == unit.semantic_intent
+        ):
+            unit_groups[-1].append(unit)
+        else:
+            unit_groups.append([unit])
     visual_scenes: list[VisualRealizationScene] = []
     rendered_scenes: list[dict[str, Any]] = []
-    for ordinal, unit in enumerate(compilation.narration_units, start=1):
-        binding = binding_by_unit[unit.narration_unit_id]
+    for ordinal, units in enumerate(unit_groups, start=1):
+        unit = units[0]
+        selected_bindings = [binding_by_unit[item.narration_unit_id] for item in units]
+        first_binding = selected_bindings[0]
+        last_binding = selected_bindings[-1]
+        narration_unit_ids = [item.narration_unit_id for item in units]
+        narration_unit_hashes = [item.content_hash for item in units]
+        binding_hashes = [item.content_hash for item in selected_bindings]
+        grouped_narration_text = " ".join(item.text for item in units)
+        native_visual_spec = _native_visual_spec_for_units(
+            units=units,
+            scene_id=f"scene-{ordinal:03d}",
+        )
+        visual_function = _native_visual_function(unit.visual_function)
         visual_body = {
             "scene_id": f"scene-{ordinal:03d}",
             "ordinal": ordinal,
-            "narration_unit_ids": [unit.narration_unit_id],
+            "narration_unit_ids": narration_unit_ids,
             "information_unit_ids": unit.information_unit_ids,
-            "actual_start_ms": binding.actual_start_ms,
-            "actual_end_ms": binding.actual_end_ms,
-            "visual_function": VisualFunction.CONCEPT_MODEL,
+            "actual_start_ms": first_binding.actual_start_ms,
+            "actual_end_ms": last_binding.actual_end_ms,
+            "visual_function": visual_function,
             "scene_meaning": unit.semantic_intent,
             "information_ownership_statement": (
                 f"Owns {', '.join(unit.information_unit_ids)} from {unit.section_id}."
@@ -2549,7 +2606,9 @@ def _cross_modal_timeline_projection(
                 "Native explanatory model that reveals the narration's "
                 "meaning without representing unverified factual footage."
             ),
-            "stable_visual_concept_key": f"concept:{unit.section_id}",
+            "stable_visual_concept_key": (
+                f"native-explanatory:{unit.information_unit_ids[0]}"
+            ),
             "factual_risk": unit.factual_risk,
             "importance": unit.importance,
             "evidence_truth_requirement": "NOT_REQUIRED",
@@ -2562,8 +2621,12 @@ def _cross_modal_timeline_projection(
             "preferred_source_class": "NATIVE_GRAPHIC",
             "route_constraints": ["NATIVE_ONLY", "NO_PROVIDER_FALLBACK"],
             "source_semantic_specs": {
-                "narration_unit_hash": unit.content_hash,
-                "binding_hash": binding.content_hash,
+                "narration_unit_hashes": narration_unit_hashes,
+                "binding_hashes": binding_hashes,
+                "semantic_intent_hash": hashlib.sha256(
+                    unit.semantic_intent.encode("utf-8")
+                ).hexdigest(),
+                "native_visual_spec_hash": native_visual_spec["content_hash"],
             },
         }
         visual_scene = VisualRealizationScene(
@@ -2573,24 +2636,27 @@ def _cross_modal_timeline_projection(
         rendered_scenes.append(
             {
                 "scene_id": visual_scene.scene_id,
-                "start_ms": binding.actual_start_ms,
-                "end_ms": binding.actual_end_ms,
-                "duration_ms": binding.actual_end_ms - binding.actual_start_ms,
+                "start_ms": first_binding.actual_start_ms,
+                "end_ms": last_binding.actual_end_ms,
+                "duration_ms": (
+                    last_binding.actual_end_ms - first_binding.actual_start_ms
+                ),
                 "narration_text_hash": hashlib.sha256(
-                    unit.text.encode("utf-8")
+                    grouped_narration_text.encode("utf-8")
                 ).hexdigest(),
-                "visual_treatment": "NATIVE_TEXT_CARD",
+                "visual_treatment": "NATIVE_EXPLANATORY_DIAGRAM",
                 "script_artifact_version_id": str(script.id),
                 "script_content_hash": script.content_hash,
                 "visual_plan_artifact_version_id": str(visual.id),
                 "visual_plan_content_hash": visual.content_hash,
-                "audio_start_ms": binding.actual_start_ms,
-                "audio_end_ms": binding.actual_end_ms,
+                "audio_start_ms": first_binding.actual_start_ms,
+                "audio_end_ms": last_binding.actual_end_ms,
                 "alignment_method": audio["alignment_method"],
                 "narration_unit_ids": visual_scene.narration_unit_ids,
                 "information_unit_ids": visual_scene.information_unit_ids,
                 "visual_function": visual_scene.visual_function.value,
                 "visual_intent_hash": visual_scene.content_hash,
+                "native_visual_spec": native_visual_spec,
             }
         )
     plan_body = {
@@ -2615,6 +2681,183 @@ def _cross_modal_timeline_projection(
         "visual_realization_plan": visual_plan.model_dump(mode="json"),
         "visual_realization_plan_hash": visual_plan.content_hash,
     }
+
+
+_NATIVE_VISUAL_COMPOSITIONS = frozenset(
+    {
+        "EVIDENCE_TO_STRUCTURE",
+        "DECISION_FLOW",
+        "BOUNDARY_COMPARISON",
+        "CONCEPT_FLOW",
+    }
+)
+
+
+def _native_visual_function(hint: str) -> VisualFunction:
+    """Map sealed visualizability intent to a non-factual native function."""
+
+    normalized = str(hint or "").strip().upper()
+    if "BOUNDARY" in normalized or "COMPARISON" in normalized:
+        return VisualFunction.COMPARISON
+    if "PROCESS" in normalized or "DECISION" in normalized:
+        return VisualFunction.PROCESS
+    if "DATA" in normalized:
+        return VisualFunction.DATA
+    if "EVIDENCE" in normalized or "AUTHENTIC" in normalized:
+        return VisualFunction.EXAMPLE_CONTEXT
+    return VisualFunction.CONCEPT_MODEL
+
+
+def _native_visual_composition(hint: str) -> str:
+    normalized = str(hint or "").strip().upper()
+    if "BOUNDARY" in normalized or "COMPARISON" in normalized:
+        return "BOUNDARY_COMPARISON"
+    if "PROCESS" in normalized or "DECISION" in normalized:
+        return "DECISION_FLOW"
+    if "EVIDENCE" in normalized or "AUTHENTIC" in normalized:
+        return "EVIDENCE_TO_STRUCTURE"
+    return "CONCEPT_FLOW"
+
+
+def _native_visual_headline(semantic_intent: str) -> str:
+    """Create a bounded proposition label without generating new semantics."""
+
+    normalized = " ".join(str(semantic_intent or "").split())
+    if not normalized:
+        raise ValidationFailureError("V2_NATIVE_VISUAL_SEMANTIC_INTENT_REQUIRED")
+    if len(normalized) <= 116:
+        return normalized
+    prefix = normalized[:113].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    if not prefix:
+        raise ValidationFailureError("V2_NATIVE_VISUAL_HEADLINE_INVALID")
+    return prefix + "..."
+
+
+def _native_visual_spec_for_units(*, units: list[Any], scene_id: str) -> dict[str, Any]:
+    """Build one hash-bound native diagram plan from qualified meaning truth.
+
+    The visible headline is a deterministic prefix of the approved information
+    proposition, never a caption cue or the narration-unit text.  The remaining
+    labels are renderer vocabulary that explains layout roles rather than making
+    factual product/UI claims.
+    """
+
+    if not units:
+        raise ValidationFailureError("V2_NATIVE_VISUAL_NARRATION_UNITS_REQUIRED")
+    unit = units[0]
+    if any(
+        item.information_unit_ids != unit.information_unit_ids
+        or item.semantic_intent != unit.semantic_intent
+        or item.visual_function != unit.visual_function
+        for item in units
+    ):
+        raise ValidationFailureError("V2_NATIVE_VISUAL_UNIT_GROUP_INVALID")
+    composition = _native_visual_composition(unit.visual_function)
+    steps_by_composition = {
+        "EVIDENCE_TO_STRUCTURE": ["SOURCE", "STRUCTURE", "VERIFIED DATA"],
+        "DECISION_FLOW": ["INPUT", "BOUNDARY", "ACTION"],
+        "BOUNDARY_COMPARISON": ["INTERPRET", "VALIDATE", "EXECUTE"],
+        "CONCEPT_FLOW": ["CONTEXT", "MODEL", "OUTCOME"],
+    }
+    headline = _native_visual_headline(unit.semantic_intent)
+    narration_text_hash = hashlib.sha256(
+        " ".join(item.text for item in units).encode("utf-8")
+    ).hexdigest()
+    headline_hash = hashlib.sha256(headline.encode("utf-8")).hexdigest()
+    if headline_hash == narration_text_hash:
+        raise ValidationFailureError("V2_NATIVE_VISUAL_NARRATION_TEXT_FORBIDDEN")
+    body = {
+        "schema_version": "vcos.native-explanatory-scene.v1",
+        "scene_id": scene_id,
+        "composition": composition,
+        "visual_function_hint": unit.visual_function,
+        "headline": headline,
+        "headline_derivation": "QUALIFIED_PROPOSITION_PREFIX_MAX_116",
+        "headline_hash": headline_hash,
+        "semantic_intent_hash": hashlib.sha256(
+            unit.semantic_intent.encode("utf-8")
+        ).hexdigest(),
+        "narration_text_hash": narration_text_hash,
+        "step_labels": steps_by_composition[composition],
+        "information_unit_ids": list(unit.information_unit_ids),
+        "source_ref": (
+            f"qualified-information-unit://{unit.information_unit_ids[0]}/"
+            "semantic-intent"
+        ),
+        "source_hash": content_hash(
+            {
+                "narration_unit_hashes": [item.content_hash for item in units],
+                "semantic_intent_hash": hashlib.sha256(
+                    unit.semantic_intent.encode("utf-8")
+                ).hexdigest(),
+            }
+        ),
+        "factual_ui_representation": False,
+        "caption_source": False,
+        "renderer_vocabulary_version": "vcos.native-explanatory-v1",
+    }
+    return {**body, "content_hash": content_hash(body)}
+
+
+def _native_visual_spec_matches_scene(scene: dict[str, Any]) -> bool:
+    spec = scene.get("native_visual_spec")
+    if not isinstance(spec, dict):
+        return False
+    required = {
+        "schema_version",
+        "scene_id",
+        "composition",
+        "visual_function_hint",
+        "headline",
+        "headline_derivation",
+        "headline_hash",
+        "semantic_intent_hash",
+        "narration_text_hash",
+        "step_labels",
+        "information_unit_ids",
+        "source_ref",
+        "source_hash",
+        "factual_ui_representation",
+        "caption_source",
+        "renderer_vocabulary_version",
+        "content_hash",
+    }
+    body = {key: value for key, value in spec.items() if key != "content_hash"}
+    return bool(
+        set(spec) == required
+        and spec.get("schema_version") == "vcos.native-explanatory-scene.v1"
+        and spec.get("scene_id") == scene.get("scene_id")
+        and spec.get("composition") in _NATIVE_VISUAL_COMPOSITIONS
+        and isinstance(spec.get("headline"), str)
+        and 1 <= len(spec["headline"]) <= 116
+        and spec.get("headline_derivation") == "QUALIFIED_PROPOSITION_PREFIX_MAX_116"
+        and spec.get("headline_hash")
+        == hashlib.sha256(spec["headline"].encode("utf-8")).hexdigest()
+        and spec.get("headline_hash") != spec.get("narration_text_hash")
+        and isinstance(spec.get("step_labels"), list)
+        and len(spec["step_labels"]) == 3
+        and all(
+            isinstance(value, str) and 1 <= len(value) <= 20
+            for value in spec["step_labels"]
+        )
+        and isinstance(spec.get("information_unit_ids"), list)
+        and bool(spec["information_unit_ids"])
+        and spec.get("factual_ui_representation") is False
+        and spec.get("caption_source") is False
+        and spec.get("renderer_vocabulary_version") == "vcos.native-explanatory-v1"
+        and isinstance(spec.get("source_ref"), str)
+        and spec["source_ref"].startswith("qualified-information-unit://")
+        and all(
+            isinstance(spec.get(key), str) and re.fullmatch(r"[0-9a-f]{64}", spec[key])
+            for key in (
+                "semantic_intent_hash",
+                "narration_text_hash",
+                "source_hash",
+                "content_hash",
+            )
+        )
+        and spec.get("content_hash") == content_hash(body)
+    )
 
 
 def _cross_modal_qc_for_timeline(
@@ -2701,6 +2944,33 @@ def _cross_modal_qc_for_timeline(
 
     expected_scenes = {item.scene_id: item for item in visual_plan.scenes}
     canonical_scenes = {str(item.get("scene_id")): item for item in timeline["scenes"]}
+    concept_keys = [item.stable_visual_concept_key for item in visual_plan.scenes]
+    if len(concept_keys) != len(set(concept_keys)):
+        observe(
+            "NARRATION_VISUAL_DIRECT_MISMATCH",
+            scene_id=None,
+            unit_ids=[],
+            detail="Native visual concepts repeat across independently owned narration units.",
+        )
+    visible_signatures = [
+        (
+            (scene.get("native_visual_spec") or {}).get("headline_hash"),
+            (scene.get("native_visual_spec") or {}).get("composition"),
+            tuple((scene.get("native_visual_spec") or {}).get("step_labels") or []),
+        )
+        for scene in canonical_scenes.values()
+        if isinstance(scene, dict) and isinstance(scene.get("native_visual_spec"), dict)
+    ]
+    if len(visible_signatures) != len(set(visible_signatures)):
+        observe(
+            "NARRATION_VISUAL_DIRECT_MISMATCH",
+            scene_id=None,
+            unit_ids=[],
+            detail=(
+                "Independent native scenes repeat the same visible semantic "
+                "headline and explanatory composition."
+            ),
+        )
     if set(canonical_scenes) != set(expected_scenes):
         observe(
             "MISSING_NARRATION_UNIT_COVERAGE",
@@ -2734,6 +3004,24 @@ def _cross_modal_qc_for_timeline(
                 scene_id=scene_id,
                 unit_ids=unit_ids,
                 detail="Canonical scene does not represent its owned narration and information units.",
+            )
+        native_spec = actual.get("native_visual_spec")
+        if (
+            not _native_visual_spec_matches_scene(actual)
+            or not isinstance(native_spec, dict)
+            or native_spec.get("content_hash")
+            != expected.source_semantic_specs.get("native_visual_spec_hash")
+            or native_spec.get("semantic_intent_hash")
+            != expected.source_semantic_specs.get("semantic_intent_hash")
+        ):
+            observe(
+                "ESSENTIAL_VISUAL_UNREADABLE",
+                scene_id=scene_id,
+                unit_ids=unit_ids,
+                detail=(
+                    "Canonical scene lacks the hash-bound native explanatory "
+                    "visual required by its semantic authority."
+                ),
             )
     report = cross_modal_qc_report(
         canonical_timeline_hash=timeline_hash,

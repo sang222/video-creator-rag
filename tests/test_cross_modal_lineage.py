@@ -172,7 +172,9 @@ def test_capability_compiler_rejects_conflicts_and_hard_budget_overflow() -> Non
         )
 
 
-def test_narration_units_bind_exact_words_and_drive_one_realization_scene_each() -> None:
+def test_narration_units_bind_exact_words_and_drive_one_realization_scene_each() -> (
+    None
+):
     coverage, output, canonical_script = _qualified_fixture()
     script_hash = hashlib.sha256(canonical_script.encode("utf-8")).hexdigest()
     compilation = NarrationUnitCompiler.compile(
@@ -218,7 +220,9 @@ def test_narration_units_bind_exact_words_and_drive_one_realization_scene_each()
             "route_constraints": [],
             "source_semantic_specs": {},
         }
-        scenes.append(VisualRealizationScene(**body, content_hash=cross_modal_hash(body)))
+        scenes.append(
+            VisualRealizationScene(**body, content_hash=cross_modal_hash(body))
+        )
     plan_body = {
         "schema_version": "vcos.visual-realization-plan.v1",
         "narration_binding_hash": bindings.content_hash,
@@ -227,6 +231,78 @@ def test_narration_units_bind_exact_words_and_drive_one_realization_scene_each()
     }
     plan = VisualRealizationPlan(**plan_body, content_hash=cross_modal_hash(plan_body))
     validate_visual_realization_plan(plan=plan, bindings=bindings)
+
+
+def test_narration_unit_chunks_preserve_live_shaped_paragraph_separators() -> None:
+    coverage, output, _ = _qualified_fixture()
+    sections = []
+    for section in output.sections:
+        narration = section.narration.replace(". This", ".\n\nThis", 1)
+        sections.append(section.model_copy(update={"narration": narration}))
+    paragraph_output = output.model_copy(update={"sections": sections})
+    canonical_script = "\n\n".join(
+        section.narration for section in paragraph_output.sections
+    )
+
+    compilation = NarrationUnitCompiler.compile(
+        output=paragraph_output,
+        canonical_script=canonical_script,
+        canonical_script_hash=hashlib.sha256(
+            canonical_script.encode("utf-8")
+        ).hexdigest(),
+        coverage_plan=coverage,
+        estimated_duration_ms=90_000,
+    )
+
+    reconstructed = "".join(
+        canonical_script[unit.source_text_span.start : unit.source_text_span.end]
+        for unit in compilation.narration_units
+    )
+    assert "\n\n" in reconstructed
+    assert all(
+        unit.text
+        == canonical_script[unit.source_text_span.start : unit.source_text_span.end]
+        for unit in compilation.narration_units
+    )
+    assert re.sub(r"\s+", "", reconstructed) == re.sub(r"\s+", "", canonical_script)
+
+
+def test_narration_unit_chunks_keep_terminal_smart_quote_with_spoken_token() -> None:
+    coverage, output, _ = _qualified_fixture()
+    sections = list(output.sections)
+    first = sections[0]
+    quoted = first.model_copy(
+        update={
+            "narration": (
+                "The operator asks, \u201cGive me the important details.\u201d "
+                "A validated boundary then controls the action."
+            )
+        }
+    )
+    sections[0] = quoted
+    quoted_output = output.model_copy(update={"sections": sections})
+    canonical_script = "\n\n".join(
+        section.narration for section in quoted_output.sections
+    )
+
+    compilation = NarrationUnitCompiler.compile(
+        output=quoted_output,
+        canonical_script=canonical_script,
+        canonical_script_hash=hashlib.sha256(
+            canonical_script.encode("utf-8")
+        ).hexdigest(),
+        coverage_plan=coverage,
+        estimated_duration_ms=90_000,
+    )
+
+    flattened = [
+        token
+        for unit in compilation.narration_units
+        for token in re.findall(r"\S+", unit.text)
+    ]
+    assert flattened == re.findall(r"\S+", canonical_script)
+    assert "details.\u201d" in flattened
+    assert "\u201d" not in flattened
 
 
 def test_cross_modal_contract_blocks_token_drift_and_direct_mismatch() -> None:
@@ -341,8 +417,29 @@ def test_real_timeline_projection_requires_timed_words_and_preserves_lineage() -
         },
     )
     assert projection is not None
-    assert projection["narration_unit_compilation_hash"] == projection[
-        "narration_unit_compilation"
-    ]["content_hash"]
+    assert (
+        projection["narration_unit_compilation_hash"]
+        == projection["narration_unit_compilation"]["content_hash"]
+    )
     assert all(scene["narration_unit_ids"] for scene in projection["scenes"])
-    assert all("body" not in scene and "headline" not in scene for scene in projection["scenes"])
+    assert all(
+        "body" not in scene and "headline" not in scene
+        for scene in projection["scenes"]
+    )
+    assert all(
+        scene["visual_treatment"] == "NATIVE_EXPLANATORY_DIAGRAM"
+        and scene["native_visual_spec"]["caption_source"] is False
+        and scene["native_visual_spec"]["factual_ui_representation"] is False
+        and scene["native_visual_spec"]["headline_hash"]
+        != scene["native_visual_spec"]["narration_text_hash"]
+        for scene in projection["scenes"]
+    )
+    visible_signatures = {
+        (
+            scene["native_visual_spec"]["headline_hash"],
+            scene["native_visual_spec"]["composition"],
+            tuple(scene["native_visual_spec"]["step_labels"]),
+        )
+        for scene in projection["scenes"]
+    }
+    assert len(visible_signatures) == len(projection["scenes"])

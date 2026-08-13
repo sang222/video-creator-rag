@@ -13,6 +13,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.contracts.operator_cockpit import (
+    FinalReviewCaptionSidecarRead,
     FinalReviewMediaRead,
     FinalReviewRead,
     ManualPublishRead,
@@ -496,31 +497,53 @@ class OperatorCockpitService:
             run=run,
             candidate=candidate,
         )
+        metadata = candidate.publish_metadata_snapshot or {}
         final_media = self.session.get(FinalMediaRef, candidate.final_media_ref_id)
-        if (
-            final_media is not None
-            and final_media.provider_key == "v2-google-drive-archive"
-        ):
+        caption_sidecar: FinalReviewCaptionSidecarRead | None = None
+        if final_media is not None and final_media.provider_key in {
+            "v2-google-drive-archive",
+            "v2-google-drive-remote",
+        }:
             # Re-resolve the non-MR1 Drive authority at the human boundary.
             # The helper is database-only; it never fetches or proxies Drive
             # bytes into the cockpit.
             from app.services.v2_drive_archive import (
                 require_v2_google_drive_final_media,
+                v2_drive_caption_sidecar_review_metadata,
             )
 
-            require_v2_google_drive_final_media(
+            verified_drive = require_v2_google_drive_final_media(
                 self.session,
                 project_id=project.id,
                 final_media_id=final_media.id,
                 expected_checksum=candidate.render_output_checksum,
                 expected_archive_hash=candidate.archive_receipt_hash,
             )
+            caption_metadata = v2_drive_caption_sidecar_review_metadata(verified_drive)
+            if metadata.get("caption_sidecar") != caption_metadata:
+                raise ValidationFailureError(
+                    "FINAL_REVIEW_CAPTION_SIDECAR_AUTHORITY_MISMATCH"
+                )
+            caption_sidecar = FinalReviewCaptionSidecarRead(
+                label=caption_metadata["label"],
+                file_name=caption_metadata["file_name"],
+                caption_ref=caption_metadata["caption_ref"],
+                archive_object_ref=caption_metadata["caption_archive_object_ref"],
+                drive_web_view_url=caption_metadata["caption_drive_web_view_url"],
+                checksum_sha256=caption_metadata["caption_checksum_sha256"],
+                caption_artifact_hash=caption_metadata["caption_artifact_hash"],
+                subtitle_qc_ref=caption_metadata["subtitle_qc_ref"],
+                subtitle_qc_hash=caption_metadata["subtitle_qc_hash"],
+                cloud_media_ref_id=caption_metadata["caption_cloud_media_ref_id"],
+                drive_file_id=caption_metadata["caption_drive_file_id"],
+                verification_state=caption_metadata["archive_verification_state"],
+                delivery_mode=caption_metadata["delivery_mode"],
+            )
         cloud_media = (
             self.session.get(CloudMediaRef, final_media.cloud_media_ref_id)
             if final_media is not None and final_media.cloud_media_ref_id
             else None
         )
-        metadata = candidate.publish_metadata_snapshot or {}
         disclosures = candidate.disclosure_snapshot or {}
         materiality = candidate.materiality_policy_snapshot or {}
         title = _first_text(metadata, "title", "title_text", default=project.title)
@@ -602,7 +625,12 @@ class OperatorCockpitService:
                     _https_url(cloud_media.web_view_link) if cloud_media else None
                 ),
                 thumbnail_url=thumbnail_url,
-                captions_label=_captions_label(metadata),
+                captions_label=(
+                    caption_sidecar.label
+                    if caption_sidecar is not None
+                    else _captions_label(metadata)
+                ),
+                caption_sidecar=caption_sidecar,
                 checksum_sha256=checksum,
                 duration_seconds=duration_seconds,
             ),

@@ -61,6 +61,11 @@ V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY = "v2-google-drive-remote"
 V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE = "v2_drive_final_media_lineage_receipt"
 V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA = "vcos.v2-drive-final-media-lineage.v1"
 V2_DRIVE_ARCHIVE_RECEIPT_SCHEMA = "vcos.v2-drive-archive-receipt.v1"
+V2_DRIVE_CAPTION_REVIEW_SCHEMA = "vcos.v2-drive-caption-review.v1"
+V2_DRIVE_CAPTION_SIDECAR_LABEL = (
+    "Tệp phụ đề SRT rời đã xác minh trên Google Drive (sidecar, không phải chữ "
+    "được chèn vào khung hình)."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,9 +590,7 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
                 video_project_id=context.run.video_project_id,
                 uploaded_video_id=None,
                 render_package_id=None,
-                source_refs=[
-                    _caption_sidecar_source_ref(context.run, sidecar)
-                ],
+                source_refs=[_caption_sidecar_source_ref(context.run, sidecar)],
                 retention_policy={
                     "keep_local": True,
                     "cleanup_authorized": False,
@@ -755,8 +758,75 @@ def require_v2_google_drive_final_media(
         lineage=lineage,
         archive_receipt_hash=expected_archive_hash,
         archive_object_ref=archive_object_ref,
-        caption_archive_object_ref=_drive_caption_object_ref(caption_cloud.drive_file_id),
+        caption_archive_object_ref=_drive_caption_object_ref(
+            caption_cloud.drive_file_id
+        ),
     )
+
+
+def v2_drive_caption_sidecar_review_metadata(
+    artifact: V2VerifiedDriveArchiveArtifact,
+) -> dict[str, Any]:
+    """Project the exact verified SRT authority into immutable final review.
+
+    Callers first resolve ``artifact`` with
+    :func:`require_v2_google_drive_final_media`.  These checks deliberately
+    repeat the caption-specific bindings so a fabricated dataclass cannot turn
+    an unrelated URL or checksum into an operator-facing Drive action.
+    """
+
+    cloud = artifact.caption_cloud_media
+    lineage = artifact.lineage
+    lineage_content = lineage.content if isinstance(lineage.content, dict) else {}
+    caption_ref = lineage_content.get("caption_ref")
+    caption_checksum = lineage_content.get("caption_checksum")
+    caption_artifact_hash = lineage_content.get("caption_artifact_hash")
+    subtitle_qc_ref = lineage_content.get("subtitle_qc_ref")
+    subtitle_qc_hash = lineage_content.get("subtitle_qc_hash")
+    hashes = (caption_checksum, caption_artifact_hash, subtitle_qc_hash)
+    refs = (caption_ref, subtitle_qc_ref)
+    expected_object_ref = _drive_caption_object_ref(cloud.drive_file_id)
+    if (
+        lineage_content.get("schema_version") != V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA
+        or lineage.content_hash != content_hash(lineage_content)
+        or lineage_content.get("caption_cloud_media_ref_id") != str(cloud.id)
+        or lineage_content.get("caption_archive_object_ref") != expected_object_ref
+        or artifact.caption_archive_object_ref != expected_object_ref
+        or cloud.storage_provider != "GOOGLE_DRIVE"
+        or cloud.media_type != "CAPTION"
+        or cloud.upload_status != "VERIFIED"
+        or cloud.verification_status != "CHECKSUM_VERIFIED"
+        or cloud.checksum_sha256 != caption_checksum
+        or not _drive_sidecar_identity_valid(cloud)
+        or not _cloud_appendix_verifies_checksum(cloud)
+        or not _has_caption_sidecar_source(cloud, lineage_content)
+        or not _caption_appendix_matches_lineage(cloud, lineage_content)
+        or any(not isinstance(value, str) or not value for value in refs)
+        or any(
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            for value in hashes
+        )
+    ):
+        raise ValidationFailureError("V2_DRIVE_CAPTION_REVIEW_AUTHORITY_MISMATCH")
+    return {
+        "schema_version": V2_DRIVE_CAPTION_REVIEW_SCHEMA,
+        "delivery_mode": "SIDECAR_ONLY",
+        "label": V2_DRIVE_CAPTION_SIDECAR_LABEL,
+        "file_name": cloud.file_name,
+        "caption_ref": caption_ref,
+        "caption_archive_object_ref": expected_object_ref,
+        "caption_drive_web_view_url": cloud.web_view_link,
+        "caption_checksum_sha256": caption_checksum,
+        "caption_artifact_hash": caption_artifact_hash,
+        "subtitle_qc_ref": subtitle_qc_ref,
+        "subtitle_qc_hash": subtitle_qc_hash,
+        "caption_cloud_media_ref_id": str(cloud.id),
+        "caption_drive_file_id": cloud.drive_file_id,
+        "archive_verification_state": "VERIFIED",
+        "storage_provider": "GOOGLE_DRIVE",
+    }
 
 
 def _resolve_or_create_v2_drive_archive(
@@ -1196,9 +1266,8 @@ def _sidecar_archive_authority(journal: dict[str, Any]) -> dict[str, str]:
         "subtitle_qc_hash",
     )
     values = {key: journal.get(key) for key in required}
-    if (
-        journal.get("subtitle_qc_state") != "PASS"
-        or any(not isinstance(value, str) or not value for value in values.values())
+    if journal.get("subtitle_qc_state") != "PASS" or any(
+        not isinstance(value, str) or not value for value in values.values()
     ):
         raise ValidationFailureError("SUBTITLE_QC_FAILED")
     return {key: str(value) for key, value in values.items()}
@@ -1394,7 +1463,10 @@ __all__ = [
     "V2VerifiedDriveArchiveArtifact",
     "V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE",
     "V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA",
+    "V2_DRIVE_CAPTION_REVIEW_SCHEMA",
+    "V2_DRIVE_CAPTION_SIDECAR_LABEL",
     "V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY",
     "V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY",
     "require_v2_google_drive_final_media",
+    "v2_drive_caption_sidecar_review_metadata",
 ]

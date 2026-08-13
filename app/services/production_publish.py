@@ -72,7 +72,12 @@ from app.services.production_package import (
 PUBLISH_SERVICE_VERSION = "vcos.production-publish.v2"
 _EVENT_NAMESPACE = uuid.UUID("6b147c80-23f9-5d0c-9e1a-128d79e3455a")
 _DURATION_TOLERANCE_SECONDS = Decimal("1.000000")
-_V2_DRIVE_ARCHIVE_ADAPTER_KEY = "v2-google-drive-archive"
+_V2_DRIVE_ARCHIVE_ADAPTER_KEYS = frozenset(
+    {
+        "v2-google-drive-archive",
+        "v2-google-drive-remote",
+    }
+)
 _V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE = "v2_drive_final_media_lineage_receipt"
 _V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA = "vcos.v2-drive-final-media-lineage.v1"
 
@@ -1534,7 +1539,7 @@ class ProductionPublishService:
         cloud_appendix = cloud.technical_appendix if cloud is not None else {}
         parsed_file_ref = urlparse(final_media.file_ref)
         v2_drive_archive = bool(
-            final_media.provider_key == _V2_DRIVE_ARCHIVE_ADAPTER_KEY
+            final_media.provider_key in _V2_DRIVE_ARCHIVE_ADAPTER_KEYS
             and final_media.provider_type == "MEDIA_STORAGE"
         )
         drive_binding_valid = bool(

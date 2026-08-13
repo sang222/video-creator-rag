@@ -22,7 +22,11 @@ from app.core.errors import ValidationFailureError
 from app.db.models.foundation import DomainEvent
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
-from app.db.models.m7 import ManualPublishConfirmation, PublishHandoffPackage, UploadedVideo
+from app.db.models.m7 import (
+    ManualPublishConfirmation,
+    PublishHandoffPackage,
+    UploadedVideo,
+)
 from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
 from app.db.models.ops import DeadLetterJob, ProviderAttempt
 from app.db.models.production_workflow import (
@@ -137,7 +141,9 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _live_request_identity(*, command_id: str, audio_relative_path: str) -> dict[str, Any]:
+def _live_request_identity(
+    *, command_id: str, audio_relative_path: str
+) -> dict[str, Any]:
     return {
         "schema_version": "vcos.v2-elevenlabs-request.v1",
         "command_id": command_id,
@@ -253,7 +259,10 @@ def test_recovery_provider_preflight_blocks_before_authority_or_client(
     ):
         service.authorize(uuid.uuid4(), _controlled_worker_actor())
 
-    assert db_session.scalar(select(func.count(V2NarrationTimingRecoveryAuthority.id))) == 0
+    assert (
+        db_session.scalar(select(func.count(V2NarrationTimingRecoveryAuthority.id)))
+        == 0
+    )
     assert client.call_count == 0
 
 
@@ -342,6 +351,29 @@ def test_forced_alignment_response_is_captured_before_parser_and_replays_offline
     assert replayed.verification_status == "PASS"
     assert replayed.provider_request_id == "forced-alignment-request-001"
     assert transport.call_count == 1
+
+
+def test_exact_alignment_rejects_captured_raw_character_text_drift() -> None:
+    normalized = _temporal_normalized({"normalized_text": "alpha beta"})
+    response = _ExactForcedAlignmentClient._response(normalized, 1_000)
+    evidence = ElevenLabsForcedAlignmentResponseParser().parse(
+        response=response,
+        response_headers={"request-id": "forced-alignment-recovery-001"},
+        normalized=normalized,
+        audio_asset_ref="v2-elevenlabs://exact-character-negative",
+        audio_duration_ms=1_000,
+    )
+    response["characters"][0]["text"] = "z"
+
+    with pytest.raises(
+        ValidationFailureError,
+        match="V2_NARRATION_TIMING_RECOVERY_EXACT_COVERAGE_REQUIRED",
+    ):
+        V2NarrationTimingRecoveryService._validate_exact_alignment(
+            evidence,
+            normalized,
+            raw_response=response,
+        )
 
 
 def _raw_authority_values() -> dict[str, Any]:
@@ -682,9 +714,9 @@ def test_authority_seal_accepts_only_blocked_workflow_and_unsettled_budget(
 
 
 def test_authority_seal_binds_exact_live_package_and_controlled_actor() -> None:
-    migration = Path(
-        "alembic/versions/0076_v2_narration_timing_recovery.py"
-    ).read_text(encoding="utf-8")
+    migration = Path("alembic/versions/0076_v2_narration_timing_recovery.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "package_version.status IS DISTINCT FROM 'submitted'" in migration
     assert "package_artifact.status IS DISTINCT FROM 'draft'" in migration
@@ -755,7 +787,9 @@ def test_media_reconciliation_keeps_one_tts_and_one_alignment_count(
     monkeypatch.setattr(adapter, "_command_lock", no_lock)
     run = SimpleNamespace(id=workflow_id)
     package = SimpleNamespace()
-    script = SimpleNamespace(content={"narration_text": "alpha beta"}, content_hash=_HASH_A)
+    script = SimpleNamespace(
+        content={"narration_text": "alpha beta"}, content_hash=_HASH_A
+    )
     visual = SimpleNamespace()
     monkeypatch.setattr(
         "app.services.v2_elevenlabs_narration._production_inputs",
@@ -862,16 +896,18 @@ class _ExactForcedAlignmentClient:
         return {
             "request_id": "forced-alignment-recovery-001",
             "words": words,
-            "characters": {
-                "characters": list(spoken),
-                "character_start_times_seconds": [
-                    index * char_step / 1000 for index in range(len(spoken))
-                ],
-                "character_end_times_seconds": [
-                    (index + 1) * char_step / 1000
-                    for index in range(len(spoken))
-                ],
-            },
+            "characters": [
+                {
+                    "text": character,
+                    "start": index * char_step / 1000,
+                    "end": (
+                        index * char_step / 1000
+                        if character in {",", ".", ":", "-"}
+                        else (index + 1) * char_step / 1000
+                    ),
+                }
+                for index, character in enumerate(spoken)
+            ],
             "alignment_loss": 0.01,
             "transcript_loss": 0.01,
         }
@@ -901,8 +937,9 @@ class _ExactForcedAlignmentClient:
             audio_duration_ms=audio_duration_ms,
         )
         return SimpleNamespace(
-            request_hash=ElevenLabsForcedAlignmentRequestBuilder()
-            .build(audio_asset_ref=audio_asset_ref, normalized=normalized)["request_hash"],
+            request_hash=ElevenLabsForcedAlignmentRequestBuilder().build(
+                audio_asset_ref=audio_asset_ref, normalized=normalized
+            )["request_hash"],
             provider_response_hash=captured["content_hash"],
             evidence=evidence,
         )
@@ -1058,9 +1095,7 @@ def _build_live_shaped_failed_media(
     worker = ProductionWorkflowWorker(
         session_factory=factory,
         worker_id=f"timing-recovery-failure-{workflow.id}",
-        handlers=build_default_stage_handler_registry(
-            post_readiness_gateway=gateway
-        ),
+        handlers=build_default_stage_handler_registry(post_readiness_gateway=gateway),
     )
     with factory() as session:
         media_event_id = session.scalar(
@@ -1108,9 +1143,7 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
             )
         )
         assert reservation is not None
-        MR1MonthlyBudgetAuthority(submitted).mark_submitted(
-            reservation.reservation_ref
-        )
+        MR1MonthlyBudgetAuthority(submitted).mark_submitted(reservation.reservation_ref)
         submitted.commit()
     with factory() as before:
         run = before.get(ProductionWorkflowRun, workflow_id)
@@ -1166,7 +1199,9 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         assert not (effect_dir / "elevenlabs-narration-receipt.json").exists()
         assert (
             before.scalar(
-                select(func.count()).select_from(V2ProductionEffectLedger).where(
+                select(func.count())
+                .select_from(V2ProductionEffectLedger)
+                .where(
                     V2ProductionEffectLedger.workflow_run_id == workflow_id,
                     V2ProductionEffectLedger.stage.in_(("RENDER", "QC", "ARCHIVE")),
                 )
@@ -1175,7 +1210,9 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         )
         assert (
             before.scalar(
-                select(func.count()).select_from(WorkflowCommandReceipt).where(
+                select(func.count())
+                .select_from(WorkflowCommandReceipt)
+                .where(
                     WorkflowCommandReceipt.workflow_run_id == workflow_id,
                     WorkflowCommandReceipt.stage.in_(
                         ("MEDIA", "RENDER", "QC", "ARCHIVE", "FINALIZE")
@@ -1219,9 +1256,7 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
     response_journal = _load_json(
         effect_dir / "elevenlabs-forced-alignment-response-journal.json"
     )
-    recovered_narration = _load_json(
-        effect_dir / "elevenlabs-narration-receipt.json"
-    )
+    recovered_narration = _load_json(effect_dir / "elevenlabs-narration-receipt.json")
     assert response_journal["capture"]["secret_values_exposed"] is False
     assert recovered_narration["alignment_method"] == (
         "ELEVENLABS_FORCED_ALIGNMENT_RECOVERY"
@@ -1231,6 +1266,23 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         "provider_call_count": 1,
         "tts_retry_count": 0,
     }
+    alignment_audit = recovered_narration["alignment_audit"]
+    assert alignment_audit["exact_raw_character_sequence"] is True
+    assert alignment_audit["exact_word_token_coverage"] is True
+    assert alignment_audit["provider_zero_duration_character_count"] > 0
+    assert alignment_audit["zero_duration_character_timing_synthesized"] is False
+    timing_metadata = recovered_narration["timing_seed"]["response_metadata"]
+    assert timing_metadata["alignment_audit"] == alignment_audit
+    assert (
+        len(timing_metadata["caption_timed_words"])
+        == alignment_audit["canonical_spoken_token_count"]
+    )
+    assert len(
+        recovered_narration["timing_seed"]["normalized_character_alignment"]
+    ) == (
+        alignment_audit["raw_character_count"]
+        - alignment_audit["provider_zero_duration_character_count"]
+    )
     for expected_path in (
         "elevenlabs-forced-alignment-request-journal.json",
         "elevenlabs-forced-alignment-response-journal.json",
@@ -1256,9 +1308,7 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         dead_letter = check.scalar(
             select(DeadLetterJob).where(DeadLetterJob.domain_event_id == event.id)
         )
-        authority = check.get(
-            V2NarrationTimingRecoveryAuthority, result.authority_id
-        )
+        authority = check.get(V2NarrationTimingRecoveryAuthority, result.authority_id)
         budget = check.scalar(
             select(MR1MonthlyBudgetReservation).where(
                 MR1MonthlyBudgetReservation.run_id == workflow_id
@@ -1280,8 +1330,9 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         assert authority.max_forced_alignment_submissions == 1
         assert authority.budget_reservation_id == budget.id
         assert authority.budget_reservation_ref == budget.reservation_ref
-        assert authority.budget_authority_hash == (
-            budget.capacity_evidence_json["content_hash"]
+        assert (
+            authority.budget_authority_hash
+            == (budget.capacity_evidence_json["content_hash"])
         )
         assert (
             budget.id,
@@ -1300,11 +1351,13 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         assert receipt.provider_call_count == 1
         assert receipt.tts_retry_count == 0
         assert receipt.canonical_media_timeline_hash == ledger.result_hash
-        assert receipt.forced_alignment_provider_response_hash == (
-            response_journal["capture"]["content_hash"]
+        assert (
+            receipt.forced_alignment_provider_response_hash
+            == (response_journal["capture"]["content_hash"])
         )
-        assert receipt.forced_alignment_provider_response_hash != (
-            response_journal["content_hash"]
+        assert (
+            receipt.forced_alignment_provider_response_hash
+            != (response_journal["content_hash"])
         )
         assert media_receipt.effect_state == "RECONCILED"
         assert media_receipt.result_hash == ledger.result_hash
@@ -1331,7 +1384,9 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         ) == history
         assert (
             check.scalar(
-                select(func.count()).select_from(ProviderAttempt).where(
+                select(func.count())
+                .select_from(ProviderAttempt)
+                .where(
                     ProviderAttempt.target_id.in_([workflow_id, run.video_project_id])
                 )
             )
@@ -1362,7 +1417,9 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         assert render_events[0].delivered_at is None
         assert (
             check.scalar(
-                select(func.count()).select_from(V2ProductionEffectLedger).where(
+                select(func.count())
+                .select_from(V2ProductionEffectLedger)
+                .where(
                     V2ProductionEffectLedger.workflow_run_id == workflow_id,
                     V2ProductionEffectLedger.stage.in_(("RENDER", "QC", "ARCHIVE")),
                 )

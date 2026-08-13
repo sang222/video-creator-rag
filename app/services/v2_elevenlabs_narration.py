@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from decimal import Decimal
+from itertools import combinations
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -266,17 +267,16 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
                         V2ProductionEffectLedger.id == ledger_id
                     )
                 )
-                recovery_journal = dict(
-                    ledger.effect_journal or {}
-                ) if ledger is not None else {}
+                recovery_journal = (
+                    dict(ledger.effect_journal or {}) if ledger is not None else {}
+                )
                 if ledger is not None and ledger.state == "VERIFIED":
                     if (
                         ledger.workflow_run_id != workflow_run_id
                         or ledger.result_type
                         != "V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE"
                         or ledger.result_hash is None
-                        or recovery_journal.get("timeline_hash")
-                        != ledger.result_hash
+                        or recovery_journal.get("timeline_hash") != ledger.result_hash
                         or (ledger.authority_refs or {}).get(
                             "canonical_media_timeline_hash"
                         )
@@ -296,9 +296,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
                         or recovery_journal.get("provider_call_count") != 2
                         or recovery_journal.get("tts_provider_call_count") != 1
                         or recovery_journal.get("tts_retry_count") != 0
-                        or recovery_journal.get(
-                            "forced_alignment_provider_call_count"
-                        )
+                        or recovery_journal.get("forced_alignment_provider_call_count")
                         != 1
                     ):
                         raise ValidationFailureError(
@@ -322,9 +320,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             with self._session_factory() as session:
                 persisted_project = session.get(VideoProject, project.id)
                 if persisted_project is None:
-                    raise ValidationFailureError(
-                        "V2_CAPTION_SIDECAR_PROJECT_REQUIRED"
-                    )
+                    raise ValidationFailureError("V2_CAPTION_SIDECAR_PROJECT_REQUIRED")
                 sidecar = _persist_sidecar_artifacts(
                     session=session,
                     project=persisted_project,
@@ -432,7 +428,9 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             raise ValidationFailureError("V2_ELEVENLABS_APPROVED_SCRIPT_REQUIRED")
         output = effect_dir / "elevenlabs-final-narration.mp3"
         request_path = effect_dir / "elevenlabs-request-journal.json"
-        provider_response_path = effect_dir / "elevenlabs-provider-response-journal.json"
+        provider_response_path = (
+            effect_dir / "elevenlabs-provider-response-journal.json"
+        )
         receipt_path = effect_dir / "elevenlabs-narration-receipt.json"
         identity = {
             "schema_version": "vcos.v2-elevenlabs-request.v1",
@@ -735,8 +733,14 @@ def _persist_sidecar_artifacts(
         content=timed_words_content,
         source_manifest={
             "items": [
-                {"type": "transcript", "artifact_version_id": str(transcript_version.id)},
-                {"type": "elevenlabs_timing_seed", "content_hash": timing_seed.content_hash},
+                {
+                    "type": "transcript",
+                    "artifact_version_id": str(transcript_version.id),
+                },
+                {
+                    "type": "elevenlabs_timing_seed",
+                    "content_hash": timing_seed.content_hash,
+                },
             ]
         },
     )
@@ -766,8 +770,14 @@ def _persist_sidecar_artifacts(
         content=caption_content,
         source_manifest={
             "items": [
-                {"type": "timed_words", "artifact_version_id": str(timed_words_version.id)},
-                {"type": "transcript", "artifact_version_id": str(transcript_version.id)},
+                {
+                    "type": "timed_words",
+                    "artifact_version_id": str(timed_words_version.id),
+                },
+                {
+                    "type": "transcript",
+                    "artifact_version_id": str(transcript_version.id),
+                },
             ]
         },
     )
@@ -779,7 +789,9 @@ def _persist_sidecar_artifacts(
         caption_ref=f"artifact-version://{caption_version.id}",
     )
     if qc_content["status"] != "PASS":
-        raise ValidationFailureError("SUBTITLE_QC_FAILED:" + ",".join(qc_content["reason_codes"]))
+        raise ValidationFailureError(
+            "SUBTITLE_QC_FAILED:" + ",".join(qc_content["reason_codes"])
+        )
     qc_version = _ensure_sidecar_artifact_version(
         session=session,
         project=project,
@@ -789,7 +801,10 @@ def _persist_sidecar_artifacts(
         source_manifest={
             "items": [
                 {"type": "caption_srt", "artifact_version_id": str(caption_version.id)},
-                {"type": "timed_words", "artifact_version_id": str(timed_words_version.id)},
+                {
+                    "type": "timed_words",
+                    "artifact_version_id": str(timed_words_version.id),
+                },
             ]
         },
     )
@@ -821,8 +836,70 @@ def _timed_words_from_seed(
     seed: NarrationTimingSeed,
     transcript: str,
 ) -> list[dict[str, Any]]:
-    characters = sorted(seed.normalized_character_alignment, key=lambda item: item.character_index)
-    if not characters or [item.character_index for item in characters] != list(range(len(characters))):
+    if seed.provider_key == "elevenlabs_forced_alignment_recovery":
+        metadata = dict(seed.response_metadata or {})
+        audit = metadata.get("alignment_audit")
+        raw_words = metadata.get("caption_timed_words")
+        canonical_words = [match.group() for match in re.finditer(r"\S+", transcript)]
+        if (
+            not isinstance(audit, dict)
+            or audit.get("exact_raw_character_sequence") is not True
+            or audit.get("exact_word_token_coverage") is not True
+            or audit.get("zero_duration_character_timing_synthesized") is not False
+            or audit.get("caption_timing_source")
+            != "ELEVENLABS_FORCED_ALIGNMENT_WORD_BOUNDARIES"
+            or not isinstance(raw_words, list)
+            or len(raw_words) != len(canonical_words)
+            or audit.get("provider_word_count") != len(raw_words)
+            or audit.get("canonical_spoken_token_count") != len(raw_words)
+        ):
+            raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
+        words: list[dict[str, Any]] = []
+        previous_end = -1
+        for index, (raw, canonical_text) in enumerate(
+            zip(raw_words, canonical_words, strict=True), start=1
+        ):
+            if not isinstance(raw, dict):
+                raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
+            try:
+                raw_index = int(raw["index"])
+                start_ms = int(raw["start_ms"])
+                end_ms = int(raw["end_ms"])
+            except (KeyError, TypeError, ValueError):
+                raise ValidationFailureError(
+                    "CAPTION_SIDECAR_TIMED_WORDS_INVALID"
+                ) from None
+            if (
+                raw_index != index
+                or raw.get("text") != canonical_text
+                or not isinstance(raw.get("provider_word_id"), str)
+                or not raw["provider_word_id"]
+                or not isinstance(raw.get("source_spoken_token_ids"), list)
+                or len(raw["source_spoken_token_ids"]) != 1
+                or start_ms < previous_end
+                or end_ms <= start_ms
+                or end_ms > seed.audio_duration_ms
+            ):
+                raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
+            words.append(
+                {
+                    "index": index,
+                    "text": canonical_text,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                }
+            )
+            previous_end = end_ms
+        if not words:
+            raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_MISSING")
+        return words
+
+    characters = sorted(
+        seed.normalized_character_alignment, key=lambda item: item.character_index
+    )
+    if not characters or [item.character_index for item in characters] != list(
+        range(len(characters))
+    ):
         raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
     reconstructed = "".join(item.character for item in characters)
     if reconstructed != transcript:
@@ -832,7 +909,11 @@ def _timed_words_from_seed(
     for index, match in enumerate(re.finditer(r"\S+", reconstructed), start=1):
         span = characters[match.start() : match.end()]
         start_ms, end_ms = span[0].start_ms, span[-1].end_ms
-        if start_ms < previous_end or end_ms <= start_ms or end_ms > seed.audio_duration_ms:
+        if (
+            start_ms < previous_end
+            or end_ms <= start_ms
+            or end_ms > seed.audio_duration_ms
+        ):
             raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
         words.append(
             {
@@ -906,7 +987,102 @@ def _build_srt_cues(words: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
             cues.pop()
     for index, cue in enumerate(cues, start=1):
         cue["index"] = index
+    return _repair_srt_reading_speed(cues, words)
+
+
+def _repair_srt_reading_speed(
+    cues: list[dict[str, Any]], words: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Repartition only an over-fast cue and its predecessor.
+
+    Boundaries move only across existing provider-timed words.  No timestamp is
+    changed or synthesized.  If the local window has no policy-valid
+    repartition, leave it unchanged so SubtitleQC remains blocking.
+    """
+
+    by_index = {int(word["index"]): word for word in words}
+    position = 1
+    while position < len(cues):
+        current = cues[position]
+        if _cue_cps(current) <= 20:
+            position += 1
+            continue
+        previous = cues[position - 1]
+        window = [
+            by_index[index]
+            for index in range(
+                int(previous["word_start_index"]),
+                int(current["word_end_index"]) + 1,
+            )
+        ]
+        old_boundary = (
+            int(previous["word_end_index"]) - int(previous["word_start_index"]) + 1
+        )
+        replacement: list[dict[str, Any]] | None = None
+        # Prefer retaining two cues.  A third cue is allowed only when moving a
+        # single old boundary cannot satisfy the unchanged QC policy.
+        for part_count in (2, 3):
+            candidates: list[
+                tuple[tuple[int, tuple[int, ...]], list[dict[str, Any]]]
+            ] = []
+            for splits in combinations(range(1, len(window)), part_count - 1):
+                boundaries = (0, *splits, len(window))
+                groups = [
+                    window[boundaries[index] : boundaries[index + 1]]
+                    for index in range(part_count)
+                ]
+                if not all(_srt_group_qc_valid(group) for group in groups):
+                    continue
+                score = (
+                    sum(abs(split - old_boundary) for split in splits),
+                    splits,
+                )
+                candidates.append(
+                    (score, [_cue_from_words(group, index=0) for group in groups])
+                )
+            if candidates:
+                replacement = min(candidates, key=lambda item: item[0])[1]
+                break
+        if replacement is None:
+            position += 1
+            continue
+        cues[position - 1 : position + 1] = replacement
+        position = max(position - 1, 1)
+    for index, cue in enumerate(cues, start=1):
+        cue["index"] = index
     return cues
+
+
+def _srt_group_qc_valid(group: Sequence[dict[str, Any]]) -> bool:
+    if not group:
+        return False
+    text = " ".join(str(word["text"]) for word in group)
+    duration_ms = int(group[-1]["end_ms"]) - int(group[0]["start_ms"])
+    return bool(
+        800 <= duration_ms <= 6_000
+        and len(text) <= 84
+        and _subtitle_lines_if_valid(text) is not None
+        and len(text) / (duration_ms / 1_000) <= 20
+    )
+
+
+def _cue_from_words(group: Sequence[dict[str, Any]], *, index: int) -> dict[str, Any]:
+    text = " ".join(str(word["text"]) for word in group)
+    return {
+        "index": index,
+        "start_ms": int(group[0]["start_ms"]),
+        "end_ms": int(group[-1]["end_ms"]),
+        "lines": _subtitle_lines(text),
+        "word_start_index": int(group[0]["index"]),
+        "word_end_index": int(group[-1]["index"]),
+    }
+
+
+def _cue_cps(cue: dict[str, Any]) -> float:
+    duration_ms = int(cue["end_ms"]) - int(cue["start_ms"])
+    return len(" ".join(str(line) for line in cue["lines"])) / max(
+        duration_ms / 1_000, 0.001
+    )
 
 
 def _subtitle_lines(text: str) -> list[str]:
@@ -931,11 +1107,14 @@ def _subtitle_lines_if_valid(text: str) -> list[str] | None:
 
 
 def _render_srt(cues: Sequence[dict[str, Any]]) -> str:
-    return "\n\n".join(
-        f"{cue['index']}\n{_srt_timestamp(cue['start_ms'])} --> {_srt_timestamp(cue['end_ms'])}\n"
-        + "\n".join(cue["lines"])
-        for cue in cues
-    ) + "\n"
+    return (
+        "\n\n".join(
+            f"{cue['index']}\n{_srt_timestamp(cue['start_ms'])} --> {_srt_timestamp(cue['end_ms'])}\n"
+            + "\n".join(cue["lines"])
+            for cue in cues
+        )
+        + "\n"
+    )
 
 
 def _srt_timestamp(milliseconds: int) -> str:
