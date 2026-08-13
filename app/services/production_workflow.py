@@ -596,7 +596,7 @@ class GatewayBackedPostReadinessStageHandler:
                 retry_eligible=False,
             )
 
-        _require_gateway_execution_authority(context)
+        _require_gateway_execution_authority(context, stage=self.stage)
         context.heartbeat()
         if self.stage == ProductionWorkflowStage.MEDIA:
             result = self.gateway.produce_media(context)
@@ -1112,6 +1112,8 @@ def _require_production_gateway(
 
 def _require_gateway_execution_authority(
     context: WorkflowStageContext,
+    *,
+    stage: ProductionWorkflowStage,
 ) -> None:
     """Revalidate the exact provider/budget authorization before each effect."""
 
@@ -1193,12 +1195,43 @@ def _require_gateway_execution_authority(
                 incident_type="INTEGRITY_MISMATCH",
                 retry_eligible=False,
             )
-    if context.event.attempt_count > 1:
+    if (
+        context.event.attempt_count > 1
+        and _stage_requires_package_bound_retry_authority(stage)
+    ):
         _require_package_bound_retry_authority(
             attempt_count=context.event.attempt_count,
             provider_content=provider_content,
             budget_content=budget_content,
         )
+
+
+def _stage_requires_package_bound_retry_authority(
+    stage: ProductionWorkflowStage,
+) -> bool:
+    """Keep provider at-most-once policy separate from local reconciliation.
+
+    MEDIA and ARCHIVE can cross external provider boundaries, so every retry
+    remains subject to the immutable package/provider attempt ceiling. RENDER
+    and QC are code-pinned, zero-cost local effects with their own durable
+    effect ledgers, while FINALIZE is a database-only projection. Their
+    bounded retries are governed by the exact outbox event policy instead.
+    """
+
+    if stage in {
+        ProductionWorkflowStage.MEDIA,
+        ProductionWorkflowStage.ARCHIVE,
+    }:
+        return True
+    if stage in {
+        ProductionWorkflowStage.RENDER,
+        ProductionWorkflowStage.QC,
+        ProductionWorkflowStage.FINALIZE,
+    }:
+        return False
+    raise ProductionWorkflowCoordinator._integrity_error(
+        "WORKFLOW_POST_READINESS_RETRY_STAGE_INVALID"
+    )
 
 
 def _require_package_bound_retry_authority(
@@ -1462,18 +1495,12 @@ def _final_review_destination_projection(
                 "controlled_recovery_authority_hash": lineage.get(
                     "controlled_recovery_authority_hash"
                 ),
-                "settlement_authority_id": lineage.get(
-                    "settlement_authority_id"
-                ),
-                "settlement_authority_hash": lineage.get(
-                    "settlement_authority_hash"
-                ),
+                "settlement_authority_id": lineage.get("settlement_authority_id"),
+                "settlement_authority_hash": lineage.get("settlement_authority_hash"),
                 "settlement_qualification_run_id": lineage.get(
                     "settlement_qualification_run_id"
                 ),
-                "settlement_provenance_hash": lineage.get(
-                    "settlement_provenance_hash"
-                ),
+                "settlement_provenance_hash": lineage.get("settlement_provenance_hash"),
             }
         )
     return result

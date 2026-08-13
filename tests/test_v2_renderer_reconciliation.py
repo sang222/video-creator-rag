@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +26,10 @@ from app.services.native_ffmpeg_renderer import (
 )
 from app.services.native_media_qc import NativeMediaQC
 from app.services.native_render_plan import stable_hash
+from app.services.production_workflow import (
+    WorkflowStageError,
+    _stage_requires_package_bound_retry_authority,
+)
 from app.services.v2_native_effects import (
     V2_ELEVENLABS_NARRATION_STRATEGY,
     V2_LOCAL_ADAPTER_KEY,
@@ -33,7 +38,10 @@ from app.services.v2_native_effects import (
     V2LocalNativeProductionAdapter,
     _semantic_overlays_from_visual_plan,
 )
-from app.services.v2_provider_production import V2AuthorizedAdapterOperation
+from app.services.v2_provider_production import (
+    V2AuthorizedAdapterOperation,
+    _require_real_provider_operation,
+)
 
 
 _HASH = "a" * 64
@@ -305,6 +313,98 @@ def test_real_long_form_render_requires_elevenlabs_and_never_local_fallback() ->
             match="V2_REAL_RENDER_ELEVENLABS_NARRATION_REQUIRED",
         ):
             adapter._validate_operation(context, _real_render_operation(forbidden))
+
+
+@pytest.mark.parametrize(
+    ("stage", "mode"),
+    [
+        (ProductionWorkflowStage.RENDER, "NATIVE_FFMPEG_LOCAL"),
+        (ProductionWorkflowStage.QC, "AUTOMATED_NATIVE_QC"),
+    ],
+)
+def test_real_local_stages_require_zero_cost_and_no_external_provider_details(
+    stage: ProductionWorkflowStage,
+    mode: str,
+) -> None:
+    operation = V2AuthorizedAdapterOperation(
+        operation_id=f"local-{stage.value.casefold()}",
+        stage=stage,
+        adapter_key=V2_LOCAL_ADAPTER_KEY,
+        paid_provider_call=False,
+        max_cost_usd=Decimal("0"),
+        execution_mode="REAL_LONG_FORM_PRODUCTION",
+        parameters={
+            "mode": mode,
+            "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+        },
+    )
+
+    _require_real_provider_operation(operation)
+
+    with pytest.raises(
+        ValidationFailureError,
+        match="V2_REAL_LOCAL_PROVIDER_EXECUTION_DETAILS_FORBIDDEN",
+    ):
+        _require_real_provider_operation(
+            replace(
+                operation,
+                parameters={
+                    **operation.parameters,
+                    "provider_execution": {"provider": "unexpected-external-provider"},
+                },
+            )
+        )
+    with pytest.raises(
+        ValidationFailureError,
+        match="V2_REAL_LOCAL_STAGE_COST_INVALID",
+    ):
+        _require_real_provider_operation(
+            replace(
+                operation,
+                paid_provider_call=True,
+                max_cost_usd=Decimal("1"),
+            )
+        )
+
+
+def test_real_external_stage_still_requires_provider_execution_authority() -> None:
+    operation = V2AuthorizedAdapterOperation(
+        operation_id="elevenlabs-media",
+        stage=ProductionWorkflowStage.MEDIA,
+        adapter_key="v2-elevenlabs-narration",
+        paid_provider_call=True,
+        max_cost_usd=Decimal("1"),
+        execution_mode="REAL_LONG_FORM_PRODUCTION",
+        parameters={
+            "mode": "ELEVENLABS_FINAL_NARRATION",
+            "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+        },
+    )
+
+    with pytest.raises(
+        ValidationFailureError,
+        match="V2_REAL_PROVIDER_EXECUTION_DETAILS_REQUIRED",
+    ):
+        _require_real_provider_operation(operation)
+
+
+def test_only_external_post_readiness_stages_use_package_retry_ceiling() -> None:
+    assert _stage_requires_package_bound_retry_authority(ProductionWorkflowStage.MEDIA)
+    assert _stage_requires_package_bound_retry_authority(
+        ProductionWorkflowStage.ARCHIVE
+    )
+    for stage in (
+        ProductionWorkflowStage.RENDER,
+        ProductionWorkflowStage.QC,
+        ProductionWorkflowStage.FINALIZE,
+    ):
+        assert not _stage_requires_package_bound_retry_authority(stage)
+
+    with pytest.raises(
+        WorkflowStageError,
+        match="WORKFLOW_POST_READINESS_RETRY_STAGE_INVALID",
+    ):
+        _stage_requires_package_bound_retry_authority(ProductionWorkflowStage.READINESS)
 
 
 def test_elevenlabs_audio_authority_is_required_and_checksum_bound(

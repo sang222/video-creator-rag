@@ -673,7 +673,20 @@ def _require_real_provider_operation(operation: V2AuthorizedAdapterOperation) ->
     is treated as a substitute for either external authority.
     """
 
+    external_stage = operation.stage in {
+        ProductionWorkflowStage.MEDIA,
+        ProductionWorkflowStage.ARCHIVE,
+    }
     details = operation.parameters.get("provider_execution")
+    if not external_stage:
+        if "provider_execution" in operation.parameters:
+            raise ValidationFailureError(
+                "V2_REAL_LOCAL_PROVIDER_EXECUTION_DETAILS_FORBIDDEN"
+            )
+        if operation.paid_provider_call or operation.max_cost_usd != 0:
+            raise ValidationFailureError("V2_REAL_LOCAL_STAGE_COST_INVALID")
+        return
+
     if not isinstance(details, dict):
         raise ValidationFailureError("V2_REAL_PROVIDER_EXECUTION_DETAILS_REQUIRED")
     attempt_limit = details.get("attempt_limit")
@@ -728,8 +741,6 @@ def _require_real_provider_operation(operation: V2AuthorizedAdapterOperation) ->
             or operation.max_cost_usd != 0
         ):
             raise ValidationFailureError("V2_REAL_GOOGLE_DRIVE_OPERATION_INVALID")
-    elif operation.paid_provider_call or operation.max_cost_usd != 0:
-        raise ValidationFailureError("V2_REAL_LOCAL_STAGE_COST_INVALID")
 
 
 def _authorized_adapter_operation(
