@@ -42,7 +42,12 @@ from app.services.v2_narration_timing_recovery import (
     ORIGINAL_FAILURE as V2_TIMING_RECOVERY_FAILURE,
     V2NarrationTimingRecoveryService,
 )
+from app.services.v2_drive_archive_property_limit_recovery import (
+    ORIGINAL_FAILURE as V2_DRIVE_RECOVERY_FAILURE,
+    V2DriveArchivePropertyLimitRecoveryService,
+)
 from app.db.models.v2_effect import (
+    V2DriveArchivePropertyLimitRecoveryAuthority,
     V2NarrationTimingRecoveryAuthority,
     V2ProductionEffectLedger,
 )
@@ -232,15 +237,32 @@ class ScopedReplacementContinuationRunner:
             self.session.expire_all()
             refreshed = self.session.get(ProductionWorkflowRun, workflow.id)
             workflow = refreshed or workflow
-        if workflow is not None and workflow.state not in {
-            "PAUSED_AFTER_NATIVE_RENDER",
-            "FINAL_REVIEW_READY",
-            "BLOCKED",
-            "FAILED_TERMINAL",
-            "DEAD_LETTERED",
-            "CANCELED",
-            "SUPERSEDED",
-        } and not timing_recovered:
+        archive_recovered = False
+        if workflow is not None and self._is_drive_archive_recovery_candidate(
+            workflow.id
+        ):
+            V2DriveArchivePropertyLimitRecoveryService(self.session).recover(
+                workflow.id, self.recovery_actor
+            )
+            archive_recovered = True
+            self.session.expire_all()
+            refreshed = self.session.get(ProductionWorkflowRun, workflow.id)
+            workflow = refreshed or workflow
+        if (
+            workflow is not None
+            and workflow.state
+            not in {
+                "PAUSED_AFTER_NATIVE_RENDER",
+                "FINAL_REVIEW_READY",
+                "BLOCKED",
+                "FAILED_TERMINAL",
+                "DEAD_LETTERED",
+                "CANCELED",
+                "SUPERSEDED",
+            }
+            and not timing_recovered
+            and not archive_recovered
+        ):
             worker_result = self._run_one_scoped_event(workflow_id=workflow.id)
             self.session.expire_all()
             refreshed = self.session.get(ProductionWorkflowRun, workflow.id)
@@ -268,9 +290,7 @@ class ScopedReplacementContinuationRunner:
             select(V2ProductionEffectLedger).where(
                 V2ProductionEffectLedger.workflow_run_id == workflow_id,
                 V2ProductionEffectLedger.stage == "MEDIA",
-                V2ProductionEffectLedger.state.in_(
-                    {"FAILED_UNCERTAIN", "VERIFIED"}
-                ),
+                V2ProductionEffectLedger.state.in_({"FAILED_UNCERTAIN", "VERIFIED"}),
                 V2ProductionEffectLedger.effect_invocation_count == 1,
                 V2ProductionEffectLedger.adapter_key == "v2-elevenlabs-narration",
             )
@@ -296,10 +316,8 @@ class ScopedReplacementContinuationRunner:
         # unrelated MEDIA result.
         authority = self.session.scalar(
             select(V2NarrationTimingRecoveryAuthority).where(
-                V2NarrationTimingRecoveryAuthority.workflow_run_id
-                == workflow_id,
-                V2NarrationTimingRecoveryAuthority.media_effect_ledger_id
-                == ledger.id,
+                V2NarrationTimingRecoveryAuthority.workflow_run_id == workflow_id,
+                V2NarrationTimingRecoveryAuthority.media_effect_ledger_id == ledger.id,
             )
         )
         existing_receipt = self.session.scalar(
@@ -311,19 +329,74 @@ class ScopedReplacementContinuationRunner:
         return bool(
             authority is not None
             and existing_receipt is None
-            and ledger.result_type
-            == "V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE"
+            and ledger.result_type == "V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE"
             and ledger.result_hash is not None
             and ledger.completed_at is not None
             and journal.get("timeline_hash") == ledger.result_hash
-            and journal.get("timing_recovery_authority_id")
-            == str(authority.id)
+            and journal.get("timing_recovery_authority_id") == str(authority.id)
             and journal.get("timing_recovery_authority_hash")
             == authority.authority_hash
             and journal.get("provider_call_count") == 2
             and journal.get("tts_provider_call_count") == 1
             and journal.get("tts_retry_count") == 0
             and journal.get("forced_alignment_provider_call_count") == 1
+        )
+
+    def _is_drive_archive_recovery_candidate(self, workflow_id: uuid.UUID) -> bool:
+        workflow = self.session.get(ProductionWorkflowRun, workflow_id)
+        if (
+            workflow is None
+            or workflow.state != "BLOCKED"
+            or workflow.current_stage != "ARCHIVE"
+        ):
+            return False
+        ledger = self.session.scalar(
+            select(V2ProductionEffectLedger).where(
+                V2ProductionEffectLedger.workflow_run_id == workflow_id,
+                V2ProductionEffectLedger.stage == "ARCHIVE",
+                V2ProductionEffectLedger.state.in_({"FAILED_UNCERTAIN", "VERIFIED"}),
+                V2ProductionEffectLedger.effect_invocation_count == 1,
+                V2ProductionEffectLedger.adapter_key == "v2-google-drive-remote",
+            )
+        )
+        if ledger is None:
+            return False
+        event = self.session.scalar(
+            select(DomainEvent).where(
+                DomainEvent.workflow_run_id == workflow_id,
+                DomainEvent.command_id == ledger.command_id,
+                DomainEvent.dead_lettered_at.is_not(None),
+                DomainEvent.last_error_code == V2_DRIVE_RECOVERY_FAILURE,
+            )
+        )
+        if event is None:
+            return False
+        if ledger.state == "FAILED_UNCERTAIN":
+            return True
+
+        # A crash may leave the exact archive ledger VERIFIED after the
+        # recovery effect transaction but before its workflow receipt settles.
+        authority = self.session.scalar(
+            select(V2DriveArchivePropertyLimitRecoveryAuthority).where(
+                V2DriveArchivePropertyLimitRecoveryAuthority.workflow_run_id
+                == workflow_id,
+                V2DriveArchivePropertyLimitRecoveryAuthority.archive_effect_ledger_id
+                == ledger.id,
+                V2DriveArchivePropertyLimitRecoveryAuthority.archive_domain_event_id
+                == event.id,
+            )
+        )
+        existing_receipt = self.session.scalar(
+            select(WorkflowCommandReceipt.id).where(
+                WorkflowCommandReceipt.domain_event_id == event.id
+            )
+        )
+        return bool(
+            authority is not None
+            and existing_receipt is None
+            and ledger.result_type == "V2_VERIFIED_GOOGLE_DRIVE_REMOTE_ARCHIVE"
+            and ledger.result_hash is not None
+            and ledger.completed_at is not None
         )
 
     def _locked_qualification(self, authority_id: uuid.UUID) -> ScriptQualificationRun:

@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 
-REQUIRED_RUNTIME_DB_REVISION = "0076_v2_timing_recovery"
+REQUIRED_RUNTIME_DB_REVISION = "0077_v2_drive_recovery"
 RUNTIME_DB_REVISION_BLOCKED = "RUNTIME_DB_REVISION_BELOW_CONTROLLED_RECOVERY_AUTHORITY"
 
 

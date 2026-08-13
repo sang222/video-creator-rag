@@ -279,6 +279,8 @@ from app.db.models.production_publish import (
     SeriesEpisodePublication,
 )
 from app.db.models.v2_effect import (
+    V2DriveArchivePropertyLimitRecoveryAuthority,
+    V2DriveArchivePropertyLimitRecoveryReceipt,
     V2NarrationTimingRecoveryAuthority,
     V2NarrationTimingRecoveryReceipt,
     V2ProductionEffectLedger,
@@ -504,6 +506,8 @@ __all__ = [
     "FinalReviewCandidate",
     "FinalVideoDecision",
     "SeriesEpisodePublication",
+    "V2DriveArchivePropertyLimitRecoveryAuthority",
+    "V2DriveArchivePropertyLimitRecoveryReceipt",
     "V2NarrationTimingRecoveryAuthority",
     "V2NarrationTimingRecoveryReceipt",
     "V2ProductionEffectLedger",

@@ -51,6 +51,8 @@ GOOGLE_DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 GOOGLE_DRIVE_PROVIDER_KEY = "google_drive"
 GOOGLE_DRIVE_CREDENTIAL_KEY = "media_offload_default"
 GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+GOOGLE_DRIVE_IDEMPOTENCY_PROPERTY_KEY = "vcos_idempotency_key"
+GOOGLE_DRIVE_APP_PROPERTY_MAX_BYTES = 124
 RESUMABLE_THRESHOLD_BYTES = 5 * 1024 * 1024
 DEFAULT_ALLOWED_CLEANUP_ROOTS = (
     ROOT / "var" / "tmp" / "rendering",
@@ -733,6 +735,44 @@ class GoogleDriveMediaStorageProvider:
             )
         return parent_id
 
+    def find_folder_path(
+        self, *, access_token: str, root_folder_id: str, folder_path: list[str]
+    ) -> str | None:
+        """Resolve an exact folder path with GET requests only; never create it."""
+
+        parent_id = root_folder_id
+        for folder_name in folder_path:
+            escaped_name = folder_name.replace("'", "\\'")
+            query = urllib.parse.urlencode(
+                {
+                    "q": (
+                        f"name='{escaped_name}' and "
+                        "mimeType='application/vnd.google-apps.folder' and "
+                        f"'{parent_id}' in parents and trashed=false"
+                    ),
+                    "fields": "files(id,name)",
+                    "spaces": "drive",
+                }
+            )
+            request = urlrequest.Request(
+                f"{GOOGLE_DRIVE_FILES_URL}?{query}",
+                method="GET",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            with urlrequest.urlopen(
+                request, timeout=20, context=GOOGLE_SSL_CONTEXT
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            files = (
+                payload.get("files") if isinstance(payload.get("files"), list) else []
+            )
+            if not files:
+                return None
+            if len(files) != 1:
+                raise ValidationFailureError("Google Drive folder path is ambiguous")
+            parent_id = str(files[0]["id"])
+        return parent_id
+
     def upload_file(
         self,
         *,
@@ -772,12 +812,28 @@ class GoogleDriveMediaStorageProvider:
     ) -> GoogleDriveUploadResult | None:
         """Resolve only a file created with this exact V2 archive key."""
 
-        escaped = idempotency_key.replace("'", "\\'")
+        return self.find_file_by_app_property_value(
+            access_token=access_token,
+            folder_id=folder_id,
+            property_value=_drive_idempotency_property_value(idempotency_key),
+        )
+
+    def find_file_by_app_property_value(
+        self,
+        *,
+        access_token: str,
+        folder_id: str,
+        property_value: str,
+    ) -> GoogleDriveUploadResult | None:
+        """GET one exact literal app-property value without canonicalizing it."""
+
+        escaped = property_value.replace("'", "\\'")
         query = urllib.parse.urlencode(
             {
                 "q": (
                     f"'{folder_id}' in parents and "
-                    "appProperties has { key='vcos_idempotency_key' and "
+                    "appProperties has { "
+                    f"key='{GOOGLE_DRIVE_IDEMPOTENCY_PROPERTY_KEY}' and "
                     f"value='{escaped}' }} and trashed=false"
                 ),
                 "fields": (
@@ -896,7 +952,11 @@ class GoogleDriveMediaStorageProvider:
         boundary = f"vcos-{secrets.token_hex(12)}"
         metadata = {"name": local_path.name, "parents": [folder_id]}
         if idempotency_key:
-            metadata["appProperties"] = {"vcos_idempotency_key": idempotency_key}
+            metadata["appProperties"] = {
+                GOOGLE_DRIVE_IDEMPOTENCY_PROPERTY_KEY: (
+                    _drive_idempotency_property_value(idempotency_key)
+                )
+            }
         body = b"\r\n".join(
             [
                 f"--{boundary}".encode(),
@@ -947,7 +1007,11 @@ class GoogleDriveMediaStorageProvider:
             "parents": [folder_id],
         }
         if idempotency_key:
-            metadata_body["appProperties"] = {"vcos_idempotency_key": idempotency_key}
+            metadata_body["appProperties"] = {
+                GOOGLE_DRIVE_IDEMPOTENCY_PROPERTY_KEY: (
+                    _drive_idempotency_property_value(idempotency_key)
+                )
+            }
         metadata = json.dumps(metadata_body).encode("utf-8")
         query = urllib.parse.urlencode(
             {
@@ -1741,6 +1805,16 @@ def _hash_state(state: str) -> str:
 
 def _hash_path(path: Path) -> str:
     return hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()
+
+
+def _drive_idempotency_property_value(idempotency_key: str) -> str:
+    """Fit a stable idempotency identity within Drive's 124-byte property cap."""
+
+    key_bytes = GOOGLE_DRIVE_IDEMPOTENCY_PROPERTY_KEY.encode("utf-8")
+    value_bytes = idempotency_key.encode("utf-8")
+    if len(key_bytes) + len(value_bytes) <= GOOGLE_DRIVE_APP_PROPERTY_MAX_BYTES:
+        return idempotency_key
+    return f"sha256:{hashlib.sha256(value_bytes).hexdigest()}"
 
 
 def _sha256_file(path: Path) -> str:
