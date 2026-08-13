@@ -635,37 +635,64 @@ class ProductionPackageService:
     ) -> None:
         """Reject forged/stale readiness projections before gate evaluation."""
 
-        envelope = envelope_version.content if isinstance(envelope_version.content, dict) else {}
+        envelope = (
+            envelope_version.content
+            if isinstance(envelope_version.content, dict)
+            else {}
+        )
         if envelope.get("execution_mode") != "REAL_LONG_FORM_PRODUCTION":
             return
         qualification = next(
-            (item for item in (envelope.get("gate_receipts") or []) if isinstance(item, dict) and item.get("gate_key") == "script_qualification"),
+            (
+                item
+                for item in (envelope.get("gate_receipts") or [])
+                if isinstance(item, dict)
+                and item.get("gate_key") == "script_qualification"
+            ),
             None,
         )
-        if not isinstance(qualification, dict) or qualification.get("status") != "PASS" or not qualification.get("script_qualification_run_id"):
-            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_REQUIRED")
-        from app.services.script_qualification import ScriptQualificationService, script_hash
+        if (
+            not isinstance(qualification, dict)
+            or qualification.get("status") != "PASS"
+            or not qualification.get("script_qualification_run_id")
+        ):
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_REQUIRED"
+            )
+        from app.services.script_qualification import (
+            ScriptQualificationService,
+            script_hash,
+        )
 
         try:
             receipt = ScriptQualificationService(self.session).require_pass(
                 uuid.UUID(str(qualification["script_qualification_run_id"]))
             )
         except (ValueError, ValidationFailureError) as exc:
-            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_REQUIRED") from exc
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_REQUIRED"
+            ) from exc
         if (
             receipt.content_hash != qualification.get("receipt_hash")
             or receipt.script_assignment_hash != qualification.get("assignment_hash")
-            or receipt.factual_evidence_pack_hash != qualification.get("evidence_pack_hash")
+            or receipt.factual_evidence_pack_hash
+            != qualification.get("evidence_pack_hash")
             or (receipt.content or {}).get("runtime_contract_hash")
             != qualification.get("runtime_contract_hash")
             or (receipt.content or {}).get("assignment_resolution_hash")
             != qualification.get("assignment_resolution_hash")
         ):
-            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_RECEIPT_STALE")
-        script = script_version.content if isinstance(script_version.content, dict) else {}
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_RECEIPT_STALE"
+            )
+        script = (
+            script_version.content if isinstance(script_version.content, dict) else {}
+        )
         narration = str(script.get("narration_text") or "")
         if not narration or script_hash(narration) != receipt.script_hash:
-            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_SCRIPT_MISMATCH")
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_SCRIPT_MISMATCH"
+            )
 
     def _package_artifact(self, project_id: uuid.UUID) -> Artifact | None:
         return self.session.scalars(
@@ -1067,13 +1094,32 @@ def _canonical_package_content(
 def _package_semantic_payload(
     content: ProductionPackageContentV2,
 ) -> dict[str, Any]:
-    """Serialize without changing hashes of pre-envelope v2 authorities."""
+    """Serialize without changing hashes of historical v2 authorities.
+
+    AI-only visual policy bindings were added after the first-video package was
+    sealed.  Pydantic supplies their nullable/default values while reading the
+    old JSON, but those keys were not part of the immutable historical hash.
+    Omit the complete empty projection exactly as we already do for the older
+    support-envelope and strategic-lineage additions.  Any non-empty visual
+    binding remains hash-significant and must pass the model's all-or-none
+    authority validation.
+    """
 
     payload = content.model_dump(mode="json")
     if content.support_envelope_ref is None:
         payload.pop("support_envelope_ref", None)
     if content.strategic_lineage is None:
         payload.pop("strategic_lineage", None)
+    if (
+        content.production_visual_policy_version is None
+        and content.production_visual_policy_ref is None
+        and content.production_visual_policy_hash is None
+        and not content.active_primary_visual_routes
+    ):
+        payload.pop("production_visual_policy_version", None)
+        payload.pop("production_visual_policy_ref", None)
+        payload.pop("production_visual_policy_hash", None)
+        payload.pop("active_primary_visual_routes", None)
     return payload
 
 

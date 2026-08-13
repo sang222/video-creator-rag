@@ -44,6 +44,7 @@ from app.services.production_workflow import (
     ProductionWorkflowCoordinator,
     semantic_hash,
 )
+from app.services.production_package import _package_semantic_payload
 from app.services.v2_narration_timing_recovery import (
     V2NarrationTimingRecoveryService,
 )
@@ -59,6 +60,28 @@ _HASH_A = "a" * 64
 _HASH_B = "b" * 64
 _HASH_C = "c" * 64
 _HASH_D = "d" * 64
+
+
+def test_historical_package_hash_omits_empty_ai_visual_projection() -> None:
+    historical = SimpleNamespace(
+        support_envelope_ref=None,
+        strategic_lineage=None,
+        production_visual_policy_version=None,
+        production_visual_policy_ref=None,
+        production_visual_policy_hash=None,
+        active_primary_visual_routes=[],
+        model_dump=lambda **_kwargs: {
+            "historical_authority": "sealed",
+            "support_envelope_ref": None,
+            "strategic_lineage": None,
+            "production_visual_policy_version": None,
+            "production_visual_policy_ref": None,
+            "production_visual_policy_hash": None,
+            "active_primary_visual_routes": [],
+        },
+    )
+
+    assert _package_semantic_payload(historical) == {"historical_authority": "sealed"}
 
 
 def _controlled_actor():
