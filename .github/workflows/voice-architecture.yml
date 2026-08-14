@@ -40,11 +40,11 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Install
-        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]" ruff
       - name: Migrate to single head
         run: |
           alembic upgrade head
-          test "$(alembic heads | awk '{print $1}')" = "0081_voice_execution_closeout"
+          test "$(alembic heads | awk '{print $1}')" = "0082_segment_replay_seed"
       - name: Voice architecture and regression tests
         run: >-
           pytest -q
@@ -53,10 +53,19 @@ jobs:
           tests/test_v2_caption_grouping.py
           tests/test_cross_modal_lineage.py
           tests/test_v2_renderer_reconciliation.py
+      - name: Lint changed voice execution runtime
+        run: >-
+          ruff check
+          app/services/voice_execution.py
+          app/services/v2_elevenlabs_narration.py
+          app/services/v2_package_readiness.py
+          app/db/models/voice_authority.py
+          tests/test_voice_execution.py
       - name: Compile checks
         run: >-
           python -m compileall -q
           app
           alembic/versions/0081_voice_execution_closeout.py
+          alembic/versions/0082_narration_segment_reconciliation_seed.py
           tests/test_voice_authority.py
           tests/test_voice_execution.py

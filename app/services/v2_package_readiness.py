@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, runtime_checkable
 
@@ -69,10 +69,11 @@ from app.services.v2_support_authority import (
     _preflight_source,
     _project_authority_hash,
     _search_intent_source,
+)
+from app.services.v2_support_authority import (
     _destination_authority as _support_destination_authority,
 )
 from app.services.workflow import ArtifactService
-
 
 V2_SUPPORT_COMPILER_VERSION = "vcos.v2-support-compiler.v2"
 _SUPPORT_TYPES = (
@@ -323,8 +324,8 @@ class V2PackageReadinessGateway:
 
     support_producer: V2TrustedSupportProducer | None = None
     package_builder: V2ProductionPackageInputBuilder | None = None
-    descriptor: PreReadinessProductionGatewayDescriptor = (
-        PreReadinessProductionGatewayDescriptor(
+    descriptor: PreReadinessProductionGatewayDescriptor = field(
+        default_factory=lambda: PreReadinessProductionGatewayDescriptor(
             gateway_id="v2-package",
             version="1.0.0",
             supported_lanes=frozenset({ProductionLane.LONG_FORM}),
@@ -1061,6 +1062,69 @@ def _decimal_text(value: Any) -> str:
     return format(parsed, "f")
 
 
+_COMBINED_REPLACEMENT_BUDGET_FIELDS = (
+    "new_tts_projected_cost_usd",
+    "forced_alignment_projected_cost_usd",
+    "ai_image_projected_cost_usd",
+    "ai_video_projected_cost_usd",
+    "other_metered_effects_projected_cost_usd",
+    "approved_ceiling_usd",
+)
+
+
+def _combined_replacement_budget_binding(
+    *,
+    envelope: V2FrozenSupportEnvelope,
+    support_envelope_hash: str,
+) -> dict[str, Any]:
+    """Bind complete component cost evidence to MEDIA without zero defaults."""
+
+    reservation = dict(envelope.zero_cost_budget.reservation_evidence or {})
+    components = reservation.get("combined_replacement_costs")
+    base = {
+        "schema_version": "vcos.combined-replacement-budget.v1",
+        "authority_ref": (
+            f"{envelope.zero_cost_budget.reservation_ref}#combined-replacement"
+        ),
+        "reservation_ref": envelope.zero_cost_budget.reservation_ref,
+        "route_budget_authority_hash": envelope.zero_cost_budget.content_hash,
+        "support_envelope_hash": support_envelope_hash,
+    }
+    if not isinstance(components, dict):
+        return {
+            **base,
+            "state": "UNAVAILABLE",
+            "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENTS_REQUIRED",
+        }
+    payload = {**base, "state": "FROZEN"}
+    for cost_field in _COMBINED_REPLACEMENT_BUDGET_FIELDS:
+        if cost_field not in components:
+            return {
+                **base,
+                "state": "UNAVAILABLE",
+                "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENT_REQUIRED",
+                "missing_component": cost_field,
+            }
+        try:
+            value = Decimal(str(components[cost_field]))
+        except (InvalidOperation, ValueError, TypeError):
+            return {
+                **base,
+                "state": "UNAVAILABLE",
+                "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENT_INVALID",
+                "invalid_component": cost_field,
+            }
+        if not value.is_finite() or value < 0:
+            return {
+                **base,
+                "state": "UNAVAILABLE",
+                "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENT_INVALID",
+                "invalid_component": cost_field,
+            }
+        payload[cost_field] = _decimal_text(value)
+    return {**payload, "authority_hash": semantic_hash(payload)}
+
+
 def _real_provider_policy(authority: _SupportAuthority) -> ChannelScopedPolicy:
     try:
         scoped = ChannelScopedPolicy.model_validate(
@@ -1294,6 +1358,14 @@ def _support_payloads(
         if authority.support_envelope is not None
         else {}
     )
+    combined_replacement_budget = (
+        _combined_replacement_budget_binding(
+            envelope=authority.support_envelope,
+            support_envelope_hash=support_envelope_hash,
+        )
+        if real_production and authority.support_envelope is not None
+        else None
+    )
     visual_rights = (
         authority.support_envelope.local_generated_card_rights
         if authority.support_envelope is not None
@@ -1409,6 +1481,9 @@ def _support_payloads(
                 "attempt_limit_per_segment": 1,
                 "idempotency_key": f"{operation_id}:elevenlabs-final-narration",
                 "estimated_cost_usd": max_cost_usd,
+                "combined_replacement_budget_authority": (
+                    combined_replacement_budget
+                ),
                 "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
                 "package_support_envelope_hash": support_envelope_hash,
             }

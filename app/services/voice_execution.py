@@ -11,17 +11,17 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import ValidationFailureError
 from app.services.config_registry import content_hash
-
 
 ELEVENLABS_CAPABILITY_PROFILE_VERSION = "vcos.elevenlabs-capabilities.2026-08-14.v2"
 
@@ -195,7 +195,7 @@ class CombinedReplacementBudget:
                 self.ai_video_projected_cost_usd,
                 self.other_metered_effects_projected_cost_usd,
             ),
-            Decimal("0"),
+            Decimal(0),
         )
 
     def require_authorized(self) -> None:
@@ -216,8 +216,63 @@ class CombinedReplacementBudget:
             ),
             "combined_replacement_projected_cost_usd": str(total),
             "approved_ceiling_usd": str(self.approved_ceiling_usd),
-            "shortfall_usd": str(max(Decimal("0"), total - self.approved_ceiling_usd)),
+            "shortfall_usd": str(max(Decimal(0), total - self.approved_ceiling_usd)),
         }
+
+
+COMBINED_REPLACEMENT_BUDGET_SCHEMA = "vcos.combined-replacement-budget.v1"
+_COMBINED_REPLACEMENT_BUDGET_FIELDS = (
+    "new_tts_projected_cost_usd",
+    "forced_alignment_projected_cost_usd",
+    "ai_image_projected_cost_usd",
+    "ai_video_projected_cost_usd",
+    "other_metered_effects_projected_cost_usd",
+    "approved_ceiling_usd",
+)
+
+
+def combined_replacement_budget_authority(
+    authority: Mapping[str, Any],
+) -> tuple[CombinedReplacementBudget, str, str]:
+    """Resolve an exact, hash-sealed cost projection before paid TTS.
+
+    Route ceilings and optional provider fields are not component cost
+    evidence.  The caller must carry this complete package-bound authority;
+    absent or malformed components are intentionally not treated as zero.
+    """
+
+    if (
+        authority.get("schema_version") != COMBINED_REPLACEMENT_BUDGET_SCHEMA
+        or authority.get("state") != "FROZEN"
+        or not isinstance(authority.get("authority_ref"), str)
+        or not authority["authority_ref"].strip()
+        or not isinstance(authority.get("authority_hash"), str)
+    ):
+        raise ValidationFailureError("COMBINED_REPLACEMENT_BUDGET_AUTHORITY_REQUIRED")
+    body = {key: authority.get(key) for key in authority if key != "authority_hash"}
+    if authority["authority_hash"] != content_hash(body):
+        raise ValidationFailureError("COMBINED_REPLACEMENT_BUDGET_AUTHORITY_MISMATCH")
+    values: list[Decimal] = []
+    for field in _COMBINED_REPLACEMENT_BUDGET_FIELDS:
+        value = authority.get(field)
+        if value is None:
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_BUDGET_COMPONENT_REQUIRED:" + field
+            )
+        try:
+            decimal = Decimal(str(value))
+        except Exception as exc:
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_BUDGET_COMPONENT_INVALID:" + field
+            ) from exc
+        if not decimal.is_finite() or decimal < 0:
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_BUDGET_COMPONENT_INVALID:" + field
+            )
+        values.append(decimal)
+    return CombinedReplacementBudget(*values), authority["authority_ref"], authority[
+        "authority_hash"
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +283,12 @@ class NarrationSeamQCReport:
     content_hash: str
 
 
-def seam_qc(*, segments: Sequence[Mapping[str, Any]]) -> NarrationSeamQCReport:
+def seam_qc(
+    *,
+    segments: Sequence[Mapping[str, Any]],
+    stitched_duration_ms: int | None = None,
+    encoder_tolerance_ms: int = 250,
+) -> NarrationSeamQCReport:
     reasons: list[str] = []
     prior_end = -1
     seen: set[int] = set()
@@ -244,11 +304,21 @@ def seam_qc(*, segments: Sequence[Mapping[str, Any]]) -> NarrationSeamQCReport:
             reasons.append("SEGMENT_TIMELINE_OVERLAP")
         seen.add(index)
         prior_end = start + duration
+    summed_duration = sum(int(item.get("duration_ms") or 0) for item in segments)
+    if stitched_duration_ms is not None and (
+        stitched_duration_ms <= 0
+        or encoder_tolerance_ms < 0
+        or abs(stitched_duration_ms - summed_duration) > encoder_tolerance_ms
+    ):
+        reasons.append("STITCHED_DURATION_OUTSIDE_ENCODER_TOLERANCE")
     state = "FAIL" if reasons else "PASS"
     body = {
         "state": state,
         "reason_codes": sorted(set(reasons)),
         "segment_count": len(segments),
+        "summed_segment_duration_ms": summed_duration,
+        "stitched_duration_ms": stitched_duration_ms,
+        "encoder_tolerance_ms": encoder_tolerance_ms,
     }
     return NarrationSeamQCReport(
         state, tuple(body["reason_codes"]), len(segments), content_hash(body)
@@ -274,7 +344,7 @@ class NarrationSegmentExecutionService:
         settings: Mapping[str, Any],
         context: Mapping[str, Any],
         estimated_cost_usd: Decimal,
-    ) -> "NarrationSegmentEffectHandle":
+    ) -> NarrationSegmentEffectHandle:
         """Return a newly submitted effect or refuse an uncertain replay.
 
         Every transition is committed independently.  Therefore a worker crash
@@ -357,10 +427,34 @@ class NarrationSegmentExecutionService:
             else:
                 effect_id = existing.id
                 if existing.state == "VERIFIED":
+                    if (
+                        existing.content_hash != content_hash(body)
+                        or existing.provider_projection_hash != projection_hash
+                        or existing.canonical_text_hash != body["canonical_text_hash"]
+                        or existing.voice_id != voice_id
+                        or existing.model_id != model_id
+                        or not existing.audio_ref
+                        or not existing.audio_checksum
+                        or not existing.duration_ms
+                        or not existing.provider_request_hash
+                        or not existing.provider_request_id
+                        or not isinstance(existing.timing_seed, dict)
+                    ):
+                        raise ValidationFailureError(
+                            "NARRATION_SEGMENT_RECONCILIATION_EVIDENCE_INVALID"
+                        )
                     return NarrationSegmentEffectHandle(
                         id=existing.id,
                         provider_effect_key=existing.provider_effect_key,
                         state=existing.state,
+                        provider_request_hash=existing.provider_request_hash,
+                        provider_request_id=existing.provider_request_id,
+                        audio_ref=existing.audio_ref,
+                        audio_checksum=existing.audio_checksum,
+                        duration_ms=existing.duration_ms,
+                        timing_seed=dict(existing.timing_seed),
+                        estimated_cost_usd=existing.estimated_cost_usd,
+                        actual_cost_usd=existing.actual_cost_usd,
                     )
                 if existing.state in {"SUBMITTED", "PROVIDER_OUTCOME_UNKNOWN"}:
                     raise ValidationFailureError("PROVIDER_OUTCOME_UNKNOWN")
@@ -401,6 +495,8 @@ class NarrationSegmentExecutionService:
         audio_ref: str,
         audio_checksum: str,
         duration_ms: int,
+        timing_seed: Mapping[str, Any],
+        actual_cost_usd: Decimal | None = None,
     ) -> None:
         from app.core.time import utc_now
         from app.db.models.voice_authority import NarrationSegmentExecution
@@ -422,6 +518,10 @@ class NarrationSegmentExecutionService:
             record.audio_ref = audio_ref
             record.audio_checksum = audio_checksum
             record.duration_ms = duration_ms
+            record.timing_seed = dict(timing_seed)
+            record.actual_cost_usd = (
+                str(actual_cost_usd) if actual_cost_usd is not None else None
+            )
             record.verified_at = utc_now()
             session.commit()
 
@@ -443,6 +543,14 @@ class NarrationSegmentEffectHandle:
     id: Any
     provider_effect_key: str
     state: str
+    provider_request_hash: str | None = None
+    provider_request_id: str | None = None
+    audio_ref: str | None = None
+    audio_checksum: str | None = None
+    duration_ms: int | None = None
+    timing_seed: Mapping[str, Any] | None = None
+    estimated_cost_usd: str | None = None
+    actual_cost_usd: str | None = None
 
 
 class AudioStitchCompiler:

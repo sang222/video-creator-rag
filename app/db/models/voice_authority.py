@@ -520,6 +520,7 @@ class NarrationSegmentExecution(Base):
     audio_ref: Mapped[str | None] = mapped_column(Text)
     audio_checksum: Mapped[str | None] = mapped_column(String(64))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
+    timing_seed: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     estimated_cost_usd: Mapped[str | None] = mapped_column(String(40))
     actual_cost_usd: Mapped[str | None] = mapped_column(String(40))
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -552,6 +553,13 @@ class NarrationSegmentExecution(Base):
         CheckConstraint(
             "outcome_certainty in ('NOT_SENT','SUBMITTED','VERIFIED','UNKNOWN','FAILED')",
             name="ck_narration_segment_outcome_certainty",
+        ),
+        CheckConstraint(
+            "(state <> 'VERIFIED') or (provider_request_hash is not null and "
+            "provider_request_id is not null and audio_ref is not null and "
+            "audio_checksum is not null and duration_ms > 0 and "
+            "timing_seed is not null)",
+            name="ck_narration_segment_verified_evidence",
         ),
         CheckConstraint(
             "narration_voice_snapshot_hash ~ '^[0-9a-f]{64}$' and narration_performance_plan_hash ~ '^[0-9a-f]{64}$' and tts_performance_projection_hash ~ '^[0-9a-f]{64}$' and canonical_text_hash ~ '^[0-9a-f]{64}$' and provider_projection_hash ~ '^[0-9a-f]{64}$' and content_hash ~ '^[0-9a-f]{64}$'",
