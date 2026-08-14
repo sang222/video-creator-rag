@@ -502,6 +502,17 @@ class ChannelProfileCompiler:
                 "safety": profile_input.policies.get("safety"),
             },
             "voice_policy": profile_input.voice_style,
+            "voice_authority_policy": {
+                "schema_version": "vcos.voice-authority-policy.v1",
+                "required_for_real_production": True,
+                "market_research_required": True,
+                "approved_voice_pool_required": True,
+                "casting_point": "POST_SCRIPT_QUALIFICATION_PRE_TTS",
+                "performance_plan_required": True,
+                "one_video_one_primary_narrator": True,
+                "series_narrator_stickiness": True,
+                "global_env_voice_semantic_authority": False,
+            },
             "evidence_policy": profile_input.evidence_requirement,
             "monetization_policy": profile_input.monetization_model,
             "kpi_profile": {
