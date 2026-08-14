@@ -1227,6 +1227,44 @@ def _support_payloads(
     )
     real_production = execution_mode == "REAL_LONG_FORM_PRODUCTION"
     scoped_policy = _real_provider_policy(authority) if real_production else None
+    voice_bundle = None
+    if real_production:
+        from app.services.voice_authority import (
+            VoiceAuthorityService,
+            voice_authority_required,
+        )
+
+        if voice_authority_required(authority.policy):
+            script_ref = (
+                f"v2-approved-script:{authority.support_envelope.approved_script.script_hash}"
+                if authority.support_envelope is not None
+                else f"v2-approved-script:{semantic_hash({'text': authority.approved_script})}"
+            )
+            script_hash = (
+                authority.support_envelope.approved_script.script_hash
+                if authority.support_envelope is not None
+                else semantic_hash({"approved_script_text": authority.approved_script.strip()})
+            )
+            voice_bundle = VoiceAuthorityService(context.session).ensure_project_bundle(
+                video_project_id=authority.project.id,
+                qualified_script_ref=script_ref,
+                qualified_script_hash=script_hash,
+                canonical_narration=script["narration_text"],
+                script_sections=script["sections"],
+                created_by_user_id=authority.project.created_by_user_id,
+            )
+            script["voice_authority"] = {
+                "approved_voice_pool_id": str(voice_bundle.pool.id),
+                "approved_voice_pool_hash": voice_bundle.pool.content_hash,
+                "voice_casting_decision_id": str(voice_bundle.casting.id),
+                "voice_casting_decision_hash": voice_bundle.casting.content_hash,
+                "narration_voice_snapshot_id": str(voice_bundle.snapshot.id),
+                "narration_voice_snapshot_hash": voice_bundle.snapshot.content_hash,
+                "narration_performance_plan_id": str(voice_bundle.performance.id),
+                "narration_performance_plan_hash": voice_bundle.performance.content_hash,
+                "tts_performance_projection_id": str(voice_bundle.projection.id),
+                "tts_performance_projection_hash": voice_bundle.projection.content_hash,
+            }
     support_envelope_hash = (
         authority.support_envelope_version.content_hash
         if authority.support_envelope_version is not None
@@ -1328,15 +1366,44 @@ def _support_payloads(
         max_cost_usd = _decimal_text(route.max_cost_usd) if route is not None else "0"
         if real_production and stage == "MEDIA":
             assert scoped_policy is not None and envelope is not None
+            if voice_bundle is not None:
+                voice_id = voice_bundle.snapshot.voice_id
+                model_id = voice_bundle.snapshot.model_id
+                voice_settings = dict(voice_bundle.snapshot.baseline_voice_settings)
+                voice_authority = {
+                    "authority_mode": "FROZEN_PROJECT_VOICE_AUTHORITY",
+                    "approved_voice_pool_id": str(voice_bundle.pool.id),
+                    "approved_voice_pool_hash": voice_bundle.pool.content_hash,
+                    "voice_casting_decision_id": str(voice_bundle.casting.id),
+                    "voice_casting_decision_hash": voice_bundle.casting.content_hash,
+                    "narration_voice_snapshot_id": str(voice_bundle.snapshot.id),
+                    "narration_voice_snapshot_hash": voice_bundle.snapshot.content_hash,
+                    "narration_performance_plan_id": str(voice_bundle.performance.id),
+                    "narration_performance_plan_hash": voice_bundle.performance.content_hash,
+                    "tts_performance_projection_id": str(voice_bundle.projection.id),
+                    "tts_performance_projection_hash": voice_bundle.projection.content_hash,
+                    "tts_execution_strategy": voice_bundle.projection.execution_strategy,
+                    "tts_segment_count": len(voice_bundle.projection.segments),
+                    "capability_profile_version": voice_bundle.projection.capability_profile_version,
+                }
+            else:
+                voice_id = scoped_policy.voice_policy.voice_id
+                model_id = scoped_policy.voice_policy.model_id
+                voice_settings = scoped_policy.voice_policy.settings.model_dump(
+                    mode="json"
+                )
+                voice_authority = {
+                    "authority_mode": "LEGACY_CHANNEL_POLICY_COMPATIBILITY",
+                }
             parameters["provider_execution"] = {
                 "provider": "elevenlabs",
-                "voice_id": scoped_policy.voice_policy.voice_id,
-                "model_id": scoped_policy.voice_policy.model_id,
-                "voice_settings": scoped_policy.voice_policy.settings.model_dump(
-                    mode="json"
-                ),
+                "voice_id": voice_id,
+                "model_id": model_id,
+                "voice_settings": voice_settings,
+                **voice_authority,
                 "credential_ref": "env://ELEVENLABS_API_KEY",
                 "attempt_limit": scoped_policy.provider_usage_policy.elevenlabs.initial_tts_attempts,
+                "attempt_limit_per_segment": 1,
                 "idempotency_key": f"{operation_id}:elevenlabs-final-narration",
                 "estimated_cost_usd": max_cost_usd,
                 "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,

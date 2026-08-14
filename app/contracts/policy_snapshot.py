@@ -59,6 +59,7 @@ class CompiledChannelPolicyPayload(BaseModel):
     render_policy: RenderPolicy
     gate_policy: dict[str, Any]
     voice_policy: dict[str, Any]
+    voice_authority_policy: dict[str, Any] | None = None
     evidence_policy: dict[str, Any]
     monetization_policy: dict[str, Any]
     kpi_profile: dict[str, Any]

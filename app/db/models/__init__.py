@@ -285,6 +285,16 @@ from app.db.models.v2_effect import (
     V2NarrationTimingRecoveryReceipt,
     V2ProductionEffectLedger,
 )
+from app.db.models.voice_authority import (
+    ApprovedVoicePool,
+    NarrationPerformancePlan,
+    NarrationVoiceSnapshot,
+    SeriesNarratorBinding,
+    TTSPerformanceProjection,
+    VoiceCastingDecision,
+    VoiceMarketResearchArtifact,
+    VoiceProviderCatalogSnapshot,
+)
 from app.db.models.ai_visual import (
     AIVisualAssetEffect,
     AIVisualAssetManifest,
@@ -296,6 +306,14 @@ from app.db.models.ai_visual import (
 )
 
 __all__ = [
+    "VoiceMarketResearchArtifact",
+    "VoiceProviderCatalogSnapshot",
+    "ApprovedVoicePool",
+    "VoiceCastingDecision",
+    "SeriesNarratorBinding",
+    "NarrationVoiceSnapshot",
+    "NarrationPerformancePlan",
+    "TTSPerformanceProjection",
     "ClaimEvidenceLedger",
     "EpisodeOriginalityManifest",
     "FormatIdentityContract",

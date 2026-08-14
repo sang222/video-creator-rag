@@ -32,6 +32,7 @@ tests/*
 !tests/test_ai_visual_rerender_recovery.py
 !tests/test_ai_visual_cross_modal.py
 !tests/test_v2_drive_archive_crash_recovery.py
+!tests/test_voice_authority.py
 var/generated/
 var/credentials/
 var/logs/
