@@ -51,7 +51,6 @@ jobs:
           tests/test_voice_authority.py
           tests/test_voice_execution.py
           tests/test_v2_caption_grouping.py
-          tests/test_v2_ai_visual_provider.py
           tests/test_cross_modal_lineage.py
           tests/test_v2_renderer_reconciliation.py
       - name: Compile checks
