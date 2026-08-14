@@ -9,13 +9,39 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import DatabaseError, IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from app.core.errors import ValidationFailureError
+from app.db.models.channel import (
+    ChannelProfileVersion,
+    ChannelWorkspace,
+    CompiledChannelPolicySnapshot,
+)
+from app.db.models.foundation import Company, User
+from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
+from app.db.models.voice_authority import (
+    ApprovedVoicePool,
+    NarrationPerformancePlan,
+    NarrationSegmentExecution,
+    NarrationVoiceSnapshot,
+    TTSPerformanceProjection,
+    VoiceCastingDecision,
+    VoiceMarketResearchArtifact,
+    VoiceProviderCatalogSnapshot,
+)
+from app.db.models.workflow import VideoProject
+from app.services.combined_replacement_budget import (
+    CombinedReplacementBudgetAuthorityService,
+)
 from app.services.config_registry import content_hash
+from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
 from app.services.v2_elevenlabs_narration import V2ElevenLabsNarrationAdapter
 from app.services.v2_package_readiness import _combined_replacement_budget_binding
 from app.services.voice_execution import (
     CombinedReplacementBudget,
+    NarrationSegmentExecutionService,
     combined_replacement_budget_authority,
     elevenlabs_capability,
     frozen_voice_authority_gate,
@@ -59,6 +85,187 @@ def _authority() -> dict[str, str]:
         "voice_id": "voice",
         "model_id": "eleven_multilingual_v2",
     }
+
+
+def _hash(label: str) -> str:
+    return content_hash({"label": label})
+
+
+def _db_voice_lineage(db_session):
+    """Build a real FK-complete segment ledger lineage without test bypasses."""
+
+    company = Company(id=uuid.uuid4(), name="VCOS", slug=f"vcos-{uuid.uuid4().hex}")
+    user = User(
+        id=uuid.uuid4(),
+        email=f"voice-{uuid.uuid4().hex}@example.test",
+        display_name="Voice test operator",
+    )
+    channel = ChannelWorkspace(
+        id=uuid.uuid4(), company_id=company.id, key=f"voice-{uuid.uuid4().hex}", name="Voice"
+    )
+    profile = ChannelProfileVersion(
+        id=uuid.uuid4(),
+        channel_workspace_id=channel.id,
+        version=1,
+        profile_input={},
+        profile_input_hash=_hash("profile"),
+    )
+    policy = CompiledChannelPolicySnapshot(
+        id=uuid.uuid4(),
+        channel_workspace_id=channel.id,
+        channel_profile_version_id=profile.id,
+        snapshot_version=1,
+        compiler_version="test",
+        capability_matrix_version="test",
+        compiled_payload={},
+        content_hash=_hash("policy"),
+        profile_input_hash=profile.profile_input_hash,
+    )
+    project = VideoProject(
+        id=uuid.uuid4(),
+        company_id=company.id,
+        channel_workspace_id=channel.id,
+        policy_snapshot_id=policy.id,
+        channel_profile_version_id=profile.id,
+        title="Voice ledger test",
+        created_by_user_id=user.id,
+    )
+    research = VoiceMarketResearchArtifact(
+        id=uuid.uuid4(),
+        company_id=company.id,
+        channel_workspace_id=channel.id,
+        channel_profile_version_id=profile.id,
+        policy_snapshot_id=policy.id,
+        market_identity={},
+        requirements={},
+        evidence=[],
+        confidence_label="MEDIUM",
+        content_hash=_hash("research"),
+    )
+    catalog = VoiceProviderCatalogSnapshot(
+        id=uuid.uuid4(),
+        company_id=company.id,
+        channel_workspace_id=channel.id,
+        provider="elevenlabs",
+        catalog_version="test",
+        voices=[],
+        source_refs=[],
+        content_hash=_hash("catalog"),
+    )
+    pool = ApprovedVoicePool(
+        id=uuid.uuid4(),
+        company_id=company.id,
+        channel_workspace_id=channel.id,
+        channel_profile_version_id=profile.id,
+        policy_snapshot_id=policy.id,
+        voice_market_research_id=research.id,
+        provider_catalog_snapshot_id=catalog.id,
+        version=1,
+        voices=[],
+        content_hash=_hash("pool"),
+    )
+    casting = VoiceCastingDecision(
+        id=uuid.uuid4(),
+        video_project_id=project.id,
+        approved_voice_pool_id=pool.id,
+        approved_voice_pool_hash=pool.content_hash,
+        qualified_script_ref="script://test",
+        qualified_script_hash=_hash("script"),
+        narration_mode="TECHNICAL_EXPLAINER",
+        selected_voice_id="voice-test",
+        selected_model_id="eleven_multilingual_v2",
+        baseline_delivery_profile={},
+        selection_reason_codes=[],
+        market_fit_evidence_refs=[],
+        casting_policy_version="test",
+        decision_version=1,
+        content_hash=_hash("casting"),
+    )
+    snapshot = NarrationVoiceSnapshot(
+        id=uuid.uuid4(),
+        video_project_id=project.id,
+        voice_casting_decision_id=casting.id,
+        approved_voice_pool_id=pool.id,
+        provider="elevenlabs",
+        voice_id="voice-test",
+        model_id="eleven_multilingual_v2",
+        baseline_voice_settings={"speed": 1.0},
+        voice_catalog_version="test",
+        approved_voice_pool_version=1,
+        market_identity_hash=_hash("market"),
+        qualified_script_hash=casting.qualified_script_hash,
+        content_hash=_hash("snapshot"),
+    )
+    narration = "Exact replay audio."
+    plan = NarrationPerformancePlan(
+        id=uuid.uuid4(),
+        video_project_id=project.id,
+        narration_voice_snapshot_id=snapshot.id,
+        qualified_script_ref="script://test",
+        qualified_script_hash=casting.qualified_script_hash,
+        canonical_narration_hash=content_hash({"text": narration}),
+        voice_snapshot_hash=snapshot.content_hash,
+        baseline_delivery={},
+        beats=[],
+        performance_policy_version="test",
+        coverage_gate_state="PASS",
+        semantic_alignment_gate_state="PASS",
+        continuity_gate_state="PASS",
+        monotony_risk_gate_state="PASS",
+        content_hash=_hash("plan"),
+    )
+    projection = TTSPerformanceProjection(
+        id=uuid.uuid4(),
+        video_project_id=project.id,
+        narration_performance_plan_id=plan.id,
+        narration_voice_snapshot_id=snapshot.id,
+        provider="elevenlabs",
+        model_id="eleven_multilingual_v2",
+        execution_strategy="SINGLE_REQUEST_EXPRESSIVE",
+        capability_profile_version="test",
+        segments=[
+            {
+                "ordinal": 1,
+                "segment_id": "segment-1",
+                "source_text_start": 0,
+                "source_text_end": len(narration),
+                "text_hash": content_hash({"text": narration}),
+                "voice_settings": {"speed": 1.0},
+            }
+        ],
+        content_hash=_hash("projection"),
+    )
+    db_session.add_all([company, user])
+    db_session.flush()
+    db_session.add(channel)
+    db_session.flush()
+    db_session.add(profile)
+    db_session.flush()
+    db_session.add(policy)
+    db_session.flush()
+    db_session.add_all([project, research, catalog])
+    db_session.flush()
+    db_session.add(pool)
+    db_session.flush()
+    db_session.add(casting)
+    db_session.flush()
+    db_session.add(snapshot)
+    db_session.flush()
+    db_session.add(plan)
+    db_session.flush()
+    db_session.add(projection)
+    db_session.commit()
+    factory = sessionmaker(
+        bind=db_session.get_bind(), autoflush=False, expire_on_commit=False
+    )
+    return SimpleNamespace(
+        project=project,
+        snapshot=snapshot,
+        plan=plan,
+        projection=projection,
+        narration=narration,
+        session_factory=factory,
+    )
 
 
 def test_real_execution_requires_exact_frozen_voice_authority() -> None:
@@ -163,37 +370,177 @@ def test_combined_budget_authority_requires_every_current_component() -> None:
         combined_replacement_budget_authority(over_budget)[0].require_authorized()
 
 
-def test_package_binds_explicit_unavailable_or_frozen_combined_cost_authority() -> None:
-    budget = SimpleNamespace(
-        reservation_evidence={},
-        reservation_ref="reservation://project-1",
-        content_hash="a" * 64,
+def test_package_creates_and_binds_durable_combined_cost_authority(db_session) -> None:
+    lineage = _db_voice_lineage(db_session)
+    reservation_run_id = uuid.uuid4()
+    evidence = MR1MonthlyBudgetAuthority(db_session).reserve_run(
+        run_id=reservation_run_id,
+        project_id=lineage.project.id,
+        reservation_amount_usd=Decimal("10.000000"),
+        environment_cap_usd=Decimal("100.000000"),
+        company_cap_usd=Decimal("100.000000"),
+        channel_cap_usd=Decimal("100.000000"),
+        provider_allocations_usd={"elevenlabs": Decimal("10.000000")},
+        provider_caps_usd={"elevenlabs": Decimal("100.000000")},
+        provider_aliases={"elevenlabs": ["elevenlabs", "forced_alignment"]},
     )
-    unavailable = _combined_replacement_budget_binding(
-        envelope=SimpleNamespace(zero_cost_budget=budget),
-        support_envelope_hash="b" * 64,
+    db_session.commit()
+    routes = [
+        SimpleNamespace(stage="MEDIA", paid_provider_call=True, route_hash=_hash("media")),
+        SimpleNamespace(stage="VISUAL", paid_provider_call=True, route_hash=_hash("visual")),
+        SimpleNamespace(stage="RENDER", paid_provider_call=False, route_hash=_hash("render")),
+        SimpleNamespace(stage="QC", paid_provider_call=False, route_hash=_hash("qc")),
+        SimpleNamespace(stage="ARCHIVE", paid_provider_call=False, route_hash=_hash("archive")),
+    ]
+    settings = SimpleNamespace(
+        elevenlabs_tts_cost_per_character_usd=Decimal("0.010000"),
+        elevenlabs_forced_alignment_cost_usd=Decimal("0.250000"),
     )
-    assert unavailable["state"] == "UNAVAILABLE"
-    assert unavailable["reason_code"] == "COMBINED_REPLACEMENT_COST_COMPONENTS_REQUIRED"
+    service = CombinedReplacementBudgetAuthorityService(db_session, settings=settings)
+    authority = service.freeze(
+        project_id=lineage.project.id,
+        reservation_ref=evidence["reservation_ref"],
+        support_envelope_hash=_hash("support"),
+        route_budget_authority_hash=_hash("route-budget"),
+        projection=lineage.projection,
+        canonical_narration=lineage.narration,
+        sections=[{"section_id": "scene-1", "section_hash": _hash("scene-1")}],
+        visual_policy_hash=_hash("visual-policy"),
+        routes=routes,
+        approved_ceiling_usd=Decimal("10.000000"),
+    )
+    binding = _combined_replacement_budget_binding(authority=authority)
+    budget, ref, digest = combined_replacement_budget_authority(binding)
+    assert ref == authority.authority_ref
+    assert digest == authority.content_hash
+    assert budget.ai_image_projected_cost_usd > 0
+    assert budget.ai_video_projected_cost_usd == 0
+    assert authority.source_refs["ai_visual_preflight"]["video_owner_cost_state"].startswith(
+        "EXACT_ZERO"
+    )
+    assert db_session.scalar(select(MR1MonthlyBudgetReservation)).reservation_ref == evidence["reservation_ref"]
+    authority.shortfall_usd = Decimal("1.000000")
+    with pytest.raises(DatabaseError, match="append-only"):
+        db_session.commit()
+    db_session.rollback()
 
-    budget.reservation_evidence = {
-        "combined_replacement_costs": {
-            "new_tts_projected_cost_usd": "3.00",
-            "forced_alignment_projected_cost_usd": "0.50",
-            "ai_image_projected_cost_usd": "1.00",
-            "ai_video_projected_cost_usd": "2.00",
-            "other_metered_effects_projected_cost_usd": "0.25",
-            "approved_ceiling_usd": "7.00",
-        }
+    with pytest.raises(
+        ValidationFailureError,
+        match="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+    ):
+        service.freeze(
+            project_id=lineage.project.id,
+            reservation_ref=evidence["reservation_ref"],
+            support_envelope_hash=_hash("support-missing-visual"),
+            route_budget_authority_hash=_hash("route-budget"),
+            projection=lineage.projection,
+            canonical_narration=lineage.narration,
+            sections=[{"section_id": "scene-1", "section_hash": _hash("scene-1")}],
+            visual_policy_hash=None,
+            routes=routes,
+            approved_ceiling_usd=Decimal("10.000000"),
+        )
+
+
+def test_real_postgresql_segment_ledger_reconciles_and_never_resends(db_session) -> None:
+    lineage = _db_voice_lineage(db_session)
+    service = NarrationSegmentExecutionService(lineage.session_factory)
+    authority = {
+        "narration_voice_snapshot_id": str(lineage.snapshot.id),
+        "narration_voice_snapshot_hash": lineage.snapshot.content_hash,
+        "narration_performance_plan_id": str(lineage.plan.id),
+        "narration_performance_plan_hash": lineage.plan.content_hash,
+        "tts_performance_projection_id": str(lineage.projection.id),
+        "tts_performance_projection_hash": lineage.projection.content_hash,
     }
-    frozen = _combined_replacement_budget_binding(
-        envelope=SimpleNamespace(zero_cost_budget=budget),
-        support_envelope_hash="b" * 64,
+    segment = {"segment_id": "segment-1", "segment_index": 0}
+    provider_projection = {"text": lineage.narration, "apply_text_normalization": "off"}
+    submitted = service.intend_and_submit(
+        video_project_id=lineage.project.id,
+        authority=authority,
+        segment=segment,
+        canonical_text=lineage.narration,
+        provider_projection=provider_projection,
+        voice_id="voice-test",
+        model_id="eleven_multilingual_v2",
+        settings={"speed": 1.0},
+        context={},
+        estimated_cost_usd=Decimal("0.25"),
     )
-    assert frozen["state"] == "FROZEN"
-    assert combined_replacement_budget_authority(frozen)[0].projected_incremental_cost_usd == Decimal(
-        "6.75"
+    assert submitted.state == "SUBMITTED"
+    service.verify(
+        effect_id=submitted.id,
+        provider_request_hash=_hash("request"),
+        provider_request_id="request-1",
+        audio_ref="sealed/segment-1.mp3",
+        audio_checksum="a" * 64,
+        duration_ms=120,
+        timing_seed={"seed": "sealed"},
+        actual_cost_usd=Decimal("0.25"),
     )
+    replay = service.intend_and_submit(
+        video_project_id=lineage.project.id,
+        authority=authority,
+        segment=segment,
+        canonical_text=lineage.narration,
+        provider_projection=provider_projection,
+        voice_id="voice-test",
+        model_id="eleven_multilingual_v2",
+        settings={"speed": 1.0},
+        context={},
+        estimated_cost_usd=Decimal("0.25"),
+    )
+    assert replay.state == "VERIFIED"
+    assert replay.audio_ref == "sealed/segment-1.mp3"
+    with pytest.raises(
+        ValidationFailureError, match="NARRATION_SEGMENT_RECONCILIATION_EVIDENCE_INVALID"
+    ):
+        service.intend_and_submit(
+            video_project_id=lineage.project.id,
+            authority=authority,
+            segment=segment,
+            canonical_text=lineage.narration,
+            provider_projection=provider_projection,
+            voice_id="voice-test",
+            model_id="eleven_multilingual_v2",
+            settings={"speed": 1.01},
+            context={},
+            estimated_cost_usd=Decimal("0.25"),
+        )
+
+    second = service.intend_and_submit(
+        video_project_id=lineage.project.id,
+        authority=authority,
+        segment={"segment_id": "segment-2", "segment_index": 1},
+        canonical_text="Second sealed segment.",
+        provider_projection={"text": "Second sealed segment."},
+        voice_id="voice-test",
+        model_id="eleven_multilingual_v2",
+        settings={"speed": 1.0},
+        context={},
+        estimated_cost_usd=Decimal("0.25"),
+    )
+    service.mark_unknown(effect_id=second.id)
+    with pytest.raises(ValidationFailureError, match="PROVIDER_OUTCOME_UNKNOWN"):
+        service.intend_and_submit(
+            video_project_id=lineage.project.id,
+            authority=authority,
+            segment={"segment_id": "segment-2", "segment_index": 1},
+            canonical_text="Second sealed segment.",
+            provider_projection={"text": "Second sealed segment."},
+            voice_id="voice-test",
+            model_id="eleven_multilingual_v2",
+            settings={"speed": 1.0},
+            context={},
+            estimated_cost_usd=Decimal("0.25"),
+        )
+
+    with lineage.session_factory() as session:
+        verified = session.get(NarrationSegmentExecution, submitted.id)
+        assert verified is not None
+        verified.audio_ref = None
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
 def test_seam_qc_rejects_missing_or_reordered_audio() -> None:

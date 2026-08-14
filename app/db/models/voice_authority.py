@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -12,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -468,6 +470,97 @@ class TTSPerformanceProjection(Base):
             "content_hash ~ '^[0-9a-f]{64}$'", name="ck_tts_projection_hash"
         ),
         Index("ix_tts_performance_project", "video_project_id", "created_at"),
+    )
+
+
+class CombinedReplacementBudgetAuthority(Base):
+    """One immutable pre-effect cost authority for a V2 replacement run.
+
+    The row is deliberately separate from MR1's mutable settlement lifecycle.
+    It records the exact preflight inputs that justified the reservation and is
+    never repurposed for a later package or provider plan.
+    """
+
+    __tablename__ = "combined_replacement_budget_authorities"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    authority_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    video_project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False
+    )
+    budget_reservation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mr1_monthly_budget_reservations.id"),
+        nullable=False,
+    )
+    budget_reservation_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    support_envelope_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    route_budget_authority_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    tts_performance_projection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tts_performance_projections.id"), nullable=False
+    )
+    tts_performance_projection_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_refs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    new_tts_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    forced_alignment_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    ai_image_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    ai_video_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    other_metered_effects_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    combined_replacement_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    approved_ceiling_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    shortfall_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="FROZEN")
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = utc_created_at()
+
+    __table_args__ = (
+        UniqueConstraint("authority_ref", name="uq_combined_replacement_budget_ref"),
+        UniqueConstraint(
+            "video_project_id",
+            "support_envelope_hash",
+            "tts_performance_projection_hash",
+            "content_hash",
+            name="uq_combined_replacement_budget_identity",
+        ),
+        CheckConstraint("state = 'FROZEN'", name="ck_combined_replacement_budget_state"),
+        CheckConstraint(
+            "new_tts_projected_cost_usd >= 0 and "
+            "forced_alignment_projected_cost_usd >= 0 and "
+            "ai_image_projected_cost_usd >= 0 and "
+            "ai_video_projected_cost_usd >= 0 and "
+            "other_metered_effects_projected_cost_usd >= 0 and "
+            "combined_replacement_projected_cost_usd >= 0 and "
+            "approved_ceiling_usd >= 0 and shortfall_usd >= 0",
+            name="ck_combined_replacement_budget_nonnegative",
+        ),
+        CheckConstraint(
+            "support_envelope_hash ~ '^[0-9a-f]{64}$' and "
+            "route_budget_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "tts_performance_projection_hash ~ '^[0-9a-f]{64}$' and "
+            "content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_combined_replacement_budget_hashes",
+        ),
+        Index(
+            "ix_combined_replacement_budget_project_created",
+            "video_project_id",
+            "created_at",
+        ),
     )
 
 

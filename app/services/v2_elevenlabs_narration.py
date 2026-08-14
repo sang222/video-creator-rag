@@ -253,6 +253,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             )
             from app.db.models.voice_authority import (
                 ApprovedVoicePool,
+                CombinedReplacementBudgetAuthority,
                 NarrationPerformancePlan,
                 NarrationVoiceSnapshot,
                 TTSPerformanceProjection,
@@ -278,7 +279,19 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
                 TTSPerformanceProjection,
                 uuid.UUID(str(details["tts_performance_projection_id"])),
             )
-        except (KeyError, ValueError) as exc:
+            raw_budget_authority = details.get(
+                "combined_replacement_budget_authority"
+            )
+            if not isinstance(raw_budget_authority, Mapping):
+                raise TypeError("combined replacement budget authority missing")
+            _budget, budget_ref, budget_hash = combined_replacement_budget_authority(
+                raw_budget_authority
+            )
+            budget_authority = context.session.get(
+                CombinedReplacementBudgetAuthority,
+                uuid.UUID(str(raw_budget_authority["authority_id"])),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
             raise ValidationFailureError(
                 "REAL_PRODUCTION_VOICE_AUTHORITY_REQUIRED"
             ) from exc
@@ -309,6 +322,20 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             or projection.execution_strategy != details.get("tts_execution_strategy")
             or projection.capability_profile_version
             != details.get("capability_profile_version")
+            or budget_authority is None
+            or budget_authority.state != "FROZEN"
+            or budget_authority.authority_ref != budget_ref
+            or budget_authority.content_hash != budget_hash
+            or budget_authority.video_project_id != context.run.video_project_id
+            or budget_authority.tts_performance_projection_id != projection.id
+            or budget_authority.tts_performance_projection_hash
+            != projection.content_hash
+            or budget_authority.budget_reservation_ref
+            != details.get("budget_reservation_ref")
+            or budget_authority.route_budget_authority_hash
+            != raw_budget_authority.get("route_budget_authority_hash")
+            or budget_authority.support_envelope_hash
+            != details.get("package_support_envelope_hash")
         ):
             raise ValidationFailureError("REAL_PRODUCTION_VOICE_AUTHORITY_MISMATCH")
 

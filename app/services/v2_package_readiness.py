@@ -1062,67 +1062,20 @@ def _decimal_text(value: Any) -> str:
     return format(parsed, "f")
 
 
-_COMBINED_REPLACEMENT_BUDGET_FIELDS = (
-    "new_tts_projected_cost_usd",
-    "forced_alignment_projected_cost_usd",
-    "ai_image_projected_cost_usd",
-    "ai_video_projected_cost_usd",
-    "other_metered_effects_projected_cost_usd",
-    "approved_ceiling_usd",
-)
+def _combined_replacement_budget_binding(*, authority: Any) -> dict[str, Any]:
+    """Serialize a server-created combined authority for the MEDIA operation.
 
+    Package readiness is the only writer.  In particular this never reads or
+    augments MR1 reservation JSON, which remains immutable capacity evidence.
+    """
 
-def _combined_replacement_budget_binding(
-    *,
-    envelope: V2FrozenSupportEnvelope,
-    support_envelope_hash: str,
-) -> dict[str, Any]:
-    """Bind complete component cost evidence to MEDIA without zero defaults."""
+    from app.services.combined_replacement_budget import (
+        CombinedReplacementBudgetAuthorityService,
+    )
 
-    reservation = dict(envelope.zero_cost_budget.reservation_evidence or {})
-    components = reservation.get("combined_replacement_costs")
-    base = {
-        "schema_version": "vcos.combined-replacement-budget.v1",
-        "authority_ref": (
-            f"{envelope.zero_cost_budget.reservation_ref}#combined-replacement"
-        ),
-        "reservation_ref": envelope.zero_cost_budget.reservation_ref,
-        "route_budget_authority_hash": envelope.zero_cost_budget.content_hash,
-        "support_envelope_hash": support_envelope_hash,
-    }
-    if not isinstance(components, dict):
-        return {
-            **base,
-            "state": "UNAVAILABLE",
-            "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENTS_REQUIRED",
-        }
-    payload = {**base, "state": "FROZEN"}
-    for cost_field in _COMBINED_REPLACEMENT_BUDGET_FIELDS:
-        if cost_field not in components:
-            return {
-                **base,
-                "state": "UNAVAILABLE",
-                "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENT_REQUIRED",
-                "missing_component": cost_field,
-            }
-        try:
-            value = Decimal(str(components[cost_field]))
-        except (InvalidOperation, ValueError, TypeError):
-            return {
-                **base,
-                "state": "UNAVAILABLE",
-                "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENT_INVALID",
-                "invalid_component": cost_field,
-            }
-        if not value.is_finite() or value < 0:
-            return {
-                **base,
-                "state": "UNAVAILABLE",
-                "reason_code": "COMBINED_REPLACEMENT_COST_COMPONENT_INVALID",
-                "invalid_component": cost_field,
-            }
-        payload[cost_field] = _decimal_text(value)
-    return {**payload, "authority_hash": semantic_hash(payload)}
+    return CombinedReplacementBudgetAuthorityService.provider_execution_binding(
+        authority
+    )
 
 
 def _real_provider_policy(authority: _SupportAuthority) -> ChannelScopedPolicy:
@@ -1358,14 +1311,6 @@ def _support_payloads(
         if authority.support_envelope is not None
         else {}
     )
-    combined_replacement_budget = (
-        _combined_replacement_budget_binding(
-            envelope=authority.support_envelope,
-            support_envelope_hash=support_envelope_hash,
-        )
-        if real_production and authority.support_envelope is not None
-        else None
-    )
     visual_rights = (
         authority.support_envelope.local_generated_card_rights
         if authority.support_envelope is not None
@@ -1396,6 +1341,33 @@ def _support_payloads(
         and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
         else ["NATIVE_FFMPEG"]
     )
+    combined_replacement_budget = None
+    if real_production:
+        if voice_bundle is None or envelope is None:
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_VOICE_PROJECTION_REQUIRED"
+            )
+        from app.services.combined_replacement_budget import (
+            CombinedReplacementBudgetAuthorityService,
+        )
+
+        combined_authority = CombinedReplacementBudgetAuthorityService(
+            context.session
+        ).freeze(
+            project_id=authority.project.id,
+            reservation_ref=str(envelope.zero_cost_budget.reservation_ref or ""),
+            support_envelope_hash=support_envelope_hash,
+            route_budget_authority_hash=envelope.zero_cost_budget.content_hash,
+            projection=voice_bundle.projection,
+            canonical_narration=script["narration_text"],
+            sections=sections,
+            visual_policy_hash=envelope.production_visual_policy_hash,
+            routes=envelope.native_routes,
+            approved_ceiling_usd=envelope.zero_cost_budget.authorized_cost_usd,
+        )
+        combined_replacement_budget = _combined_replacement_budget_binding(
+            authority=combined_authority
+        )
     for stage in (*stage_modes, "ARCHIVE"):
         route = route_by_stage.get(stage)
         adapter_key = (

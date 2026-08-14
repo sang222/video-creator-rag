@@ -46,7 +46,7 @@ jobs:
       - name: Migrate to single head
         run: |
           alembic upgrade head
-          test "$(alembic heads | awk '{print $1}')" = "0082_segment_replay_seed"
+          test "$(alembic heads | awk '{print $1}')" = "0083_combined_budget_authority"
       - name: Voice architecture and regression tests
         run: >-
           pytest -q
@@ -60,8 +60,10 @@ jobs:
           ruff check
           app/services/voice_execution.py
           app/services/v2_elevenlabs_narration.py
+          app/services/combined_replacement_budget.py
           app/services/v2_package_readiness.py
           app/db/models/voice_authority.py
+          alembic/versions/0083_combined_replacement_budget_authority.py
           tests/test_voice_execution.py
       - name: Compile checks
         run: >-
@@ -69,5 +71,6 @@ jobs:
           app
           alembic/versions/0081_voice_execution_closeout.py
           alembic/versions/0082_narration_segment_reconciliation_seed.py
+          alembic/versions/0083_combined_replacement_budget_authority.py
           tests/test_voice_authority.py
           tests/test_voice_execution.py
