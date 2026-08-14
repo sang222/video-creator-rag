@@ -33,7 +33,6 @@ jobs:
       VCOS_ENVIRONMENT: test
       VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
       VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
-      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,7 +50,8 @@ jobs:
           pytest -q
           tests/test_voice_authority.py
           tests/test_voice_execution.py
-          tests/test_v2_narration_timing_recovery.py
+          tests/test_v2_caption_grouping.py
+          tests/test_v2_ai_visual_provider.py
           tests/test_cross_modal_lineage.py
           tests/test_v2_renderer_reconciliation.py
       - name: Compile checks
