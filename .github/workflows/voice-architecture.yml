@@ -33,6 +33,7 @@ jobs:
       VCOS_ENVIRONMENT: test
       VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
       VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
