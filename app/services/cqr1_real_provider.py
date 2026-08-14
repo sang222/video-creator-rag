@@ -230,14 +230,18 @@ class NoRetryMultipartJSONTransport:
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "Content-Length": str(len(body)),
         }
-        request = urllib.request.Request(url, method=method, data=body, headers=request_headers)
+        request = urllib.request.Request(
+            url, method=method, data=body, headers=request_headers
+        )
         with urllib.request.urlopen(
             request,
             timeout=timeout,
             context=self.ssl_context,
         ) as response:
             parsed = json.loads(response.read().decode("utf-8"))
-            return parsed, {str(key): str(value) for key, value in response.headers.items()}
+            return parsed, {
+                str(key): str(value) for key, value in response.headers.items()
+            }
 
 
 @dataclass(frozen=True)
@@ -369,6 +373,7 @@ class ElevenLabsConvertWithTimestampsClient:
         destination: Path,
         voice_settings: dict[str, Any] | None = None,
         seed: int | None = None,
+        provider_context: dict[str, Any] | None = None,
         audio_asset_ref: str | None = None,
     ) -> ElevenLabsTimestampExecution:
         _require_nonempty(api_key, "ELEVENLABS_API_KEY_MISSING")
@@ -376,7 +381,10 @@ class ElevenLabsConvertWithTimestampsClient:
         _require_nonempty(model_id, "ELEVENLABS_MODEL_ID_MISSING")
         if self.call_count:
             raise RuntimeError("ELEVENLABS_TTS_CALL_LIMIT_EXCEEDED")
-        if destination.exists() or destination.with_name(destination.name + ".part").exists():
+        if (
+            destination.exists()
+            or destination.with_name(destination.name + ".part").exists()
+        ):
             raise FileExistsError("ELEVENLABS_TTS_DESTINATION_NOT_FRESH")
         request = self.request_builder.build(
             normalized=normalized,
@@ -384,6 +392,7 @@ class ElevenLabsConvertWithTimestampsClient:
             model_id=model_id,
             voice_settings=voice_settings,
             seed=seed,
+            provider_context=provider_context,
         )
         self.call_count += 1
         try:
@@ -405,7 +414,9 @@ class ElevenLabsConvertWithTimestampsClient:
         audio = _decode_audio_payload(response)
         _write_bytes_atomic(destination, audio)
         digest = _sha256_file(destination)
-        duration_ms = round(media_duration_seconds(self.media_probe(destination)) * 1000)
+        duration_ms = round(
+            media_duration_seconds(self.media_probe(destination)) * 1000
+        )
         if duration_ms <= 0:
             raise RuntimeError("ELEVENLABS_TTS_AUDIO_DURATION_INVALID")
         resolved_audio_ref = audio_asset_ref or f"file-sha256:{digest}"
@@ -471,7 +482,9 @@ class ElevenLabsForcedAlignmentClient:
             audio_asset_ref=audio_asset_ref,
             normalized=normalized,
         )
-        mime_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
+        mime_type = (
+            mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
+        )
         self.call_count += 1
         try:
             response, headers = self.transport.multipart_json_request(
@@ -638,16 +651,11 @@ class PlannedPexelsV2SearchClient:
         if not isinstance(payload, dict):
             raise RuntimeError("PEXELS_RESPONSE_INVALID")
         parsed = self.response_parser.parse(_fill_pexels_descriptions(payload))
-        deduplicated = {
-            candidate.provider_asset_id: candidate
-            for candidate in parsed
-        }
+        deduplicated = {candidate.provider_asset_id: candidate for candidate in parsed}
         candidates = tuple(deduplicated.values())
-        candidates, metadata_semantic_gate = (
-            apply_pexels_metadata_semantic_hard_gate(
-                candidates,
-                request=request,
-            )
+        candidates, metadata_semantic_gate = apply_pexels_metadata_semantic_hard_gate(
+            candidates,
+            request=request,
         )
         scoring_basis: dict[str, Any] = {
             "provider_search_order_used": False,
@@ -833,17 +841,16 @@ def _apply_physical_production_metadata_gate(
                 "PEXELS_METADATA_REQUIRED_PHYSICAL_PRODUCTION_SIGNAL_MISSING"
             )
         if forbidden_matches:
-            reasons.append(
-                "PEXELS_METADATA_SCREEN_DEVICE_UI_OR_LOGO_CONFLICT"
-            )
-        if candidate.logo_or_text_present is True or candidate.brand_or_trademark_present is True:
+            reasons.append("PEXELS_METADATA_SCREEN_DEVICE_UI_OR_LOGO_CONFLICT")
+        if (
+            candidate.logo_or_text_present is True
+            or candidate.brand_or_trademark_present is True
+        ):
             reasons.append("PEXELS_METADATA_LOGO_OR_BRAND_FLAGGED")
         if out_of_domain_matches:
             reasons.append("PEXELS_METADATA_OUT_OF_DOMAIN")
         reasons = list(dict.fromkeys(reasons))
-        hard_conflicts = list(
-            dict.fromkeys([*candidate.hard_conflict_tags, *reasons])
-        )
+        hard_conflicts = list(dict.fromkeys([*candidate.hard_conflict_tags, *reasons]))
         gated.append(
             candidate.model_copy(update={"hard_conflict_tags": hard_conflicts})
         )
@@ -935,7 +942,9 @@ def _apply_provider_search_review_floor(
                     "visual_direction_fit_score": round(direction, 6),
                     "previous_scene_continuity_score": round(direction, 6),
                     "next_scene_continuity_score": round(direction, 6),
-                    "crop_safety_score": 0.8 if candidate.width >= candidate.height else 0.0,
+                    "crop_safety_score": 0.8
+                    if candidate.width >= candidate.height
+                    else 0.0,
                     "technical_quality_score": round(technical, 6),
                     "originality_score": 0.6,
                 }
@@ -946,8 +955,27 @@ def _apply_provider_search_review_floor(
 
 def _meaningful_tokens(value: str) -> set[str]:
     stop = {
-        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
-        "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "with",
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "this",
+        "to",
+        "with",
     }
     return {
         token
@@ -1001,7 +1029,9 @@ def _multipart_body(
         chunks.extend(
             (
                 marker,
-                f'Content-Disposition: form-data; name="{_header_value(name)}"\r\n\r\n'.encode("utf-8"),
+                f'Content-Disposition: form-data; name="{_header_value(name)}"\r\n\r\n'.encode(
+                    "utf-8"
+                ),
                 str(value).encode("utf-8"),
                 b"\r\n",
             )
@@ -1068,7 +1098,10 @@ def _safe_usage_metadata(response: Mapping[str, Any]) -> dict[str, Any]:
     allowed: dict[str, Any] = {}
     for key, value in raw.items():
         normalized_key = str(key)
-        if any(fragment in normalized_key.casefold() for fragment in ("token", "secret", "url", "authorization")):
+        if any(
+            fragment in normalized_key.casefold()
+            for fragment in ("token", "secret", "url", "authorization")
+        ):
             continue
         if value is None or isinstance(value, (str, int, float, bool)):
             allowed[normalized_key] = value

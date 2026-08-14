@@ -548,6 +548,7 @@ class ElevenLabsTimestampRequestBuilder:
         model_id: str,
         voice_settings: dict[str, Any] | None = None,
         seed: int | None = None,
+        provider_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         dictionary_locators = []
         for ref in normalized.pronunciation_dictionary_refs:
@@ -566,6 +567,18 @@ class ElevenLabsTimestampRequestBuilder:
         }
         if seed is not None:
             payload["seed"] = seed
+        context = dict(provider_context or {})
+        allowed_context = {
+            "previous_text",
+            "next_text",
+            "previous_request_ids",
+            "next_request_ids",
+        }
+        if set(context) - allowed_context:
+            raise ValueError("ELEVENLABS_PROVIDER_CONTEXT_INVALID")
+        if "seed" in context:
+            raise ValueError("ELEVENLABS_PROVIDER_CONTEXT_SEED_FORBIDDEN")
+        payload.update(context)
         request = {
             "provider_key": "elevenlabs",
             "endpoint_path": f"/v1/text-to-speech/{voice_id}/with-timestamps",

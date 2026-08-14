@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from decimal import Decimal
 from itertools import combinations
 from pathlib import Path
@@ -43,6 +44,7 @@ from app.services.v2_provider_production import (
     V2AuthorizedAdapterOperation,
     V2ProductionAdapterDescriptor,
 )
+from app.services.voice_execution import frozen_voice_authority_gate
 
 
 V2_ELEVENLABS_NARRATION_ADAPTER_KEY = "v2-elevenlabs-narration"
@@ -114,6 +116,84 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             or not isinstance(details.get("voice_settings"), dict)
         ):
             raise ValidationFailureError("V2_ELEVENLABS_NARRATION_OPERATION_INVALID")
+        self._validate_frozen_voice_authority(context=context, details=details)
+
+    @staticmethod
+    def _validate_frozen_voice_authority(
+        *, context: WorkflowStageContext, details: dict[str, Any]
+    ) -> None:
+        """Resolve exact persisted voice truth; environment is never authority."""
+
+        # The script hash was sealed by package readiness.  Binding every
+        # source object here closes the former gap where an operation carried
+        # IDs but the real media adapter still trusted global voice config.
+        try:
+            frozen_voice_authority_gate(
+                authority=details,
+                script_hash=str(details["qualified_script_hash"]),
+                voice_id=str(details["voice_id"]),
+                model_id=str(details["model_id"]),
+            )
+            from app.db.models.voice_authority import (
+                ApprovedVoicePool,
+                NarrationPerformancePlan,
+                NarrationVoiceSnapshot,
+                TTSPerformanceProjection,
+                VoiceCastingDecision,
+            )
+
+            pool = context.session.get(
+                ApprovedVoicePool, uuid.UUID(str(details["approved_voice_pool_id"]))
+            )
+            casting = context.session.get(
+                VoiceCastingDecision,
+                uuid.UUID(str(details["voice_casting_decision_id"])),
+            )
+            snapshot = context.session.get(
+                NarrationVoiceSnapshot,
+                uuid.UUID(str(details["narration_voice_snapshot_id"])),
+            )
+            performance = context.session.get(
+                NarrationPerformancePlan,
+                uuid.UUID(str(details["narration_performance_plan_id"])),
+            )
+            projection = context.session.get(
+                TTSPerformanceProjection,
+                uuid.UUID(str(details["tts_performance_projection_id"])),
+            )
+        except (KeyError, ValueError) as exc:
+            raise ValidationFailureError(
+                "REAL_PRODUCTION_VOICE_AUTHORITY_REQUIRED"
+            ) from exc
+        if (
+            pool is None
+            or casting is None
+            or snapshot is None
+            or performance is None
+            or projection is None
+            or pool.content_hash != details["approved_voice_pool_hash"]
+            or casting.content_hash != details["voice_casting_decision_hash"]
+            or snapshot.content_hash != details["narration_voice_snapshot_hash"]
+            or performance.content_hash != details["narration_performance_plan_hash"]
+            or projection.content_hash != details["tts_performance_projection_hash"]
+            or casting.video_project_id != context.run.video_project_id
+            or snapshot.video_project_id != context.run.video_project_id
+            or performance.video_project_id != context.run.video_project_id
+            or projection.video_project_id != context.run.video_project_id
+            or snapshot.voice_casting_decision_id != casting.id
+            or snapshot.approved_voice_pool_id != pool.id
+            or performance.narration_voice_snapshot_id != snapshot.id
+            or projection.narration_performance_plan_id != performance.id
+            or projection.narration_voice_snapshot_id != snapshot.id
+            or snapshot.qualified_script_hash != details["qualified_script_hash"]
+            or snapshot.voice_id != details["voice_id"]
+            or snapshot.model_id != details["model_id"]
+            or projection.model_id != details["model_id"]
+            or projection.execution_strategy != details.get("tts_execution_strategy")
+            or projection.capability_profile_version
+            != details.get("capability_profile_version")
+        ):
+            raise ValidationFailureError("REAL_PRODUCTION_VOICE_AUTHORITY_MISMATCH")
 
     def _produce_media(
         self,
