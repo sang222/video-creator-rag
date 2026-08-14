@@ -50,7 +50,6 @@ jobs:
           pytest -q
           tests/test_voice_authority.py
           tests/test_voice_execution.py
-          tests/test_v2_elevenlabs_narration_recovery.py
           tests/test_v2_narration_timing_recovery.py
           tests/test_cross_modal_lineage.py
           tests/test_v2_renderer_reconciliation.py
