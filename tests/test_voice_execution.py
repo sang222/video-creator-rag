@@ -9,10 +9,11 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.exc import DatabaseError, IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
 from app.db.models.channel import (
     ChannelProfileVersion,
@@ -89,6 +90,20 @@ def _authority() -> dict[str, str]:
 
 def _hash(label: str) -> str:
     return content_hash({"label": label})
+
+
+@pytest.fixture
+def db_session():
+    """Use the migrated PostgreSQL service directly in GitHub Actions too."""
+
+    engine = create_engine(get_settings().database_url, future=True, pool_pre_ping=True)
+    session = Session(bind=engine, autoflush=False, expire_on_commit=False)
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+        engine.dispose()
 
 
 def _db_voice_lineage(db_session):
