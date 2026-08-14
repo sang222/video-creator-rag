@@ -14,7 +14,10 @@ import subprocess
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.errors import ValidationFailureError
 from app.services.config_registry import content_hash
@@ -252,6 +255,196 @@ def seam_qc(*, segments: Sequence[Mapping[str, Any]]) -> NarrationSeamQCReport:
     )
 
 
+class NarrationSegmentExecutionService:
+    """Durably journal each paid narration request before it can be sent."""
+
+    def __init__(self, session_factory: Callable[[], Session]):
+        self._session_factory = session_factory
+
+    def intend_and_submit(
+        self,
+        *,
+        video_project_id: Any,
+        authority: Mapping[str, Any],
+        segment: Mapping[str, Any],
+        canonical_text: str,
+        provider_projection: Mapping[str, Any],
+        voice_id: str,
+        model_id: str,
+        settings: Mapping[str, Any],
+        context: Mapping[str, Any],
+        estimated_cost_usd: Decimal,
+    ) -> "NarrationSegmentEffectHandle":
+        """Return a newly submitted effect or refuse an uncertain replay.
+
+        Every transition is committed independently.  Therefore a worker crash
+        after this call is unambiguously a provider-outcome reconciliation
+        problem, never authorization to resend a paid request.
+        """
+
+        from app.db.models.voice_authority import NarrationSegmentExecution
+
+        index = int(segment["segment_index"])
+        effect_key = str(
+            content_hash(
+                {
+                    "projection_hash": authority["tts_performance_projection_hash"],
+                    "segment_id": segment["segment_id"],
+                    "segment_index": index,
+                    "canonical_text_hash": content_hash({"text": canonical_text}),
+                }
+            )
+        )
+        projection_hash = content_hash(dict(provider_projection))
+        body = {
+            "video_project_id": str(video_project_id),
+            "effect_key": effect_key,
+            "segment_id": segment["segment_id"],
+            "segment_index": index,
+            "canonical_text_hash": content_hash({"text": canonical_text}),
+            "provider_projection_hash": projection_hash,
+            "voice_id": voice_id,
+            "model_id": model_id,
+            "settings": dict(settings),
+            "context": dict(context),
+        }
+        with self._session_factory() as session:
+            existing = session.scalar(
+                select(NarrationSegmentExecution).where(
+                    NarrationSegmentExecution.video_project_id == video_project_id,
+                    NarrationSegmentExecution.provider_effect_key == effect_key,
+                )
+            )
+            if existing is None:
+                record = NarrationSegmentExecution(
+                    video_project_id=video_project_id,
+                    narration_voice_snapshot_id=authority[
+                        "narration_voice_snapshot_id"
+                    ],
+                    narration_voice_snapshot_hash=authority[
+                        "narration_voice_snapshot_hash"
+                    ],
+                    narration_performance_plan_id=authority[
+                        "narration_performance_plan_id"
+                    ],
+                    narration_performance_plan_hash=authority[
+                        "narration_performance_plan_hash"
+                    ],
+                    tts_performance_projection_id=authority[
+                        "tts_performance_projection_id"
+                    ],
+                    tts_performance_projection_hash=authority[
+                        "tts_performance_projection_hash"
+                    ],
+                    segment_id=str(segment["segment_id"]),
+                    segment_index=index,
+                    canonical_text_hash=body["canonical_text_hash"],
+                    provider_projection_hash=projection_hash,
+                    provider_effect_key=effect_key,
+                    voice_id=voice_id,
+                    model_id=model_id,
+                    compiled_voice_settings=dict(settings),
+                    provider_context=dict(context),
+                    state="INTENDED",
+                    estimated_cost_usd=str(estimated_cost_usd),
+                    attempt_count=0,
+                    outcome_certainty="NOT_SENT",
+                    content_hash=content_hash(body),
+                )
+                session.add(record)
+                session.commit()
+                effect_id = record.id
+            else:
+                effect_id = existing.id
+                if existing.state == "VERIFIED":
+                    return NarrationSegmentEffectHandle(
+                        id=existing.id,
+                        provider_effect_key=existing.provider_effect_key,
+                        state=existing.state,
+                    )
+                if existing.state in {"SUBMITTED", "PROVIDER_OUTCOME_UNKNOWN"}:
+                    raise ValidationFailureError("PROVIDER_OUTCOME_UNKNOWN")
+                if (
+                    existing.state != "INTENDED"
+                    or existing.content_hash != content_hash(body)
+                ):
+                    raise ValidationFailureError(
+                        "NARRATION_SEGMENT_EFFECT_IDENTITY_MISMATCH"
+                    )
+
+        with self._session_factory() as session:
+            record = session.get(
+                NarrationSegmentExecution, effect_id, with_for_update=True
+            )
+            if (
+                record is None
+                or record.state != "INTENDED"
+                or record.attempt_count != 0
+            ):
+                raise ValidationFailureError("PROVIDER_OUTCOME_UNKNOWN")
+            record.state = "SUBMITTED"
+            record.outcome_certainty = "SUBMITTED"
+            record.attempt_count = 1
+            session.commit()
+            return NarrationSegmentEffectHandle(
+                id=record.id,
+                provider_effect_key=record.provider_effect_key,
+                state="SUBMITTED",
+            )
+
+    def verify(
+        self,
+        *,
+        effect_id: Any,
+        provider_request_hash: str,
+        provider_request_id: str | None,
+        audio_ref: str,
+        audio_checksum: str,
+        duration_ms: int,
+    ) -> None:
+        from app.core.time import utc_now
+        from app.db.models.voice_authority import NarrationSegmentExecution
+
+        with self._session_factory() as session:
+            record = session.get(
+                NarrationSegmentExecution, effect_id, with_for_update=True
+            )
+            if (
+                record is None
+                or record.state != "SUBMITTED"
+                or record.attempt_count != 1
+            ):
+                raise ValidationFailureError("NARRATION_SEGMENT_VERIFICATION_INVALID")
+            record.state = "VERIFIED"
+            record.outcome_certainty = "VERIFIED"
+            record.provider_request_hash = provider_request_hash
+            record.provider_request_id = provider_request_id
+            record.audio_ref = audio_ref
+            record.audio_checksum = audio_checksum
+            record.duration_ms = duration_ms
+            record.verified_at = utc_now()
+            session.commit()
+
+    def mark_unknown(self, *, effect_id: Any) -> None:
+        from app.db.models.voice_authority import NarrationSegmentExecution
+
+        with self._session_factory() as session:
+            record = session.get(
+                NarrationSegmentExecution, effect_id, with_for_update=True
+            )
+            if record is not None and record.state == "SUBMITTED":
+                record.state = "PROVIDER_OUTCOME_UNKNOWN"
+                record.outcome_certainty = "UNKNOWN"
+                session.commit()
+
+
+@dataclass(frozen=True, slots=True)
+class NarrationSegmentEffectHandle:
+    id: Any
+    provider_effect_key: str
+    state: str
+
+
 class AudioStitchCompiler:
     """Deterministically compose audio via FFmpeg; never concatenate MP3 bytes."""
 
@@ -288,8 +481,17 @@ class AudioStitchCompiler:
                     "0",
                     "-i",
                     str(list_path),
-                    "-c",
-                    "copy",
+                    # Provider outputs may differ in encoder delay or stream
+                    # metadata.  Re-encode to a fixed canonical MP3 profile
+                    # rather than relying on unsafe byte/stream concatenation.
+                    "-c:a",
+                    "libmp3lame",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                    "-b:a",
+                    "192k",
                     str(destination),
                 ],
                 check=True,

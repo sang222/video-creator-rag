@@ -44,12 +44,20 @@ jobs:
       - name: Migrate to single head
         run: |
           alembic upgrade head
-          test "$(alembic heads | awk '{print $1}')" = "0080_voice_authority"
+          test "$(alembic heads | awk '{print $1}')" = "0081_voice_execution_closeout"
       - name: Voice architecture and regression tests
         run: >-
           pytest -q
           tests/test_voice_authority.py
+          tests/test_voice_execution.py
+          tests/test_v2_elevenlabs_narration_recovery.py
+          tests/test_v2_narration_timing_recovery.py
           tests/test_cross_modal_lineage.py
           tests/test_v2_renderer_reconciliation.py
       - name: Compile checks
-        run: python -m compileall -q app alembic/versions/0080_voice_authority.py tests/test_voice_authority.py
+        run: >-
+          python -m compileall -q
+          app
+          alembic/versions/0081_voice_execution_closeout.py
+          tests/test_voice_authority.py
+          tests/test_voice_execution.py
