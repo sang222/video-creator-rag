@@ -26,6 +26,7 @@ from app.db.models import (
     DomainEvent,
     LongFormAnalyticsWindow,
     OpsIncident,
+    PublicPublicationReceipt,
     UploadedVideo,
 )
 from app.db.models.m5 import ProjectAdmissionDecision
@@ -582,11 +583,28 @@ class LongFormAnalyticsScheduler:
             uploaded.destination_binding_fingerprint,
             uploaded.published_at,
         ]
+        publication_receipt = (
+            self.session.get(
+                PublicPublicationReceipt, uploaded.public_publication_receipt_id
+            )
+            if uploaded.public_publication_receipt_id is not None
+            else None
+        )
         if (
-            uploaded.schema_version != "v2"
+            uploaded.schema_version not in {"v2", "v3"}
+            or uploaded.actual_visibility != "PUBLIC"
             or uploaded.production_lane != "LONG_FORM"
             or uploaded.content_mode not in {"SERIES_EPISODE", "STANDALONE"}
             or any(value is None for value in required)
+            or (
+                uploaded.schema_version == "v3"
+                and (
+                    publication_receipt is None
+                    or publication_receipt.observed_privacy_status != "PUBLIC"
+                    or publication_receipt.platform_video_id
+                    != uploaded.platform_video_id
+                )
+            )
         ):
             raise ValidationFailureError(
                 "LONG_FORM_ANALYTICS_UPLOADED_VIDEO_AUTHORITY_INVALID"

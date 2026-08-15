@@ -2324,9 +2324,19 @@ class V2LocalNativeProductionAdapter:
                     V2ProductionEffectLedger.state == "VERIFIED",
                 )
             )
+            media_ledger = session.scalar(
+                select(V2ProductionEffectLedger).where(
+                    V2ProductionEffectLedger.workflow_run_id == run.id,
+                    V2ProductionEffectLedger.stage == "MEDIA",
+                    V2ProductionEffectLedger.state == "VERIFIED",
+                )
+            )
             if render_ledger is None:
                 raise ValidationFailureError("V2_LOCAL_ARCHIVE_RENDER_REQUIRED")
+            if media_ledger is None:
+                raise ValidationFailureError("V2_LOCAL_ARCHIVE_MEDIA_REQUIRED")
             render_journal = dict(render_ledger.effect_journal)
+            media_journal = dict(media_ledger.effect_journal)
             destination = session.get(
                 ArtifactVersion,
                 package.destination_binding_ref.artifact_version_id,
@@ -2342,6 +2352,30 @@ class V2LocalNativeProductionAdapter:
         archive_dir = self.root / "archive" / str(project.id)
         archive_dir.mkdir(parents=True, exist_ok=True)
         destination_path = archive_dir / f"{checksum}.mp4"
+        caption_source = self._from_relative(
+            _required_text(media_journal, "caption_relative_path")
+        )
+        caption_checksum = _required_hash(media_journal, "caption_checksum")
+        if _sha256_file(caption_source) != caption_checksum:
+            raise ValidationFailureError(
+                "V2_LOCAL_ARCHIVE_CAPTION_SOURCE_CHECKSUM_MISMATCH"
+            )
+        caption_destination = archive_dir / f"{checksum}.srt"
+        if caption_destination.exists():
+            if (
+                caption_destination.is_symlink()
+                or _sha256_file(caption_destination) != caption_checksum
+            ):
+                raise ValidationFailureError(
+                    "V2_LOCAL_ARCHIVE_CAPTION_DESTINATION_MISMATCH"
+                )
+        else:
+            shutil.copy2(caption_source, caption_destination)
+            if _sha256_file(caption_destination) != caption_checksum:
+                raise ValidationFailureError(
+                    "V2_LOCAL_ARCHIVE_CAPTION_COPY_MISMATCH"
+                )
+        caption_relative_ref = self._relative(caption_destination)
         effect_dir = self._effect_dir(context.command_id)
         journal_path = effect_dir / "archive-command-journal.json"
         audio_strategy = str(render_journal["audio_strategy"])
@@ -2393,6 +2427,15 @@ class V2LocalNativeProductionAdapter:
             "size_bytes": destination_path.stat().st_size,
             "thumbnail_relative_ref": thumbnail_relative_ref,
             "thumbnail_checksum": thumbnail_checksum,
+            "caption_relative_ref": caption_relative_ref,
+            "caption_checksum": caption_checksum,
+            "caption_ref": _required_text(media_journal, "caption_ref"),
+            "caption_artifact_hash": _required_hash(
+                media_journal, "caption_artifact_hash"
+            ),
+            "subtitle_qc_ref": _required_text(media_journal, "subtitle_qc_ref"),
+            "subtitle_qc_hash": _required_hash(media_journal, "subtitle_qc_hash"),
+            "caption_language": str(media_journal.get("caption_language") or "en"),
             "measured_render_duration_ms": int(
                 render_journal["measured_render_duration_ms"]
             ),
@@ -2417,6 +2460,15 @@ class V2LocalNativeProductionAdapter:
             archive_journal_hash=archive_journal_hash,
             thumbnail_relative_ref=thumbnail_relative_ref,
             thumbnail_checksum=thumbnail_checksum,
+            caption_relative_ref=caption_relative_ref,
+            caption_checksum=caption_checksum,
+            caption_ref=_required_text(media_journal, "caption_ref"),
+            caption_artifact_hash=_required_hash(
+                media_journal, "caption_artifact_hash"
+            ),
+            subtitle_qc_ref=_required_text(media_journal, "subtitle_qc_ref"),
+            subtitle_qc_hash=_required_hash(media_journal, "subtitle_qc_hash"),
+            caption_language=str(media_journal.get("caption_language") or "en"),
             audio_strategy=audio_strategy,
             audio_asset_ref=str(render_journal["audio_asset_ref"]),
             audio_checksum=render_journal.get("audio_checksum"),
@@ -2440,6 +2492,12 @@ class V2LocalNativeProductionAdapter:
             "thumbnail_relative_ref": thumbnail_relative_ref,
             "thumbnail_checksum": thumbnail_checksum,
             "thumbnail_invocation_count": 1,
+            "caption_relative_ref": caption_relative_ref,
+            "caption_checksum": caption_checksum,
+            "caption_ref": _required_text(media_journal, "caption_ref"),
+            "subtitle_qc_ref": _required_text(media_journal, "subtitle_qc_ref"),
+            "subtitle_qc_hash": _required_hash(media_journal, "subtitle_qc_hash"),
+            "caption_sidecar_copy_count": 1,
             "final_media_ref_id": str(final_media.id),
             "audio_strategy": audio_strategy,
             "audio_asset_ref": render_journal["audio_asset_ref"],
@@ -2464,6 +2522,11 @@ class V2LocalNativeProductionAdapter:
                 "automatic_publish": False,
                 "thumbnail_relative_ref": thumbnail_relative_ref,
                 "thumbnail_checksum": thumbnail_checksum,
+                "caption_relative_ref": caption_relative_ref,
+                "caption_checksum": caption_checksum,
+                "caption_ref": _required_text(media_journal, "caption_ref"),
+                "subtitle_qc_ref": _required_text(media_journal, "subtitle_qc_ref"),
+                "subtitle_qc_hash": _required_hash(media_journal, "subtitle_qc_hash"),
                 "audio_strategy": audio_strategy,
                 "audio_asset_ref": render_journal["audio_asset_ref"],
                 "audio_checksum": render_journal.get("audio_checksum"),
@@ -2695,6 +2758,13 @@ class V2LocalNativeProductionAdapter:
         archive_journal_hash: str,
         thumbnail_relative_ref: str,
         thumbnail_checksum: str,
+        caption_relative_ref: str,
+        caption_checksum: str,
+        caption_ref: str,
+        caption_artifact_hash: str,
+        subtitle_qc_ref: str,
+        subtitle_qc_hash: str,
+        caption_language: str,
         audio_strategy: str,
         audio_asset_ref: str,
         audio_checksum: str | None,
@@ -2741,6 +2811,14 @@ class V2LocalNativeProductionAdapter:
                 "readback_checksum": checksum,
                 "thumbnail_relative_ref": thumbnail_relative_ref,
                 "thumbnail_checksum": thumbnail_checksum,
+                "caption_relative_ref": caption_relative_ref,
+                "caption_checksum": caption_checksum,
+                "caption_ref": caption_ref,
+                "caption_artifact_hash": caption_artifact_hash,
+                "subtitle_qc_ref": subtitle_qc_ref,
+                "subtitle_qc_hash": subtitle_qc_hash,
+                "caption_language": caption_language,
+                "caption_storage_provider": "VCOS_LOCAL_ARCHIVE",
                 "audio_strategy": audio_strategy,
                 "audio_asset_ref": audio_asset_ref,
                 "audio_checksum": audio_checksum,
@@ -2779,7 +2857,15 @@ class V2LocalNativeProductionAdapter:
                             "type": "render_output",
                             "ref": run.render_output_ref,
                             "checksum": checksum,
-                        }
+                        },
+                        {
+                            "type": "caption_sidecar",
+                            "ref": caption_ref,
+                            "local_ref": caption_relative_ref,
+                            "checksum": caption_checksum,
+                            "subtitle_qc_ref": subtitle_qc_ref,
+                            "subtitle_qc_hash": subtitle_qc_hash,
+                        },
                     ],
                     technical_appendix=appendix,
                 )
@@ -2813,6 +2899,13 @@ class V2LocalNativeProductionAdapter:
                 "archive_state": "VERIFIED",
                 "cloud_media_ref_id": str(cloud.id),
                 "file_ref": object_ref,
+                "caption_relative_ref": caption_relative_ref,
+                "caption_checksum": caption_checksum,
+                "caption_ref": caption_ref,
+                "caption_artifact_hash": caption_artifact_hash,
+                "subtitle_qc_ref": subtitle_qc_ref,
+                "subtitle_qc_hash": subtitle_qc_hash,
+                "caption_language": caption_language,
                 "audio_strategy": audio_strategy,
                 "audio_asset_ref": audio_asset_ref,
                 "audio_checksum": audio_checksum,
@@ -5047,9 +5140,59 @@ def _fsync_directory(path: Path) -> None:
     finally:
         os.close(descriptor)
 
+def v2_local_caption_sidecar_review_metadata(
+    cloud: CloudMediaRef,
+) -> dict[str, Any]:
+    """Project checksum-verified local SRT authority into final review."""
+
+    appendix = (
+        cloud.technical_appendix
+        if isinstance(cloud.technical_appendix, dict)
+        else {}
+    )
+    required_hashes = (
+        appendix.get("caption_checksum"),
+        appendix.get("caption_artifact_hash"),
+        appendix.get("subtitle_qc_hash"),
+    )
+    if (
+        cloud.storage_provider != "VCOS_LOCAL_ARCHIVE"
+        or cloud.upload_status != "VERIFIED"
+        or cloud.verification_status != "CHECKSUM_VERIFIED"
+        or appendix.get("caption_storage_provider") != "VCOS_LOCAL_ARCHIVE"
+        or not isinstance(appendix.get("caption_relative_ref"), str)
+        or not appendix.get("caption_relative_ref")
+        or not isinstance(appendix.get("caption_ref"), str)
+        or not appendix.get("caption_ref")
+        or not isinstance(appendix.get("subtitle_qc_ref"), str)
+        or not appendix.get("subtitle_qc_ref")
+        or any(
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            for value in required_hashes
+        )
+    ):
+        raise ValidationFailureError("V2_LOCAL_CAPTION_REVIEW_AUTHORITY_MISMATCH")
+    return {
+        "schema_version": "vcos.v2-local-caption-sidecar-review.v1",
+        "delivery_mode": "SIDECAR_ONLY",
+        "label": "Download SRT sidecar",
+        "file_name": f"{cloud.file_name}.srt",
+        "caption_ref": appendix["caption_ref"],
+        "caption_local_file_ref": appendix["caption_relative_ref"],
+        "caption_checksum_sha256": appendix["caption_checksum"],
+        "caption_artifact_hash": appendix["caption_artifact_hash"],
+        "subtitle_qc_ref": appendix["subtitle_qc_ref"],
+        "subtitle_qc_hash": appendix["subtitle_qc_hash"],
+        "caption_language": appendix.get("caption_language") or "en",
+        "archive_verification_state": "VERIFIED",
+        "storage_provider": "VCOS_LOCAL_ARCHIVE",
+    }
 
 __all__ = [
     "V2_AUDIO_STRATEGY",
     "V2_LOCAL_ADAPTER_KEY",
     "V2LocalNativeProductionAdapter",
+    "v2_local_caption_sidecar_review_metadata",
 ]

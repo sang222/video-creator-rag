@@ -14,6 +14,7 @@ from app.api.routes import (
     publishing_handoff,
     drive_archive,
     youtube_follow,
+    youtube_delivery,
     learning_memory,
     provider_execution_safety,
     llm_prompt_ops,
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     _include_router_flat(application, publishing_handoff.create_router())
     _include_router_flat(application, drive_archive.create_router())
     _include_router_flat(application, youtube_follow.create_router())
+    _include_router_flat(application, youtube_delivery.create_router())
     _include_router_flat(application, learning_memory.create_router())
     _include_router_flat(application, provider_execution_safety.create_router())
     _include_router_flat(application, llm_prompt_ops.create_router())

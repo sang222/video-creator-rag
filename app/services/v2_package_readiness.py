@@ -1092,8 +1092,12 @@ def _real_provider_policy(authority: _SupportAuthority) -> ChannelScopedPolicy:
         or not scoped.provider_usage_policy.elevenlabs.final_narration_authority
         or scoped.provider_usage_policy.elevenlabs.initial_tts_attempts != 1
         or not scoped.provider_usage_policy.native_ffmpeg_final_render_authority
-        or not scoped.provider_usage_policy.drive_archive_required_before_cleanup
-        or not scoped.publish_policy.drive_archive_required
+        or not scoped.provider_usage_policy.youtube_private_stage_required_before_cleanup
+        or scoped.provider_usage_policy.drive_archive_required_before_cleanup
+        or not scoped.publish_policy.youtube_private_stage_required
+        or scoped.publish_policy.drive_archive_required
+        or scoped.publish_policy.local_purge_after_archive_state
+        != "YOUTUBE_PRIVATE_VERIFIED"
         or scoped.budget_policy.max_estimated_cost_per_video <= 0
     ):
         raise ValidationFailureError("V2_REAL_PROVIDER_POLICY_NOT_AUTHORIZED")
@@ -1374,26 +1378,12 @@ def _support_payloads(
             route.adapter_key
             if route is not None
             else (
-                "v2-google-drive-archive" if stage == "ARCHIVE" else "v2-local-native"
+                "v2-local-native"
             )
         )
-        # Normal production authority seals the Drive resolver.  A locally
-        # sealed route remains useful only for the native-effects qualification
-        # harness, where it is explicitly supplied in the frozen envelope; do
-        # not silently turn an unconfigured Drive archive into a local copy.
-        mode = (
-            "GOOGLE_DRIVE_REMOTE_ARCHIVE"
-            if real_production and stage == "ARCHIVE"
-            else (
-                "GOOGLE_DRIVE_VERIFIED_ARCHIVE"
-                if stage == "ARCHIVE" and adapter_key == "v2-google-drive-archive"
-                else (
-                    "LOCAL_VERIFIED_ARCHIVE"
-                    if stage == "ARCHIVE"
-                    else stage_modes[stage]
-                )
-            )
-        )
+        # Final MP4 custody is local and checksum-verified.  Remote review
+        # storage is the later YouTube PRIVATE delivery lane, not ARCHIVE.
+        mode = "LOCAL_VERIFIED_ARCHIVE" if stage == "ARCHIVE" else stage_modes[stage]
         parameters: dict[str, Any] = {
             "mode": mode,
             "audio_strategy": audio_strategy,
@@ -1710,7 +1700,15 @@ def _support_payloads(
             "title": authority.project.title,
             "description": authority.project.description or "",
             "privacy": str(destination.get("default_visibility") or "PRIVATE").upper(),
-            "manual_publish_required": True,
+            "manual_publish_required": not bool(
+                scoped_policy
+                and scoped_policy.publish_policy.youtube_private_stage_required
+            ),
+            "manual_public_release_required": True,
+            "youtube_private_stage_required": bool(
+                scoped_policy
+                and scoped_policy.publish_policy.youtube_private_stage_required
+            ),
             "lineage": lineage,
         },
         "rights_disclosure_completeness_report": {
@@ -1757,7 +1755,7 @@ def _support_payloads(
                 "ELEVENLABS" if real_production else "QUALIFICATION_LOCAL_OS_TTS"
             ),
             "archive_provider": (
-                "GOOGLE_DRIVE" if real_production else "QUALIFICATION_ONLY"
+                "VCOS_LOCAL_ARCHIVE" if real_production else "QUALIFICATION_ONLY"
             ),
             "visual_provider_plan": visual_provider_plan,
             "production_visual_policy_ref": (
@@ -1852,9 +1850,54 @@ def _support_payloads(
                     "privacy_status": str(
                         destination.get("default_visibility") or "PRIVATE"
                     ).upper(),
+                    "public_privacy_status": "PUBLIC",
+                    "tags": (
+                        list(scoped_policy.publish_policy.youtube_default_tags)
+                        if scoped_policy is not None
+                        else []
+                    ),
+                    "category_id": (
+                        scoped_policy.publish_policy.youtube_category_id
+                        if scoped_policy is not None
+                        else "28"
+                    ),
+                    "default_language": str(
+                        destination.get("content_language")
+                        or destination.get("primary_locale")
+                        or "en"
+                    ).split("-", 1)[0],
+                    "made_for_kids": (
+                        scoped_policy.publish_policy.youtube_made_for_kids
+                        if scoped_policy is not None
+                        else False
+                    ),
+                    "contains_synthetic_media": bool(
+                        scoped_policy
+                        and scoped_policy.publish_policy.synthetic_media_disclosure_required
+                    ),
+                    "thumbnail_required": True,
+                    "caption_required": True,
+                    "delivery_mode": (
+                        "YOUTUBE_PRIVATE_STAGE"
+                        if scoped_policy is not None
+                        and scoped_policy.publish_policy.youtube_private_stage_required
+                        else "MANUAL_UPLOAD"
+                    ),
                 },
                 "disclosure_snapshot": {
-                    "manual_publish_required": True,
+                    "manual_publish_required": not bool(
+                        scoped_policy
+                        and scoped_policy.publish_policy.youtube_private_stage_required
+                    ),
+                    "manual_public_release_required": True,
+                    "youtube_private_stage_required": bool(
+                        scoped_policy
+                        and scoped_policy.publish_policy.youtube_private_stage_required
+                    ),
+                    "contains_synthetic_media": bool(
+                        scoped_policy
+                        and scoped_policy.publish_policy.synthetic_media_disclosure_required
+                    ),
                     "audio_strategy": audio_strategy,
                     "disclosures": [],
                 },

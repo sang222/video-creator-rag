@@ -281,7 +281,7 @@ class ManualPublishConfirmation(Base):
             name="uq_manual_publish_confirmations_verification_command_id",
         ),
         CheckConstraint(
-            "schema_version in ('v1','v2')",
+            "schema_version in ('v1','v2','v3')",
             name="ck_manual_publish_confirmations_schema_version",
         ),
         CheckConstraint(
@@ -494,6 +494,9 @@ class UploadedVideo(Base):
         UUID(as_uuid=True), ForeignKey("domain_events.id")
     )
     analytics_ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    public_publication_receipt_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("public_publication_receipts.id")
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -524,9 +527,21 @@ class UploadedVideo(Base):
             "analytics_ready_event_id",
             name="uq_uploaded_videos_analytics_ready_event_id",
         ),
+        UniqueConstraint(
+            "public_publication_receipt_id",
+            name="uq_uploaded_videos_public_receipt",
+        ),
         CheckConstraint(
-            "schema_version in ('v1','v2')",
+            "schema_version in ('v1','v2','v3')",
             name="ck_uploaded_videos_schema_version",
+        ),
+        CheckConstraint(
+            "(schema_version <> 'v3') or "
+            "(public_publication_receipt_id is not null "
+            "and actual_visibility = 'PUBLIC' "
+            "and verification_status = 'VERIFIED' "
+            "and analytics_sync_status = 'READY')",
+            name="ck_uploaded_videos_v3_public_receipt",
         ),
         CheckConstraint(
             "(schema_version = 'v1') or "

@@ -363,7 +363,7 @@ class HumanUploadTaskReadV2(BaseModel):
     destination: str
     target_platform: str
     task_state: HumanUploadTaskStateV2
-    schema_version: Literal["v2"]
+    schema_version: Literal["v2", "v3"]
     final_review_candidate_id: uuid.UUID
     final_video_decision_id: uuid.UUID
     final_media_ref_id: uuid.UUID
@@ -562,6 +562,7 @@ class UploadedVideoReadV2(BaseModel):
     verified_event_id: uuid.UUID
     analytics_ready_event_id: uuid.UUID
     analytics_ready_at: AwareDatetime
+    public_publication_receipt_id: uuid.UUID | None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 

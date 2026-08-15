@@ -80,9 +80,10 @@ _V2_ADAPTER_BY_STAGE = {
     "MEDIA": "v2-local-native",
     "RENDER": "v2-local-native",
     "QC": "v2-local-native",
-    # Archive is deliberately remote-artifact resolution, not a local-copy
-    # completion.  The adapter itself remains network-free and fail-closed.
-    "ARCHIVE": "v2-google-drive-archive",
+    # The canonical post-render custody boundary is a checksum-verified local
+    # archive.  YouTube private staging later becomes remote review/storage;
+    # Google Drive remains legacy read/reconciliation only.
+    "ARCHIVE": "v2-local-native",
 }
 _JOB_TYPES_BY_LANE = {
     "LONG_FORM": {
@@ -1037,7 +1038,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
                 "MEDIA": "v2-local-native",
                 "RENDER": "v2-local-native",
                 "QC": "v2-local-native",
-                "ARCHIVE": "v2-google-drive-archive",
+                "ARCHIVE": "v2-local-native",
             }
             if self.execution_mode == "QUALIFICATION_LOCAL"
             else {
@@ -1045,7 +1046,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
                 **({"VISUAL": "v2-ai-visual-production"} if ai_visual_bound else {}),
                 "RENDER": "v2-local-native",
                 "QC": "v2-local-native",
-                "ARCHIVE": "v2-google-drive-remote",
+                "ARCHIVE": "v2-local-native",
             }
         )
         if {
@@ -3251,8 +3252,12 @@ class V2SupportAuthorityService:
             or not scoped.provider_usage_policy.elevenlabs.enabled
             or not scoped.provider_usage_policy.elevenlabs.final_narration_authority
             or not scoped.provider_usage_policy.native_ffmpeg_final_render_authority
-            or not scoped.provider_usage_policy.drive_archive_required_before_cleanup
-            or not scoped.publish_policy.drive_archive_required
+            or not scoped.provider_usage_policy.youtube_private_stage_required_before_cleanup
+            or scoped.provider_usage_policy.drive_archive_required_before_cleanup
+            or not scoped.publish_policy.youtube_private_stage_required
+            or scoped.publish_policy.drive_archive_required
+            or scoped.publish_policy.local_purge_after_archive_state
+            != "YOUTUBE_PRIVATE_VERIFIED"
         ):
             raise ValidationFailureError("V2_REAL_PROVIDER_POLICY_NOT_AUTHORIZED")
         lane_routes = _JOB_TYPES_BY_LANE.get(str(project.production_lane))
@@ -3366,10 +3371,10 @@ class V2SupportAuthorityService:
                     ),
                 )
             )
-        archive_role = roles.require_role("google_drive_archive")
+        archive_role = roles.require_role("vcos_storage")
         if (
             archive_role.is_enabled is not True
-            or archive_role.is_real_provider is not True
+            or archive_role.is_real_provider is not False
             or archive_role.supports_real_execution is not True
         ):
             raise ValidationFailureError("V2_REAL_PROVIDER_ROUTE_INVALID")
@@ -3381,16 +3386,18 @@ class V2SupportAuthorityService:
                 role=archive_role,
                 capability=None,
                 job_type=None,
-                routing_policy_ref="domain://v2-support-authority/google-drive-remote-archive",
+                routing_policy_ref="domain://v2-support-authority/local-verified-archive",
                 routing_policy_hash=semantic_hash(
                     {
                         "stage": "ARCHIVE",
                         "provider_key": archive_role.provider_key,
                         "provider_role_id": str(archive_role.id),
-                        "remote_archive_required": True,
+                        "storage_provider": "VCOS_LOCAL_ARCHIVE",
+                        "youtube_private_stage_follows": True,
+                        "automatic_publish": False,
                     }
                 ),
-                adapter_key="v2-google-drive-remote",
+                adapter_key="v2-local-native",
                 paid_provider_call=False,
                 max_cost_usd=Decimal("0"),
             )

@@ -96,7 +96,10 @@ def resolve_provider_authority(
     required: list[str] = []
     if scoped.provider_usage_policy.elevenlabs.enabled:
         required.append("elevenlabs")
-    if scoped.provider_usage_policy.drive_archive_required_before_cleanup:
+    if (
+        scoped.provider_usage_policy.drive_archive_required_before_cleanup
+        and not scoped.provider_usage_policy.youtube_private_stage_required_before_cleanup
+    ):
         required.append("google_drive_archive")
     # A caller-provided snapshot exists solely for hermetic unit tests. Runtime
     # cadence never supplies it: it recomputes the concrete v2 executor and

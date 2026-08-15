@@ -44,8 +44,10 @@ items:
       final_render_authority: native_ffmpeg_renderer
       final_narration_authority: elevenlabs
       canonical_media_timeline_required: true
-      drive_verified_archive_only: true
-      youtube_manual_upload_only: true
+      drive_verified_archive_only: false
+      youtube_manual_upload_only: false
+      youtube_private_stage_authority: true
+      youtube_public_release_manual_only: true
     voice_policy:
       provider: elevenlabs
       voice_id: pNInz6obpgDQGcFmaJgB
@@ -113,8 +115,10 @@ items:
         initial_tts_attempts: 1
         controlled_retry_requires_new_approval: true
       native_ffmpeg_final_render_authority: true
-      drive_archive_required_before_cleanup: true
-      youtube_manual_publish_only: true
+      drive_archive_required_before_cleanup: false
+      youtube_manual_publish_only: false
+      youtube_private_stage_required_before_cleanup: true
+      youtube_public_release_api_allowed: false
     budget_policy:
       channel_stage: NEW_UNPROVEN
       tier: TIER_1_LOW_COST_PRODUCTION
@@ -163,13 +167,18 @@ items:
       cross_channel_duplication_awareness: true
     publish_policy:
       primary_destination: YouTube
-      manual_upload_only: true
+      manual_upload_only: false
+      manual_public_release_only: true
+      youtube_private_stage_required: true
+      youtube_category_id: "28"
+      youtube_made_for_kids: false
+      youtube_default_tags: []
       synthetic_media_disclosure_required: true
       rights_license_complete_required: true
       metadata_thumbnail_truthfulness_required: true
       human_final_approval_required: true
-      drive_archive_required: true
-      local_purge_after_archive_state: ARCHIVE_VERIFIED
+      drive_archive_required: false
+      local_purge_after_archive_state: YOUTUBE_PRIVATE_VERIFIED
     analytics_maturity_policy:
       maturity: NEW_UNPROVEN
       learning_promotion_allowed: false
@@ -190,6 +199,7 @@ items:
         - forced_alignment
         - pexels_optional
         - google_veo_optional
-        - drive_archive
-        - manual_youtube_publish
+        - local_verified_archive
+        - youtube_private_stage
+        - manual_youtube_public_release
       launch_requires_all: true

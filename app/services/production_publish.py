@@ -21,6 +21,7 @@ from app.contracts.production_package import (
     ProductionPackageContentV2,
     ProductionReadinessReceiptContentV2,
 )
+from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.production_publish import (
     FinalReviewCandidateCreateV2,
     FinalVideoDecisionCreate,
@@ -51,6 +52,7 @@ from app.db.models.m10_5 import CloudMediaRef
 from app.db.models.m5 import ProjectAdmissionDecision
 from app.db.models.m6 import MediaQCReport
 from app.db.models.m7 import ManualPublishConfirmation, UploadedVideo
+from app.db.models.channel import CompiledChannelPolicySnapshot
 from app.db.models.production_publish import (
     FinalReviewCandidate,
     FinalVideoDecision,
@@ -671,6 +673,13 @@ class ProductionPublishService:
         run.final_review_candidate_hash = candidate.candidate_hash
         run.last_progress_at = utc_now()
         self.session.flush()
+        from app.services.youtube_delivery import TelegramDeliveryService
+
+        TelegramDeliveryService(self.session).prepare(
+            candidate_id=candidate.id,
+            notification_kind="FINAL_REVIEW_READY",
+        )
+        self.session.flush()
         return candidate
 
     def require_candidate(
@@ -790,7 +799,11 @@ class ProductionPublishService:
         self.session.flush()
 
         if data.decision == FinalVideoDecisionValue.UPLOAD:
-            self._create_upload_task_once(candidate=candidate, decision=decision)
+            self._create_upload_task_once(
+                candidate=candidate,
+                decision=decision,
+                actor=actor,
+            )
         self.session.flush()
         return self._decision_result(decision)
 
@@ -834,6 +847,10 @@ class ProductionPublishService:
             raise ConflictError("UPLOAD_TASK_CANCELED")
         if task.task_state == "VERIFIED":
             return task
+        if self._candidate_requires_private_stage(candidate=None, task=task):
+            raise ValidationFailureError(
+                "YOUTUBE_PRIVATE_STAGE_FILE_ATTESTATION_NOT_APPLICABLE"
+            )
 
         expected_refs = {task.final_media_file_ref, task.archive_object_ref}
         if data.selected_file_ref not in expected_refs:
@@ -957,6 +974,10 @@ class ProductionPublishService:
         self._require_task_publish_enabled(task)
         if task.task_state == "CANCELED":
             raise ConflictError("UPLOAD_TASK_CANCELED")
+        private_stage_required = self._candidate_requires_private_stage(
+            candidate=None,
+            task=task,
+        )
         if task.task_state == "READY_FOR_OPERATOR":
             raise ValidationFailureError("FILE_SELECTION_ATTESTATION_REQUIRED")
         if task.task_state == "VERIFIED":
@@ -966,6 +987,25 @@ class ProductionPublishService:
             return existing
 
         candidate, decision, final_media = self._task_lineage(task)
+        if private_stage_required:
+            from app.db.models.youtube_delivery import YouTubePrivateStage
+
+            stage = self.session.scalar(
+                select(YouTubePrivateStage).where(
+                    YouTubePrivateStage.final_video_decision_id == decision.id
+                )
+            )
+            if (
+                stage is None
+                or stage.state != "PRIVATE_VERIFIED"
+                or stage.platform_video_id != data.platform_video_id
+                or stage.public_release_expectation.get("platform_channel_id")
+                != data.platform_channel_id
+                or task.task_state != "AWAITING_CONFIRMATION"
+            ):
+                raise ValidationFailureError(
+                    "YOUTUBE_PRIVATE_STAGE_PUBLIC_RELEASE_NOT_READY"
+                )
         payload = self._confirmation_payload(task=task, data=data, actor=actor)
         confirmation_hash = stable_hash(payload)
         command_match = self.session.scalar(
@@ -1190,6 +1230,14 @@ class ProductionPublishService:
             raise ConflictError(
                 f"PUBLISH_CONFIRMATION_NOT_VERIFIABLE:{confirmation.confirmation_state}"
             )
+        if (
+            data.observed_privacy_status != "PUBLIC"
+            or str((confirmation.actual_metadata or {}).get("privacy_status") or "").upper()
+            != "PUBLIC"
+        ):
+            raise ValidationFailureError(
+                "PUBLICATION_VERIFICATION_REQUIRES_PUBLIC_VISIBILITY"
+            )
 
         task = self._require_v2_task(confirmation.human_upload_task_id, for_update=True)
         candidate, decision, final_media = self._task_lineage(task)
@@ -1253,6 +1301,30 @@ class ProductionPublishService:
         confirmation.reason_codes = []
         confirmation.next_action = None
 
+        observed_public_metadata = {
+            "title": data.observed_title,
+            "description": data.observed_description,
+            "privacy_status": data.observed_privacy_status,
+            "duration_seconds": str(data.observed_duration_seconds),
+            "platform": data.observed_platform,
+            "platform_channel_id": data.observed_platform_channel_id,
+            "platform_video_id": data.observed_platform_video_id,
+        }
+        from app.services.youtube_delivery import YouTubeDeliveryService
+
+        public_receipt = YouTubeDeliveryService(self.session).create_publication_receipt(
+            candidate=candidate,
+            decision=decision,
+            confirmation=confirmation,
+            observed_metadata=observed_public_metadata,
+            observed_platform_channel_id=data.observed_platform_channel_id,
+            observed_platform_video_id=data.observed_platform_video_id,
+            observed_video_url=data.observed_video_url,
+            observed_published_at=data.observed_published_at,
+            verification_evidence_ref=data.verification_evidence_ref,
+            verification_evidence_hash=verification_evidence_hash,
+        )
+
         uploaded_id = uuid.uuid4()
         verified_event_id = _event_id(uploaded_id, "UPLOADED_VIDEO_VERIFIED")
         analytics_event_id = _event_id(uploaded_id, "ANALYTICS_READY")
@@ -1277,6 +1349,8 @@ class ProductionPublishService:
             "final_video_decision_id": str(decision.id),
             "human_upload_task_id": str(task.id),
             "manual_publish_confirmation_id": str(confirmation.id),
+            "public_publication_receipt_id": str(public_receipt.id),
+            "public_publication_receipt_hash": public_receipt.receipt_hash,
             "production_package_artifact_version_id": str(
                 candidate.production_package_artifact_version_id
             ),
@@ -1363,7 +1437,8 @@ class ProductionPublishService:
             analytics_sync_status="READY",
             last_verified_at=now,
             operator_note=confirmation.operator_notes,
-            schema_version="v2",
+            schema_version="v3",
+            public_publication_receipt_id=public_receipt.id,
             final_review_candidate_id=candidate.id,
             final_video_decision_id=decision.id,
             final_media_ref_id=final_media.id,
@@ -1417,8 +1492,8 @@ class ProductionPublishService:
         actor: ActorContext,
     ) -> UploadedVideo:
         uploaded = self.session.get(UploadedVideo, uploaded_id)
-        if uploaded is None or uploaded.schema_version != "v2":
-            raise NotFoundError(f"v2 uploaded video not found: {uploaded_id}")
+        if uploaded is None or uploaded.schema_version not in {"v2", "v3"}:
+            raise NotFoundError(f"canonical uploaded video not found: {uploaded_id}")
         require_company_permission(
             self.session,
             actor=actor,
@@ -1534,6 +1609,7 @@ class ProductionPublishService:
         *,
         candidate: FinalReviewCandidate,
         decision: FinalVideoDecision,
+        actor: ActorContext,
     ) -> HumanUploadTask:
         if decision.decision != "UPLOAD":
             raise ValidationFailureError("UPLOAD_TASK_REQUIRES_UPLOAD_DECISION")
@@ -1552,6 +1628,11 @@ class ProductionPublishService:
             or final_media.checksum_sha256 != candidate.final_media_hash
         ):
             raise ValidationFailureError("UPLOAD_TASK_FINAL_MEDIA_AUTHORITY_MISMATCH")
+        private_stage_required = self._candidate_requires_private_stage(
+            candidate=candidate,
+            task=None,
+        )
+        now = utc_now()
         task = HumanUploadTask(
             company_id=candidate.company_id,
             channel_workspace_id=candidate.channel_workspace_id,
@@ -1560,7 +1641,7 @@ class ProductionPublishService:
             publish_package_id=None,
             destination=candidate.target_platform,
             target_platform=candidate.target_platform,
-            task_state="READY_FOR_OPERATOR",
+            task_state="IN_PROGRESS" if private_stage_required else "READY_FOR_OPERATOR",
             publish_metadata_ref=(
                 f"final_review_candidate:{candidate.id}:publish_metadata_snapshot"
             ),
@@ -1578,24 +1659,56 @@ class ProductionPublishService:
                     "archive_object_ref": candidate.archive_object_ref,
                 }
             ],
-            checklist=[
-                {
-                    "key": "SELECT_EXACT_FINAL_MEDIA",
-                    "required": True,
-                    "expected_checksum": candidate.final_media_hash,
-                },
-                {
-                    "key": "UPLOAD_MANUALLY",
-                    "required": True,
-                    "auto_publish": False,
-                },
-            ],
-            required_checklist=[
-                {
-                    "key": "FILE_SELECTION_ATTESTATION",
-                    "required": True,
-                }
-            ],
+            checklist=(
+                [
+                    {
+                        "key": "YOUTUBE_PRIVATE_STAGE",
+                        "required": True,
+                        "state": "PENDING",
+                    },
+                    {
+                        "key": "HUMAN_PUBLIC_RELEASE",
+                        "required": True,
+                        "auto_publish": False,
+                    },
+                    {
+                        "key": "PUBLICATION_CONFIRMATION",
+                        "required": True,
+                    },
+                ]
+                if private_stage_required
+                else [
+                    {
+                        "key": "SELECT_EXACT_FINAL_MEDIA",
+                        "required": True,
+                        "expected_checksum": candidate.final_media_hash,
+                    },
+                    {
+                        "key": "UPLOAD_MANUALLY",
+                        "required": True,
+                        "auto_publish": False,
+                    },
+                ]
+            ),
+            required_checklist=(
+                [
+                    {
+                        "key": "PRIVATE_STAGE_VERIFIED",
+                        "required": True,
+                    },
+                    {
+                        "key": "HUMAN_PUBLIC_RELEASE_CONFIRMATION",
+                        "required": True,
+                    },
+                ]
+                if private_stage_required
+                else [
+                    {
+                        "key": "FILE_SELECTION_ATTESTATION",
+                        "required": True,
+                    }
+                ]
+            ),
             schema_version="v2",
             final_review_candidate_id=candidate.id,
             final_video_decision_id=decision.id,
@@ -1617,10 +1730,49 @@ class ProductionPublishService:
             episode_number=candidate.episode_number,
             standalone_reason_code=candidate.standalone_reason_code,
             archive_object_ref=candidate.archive_object_ref,
+            selected_file_name=(
+                _file_name(final_media.file_ref) if private_stage_required else None
+            ),
+            selected_file_ref=(final_media.file_ref if private_stage_required else None),
+            selected_file_checksum=(
+                candidate.final_media_hash if private_stage_required else None
+            ),
+            attested_by_user_id=(actor.actor_id if private_stage_required else None),
+            attested_at=(now if private_stage_required else None),
+            started_by_user_id=(actor.actor_id if private_stage_required else None),
+            started_at=(now if private_stage_required else None),
+            operator_note=(
+                "VCOS will upload the exact reviewed file to YouTube PRIVATE. "
+                "The operator retains the sole public-release decision."
+                if private_stage_required
+                else None
+            ),
         )
         self.session.add(task)
         self.session.flush()
         return task
+
+    def _candidate_requires_private_stage(
+        self,
+        *,
+        candidate: FinalReviewCandidate | None,
+        task: HumanUploadTask | None,
+    ) -> bool:
+        if candidate is None and task is None:
+            raise TypeError("candidate or task is required")
+        policy_snapshot_id = (
+            candidate.policy_snapshot_id
+            if candidate is not None
+            else task.policy_snapshot_id
+        )
+        snapshot = self.session.get(CompiledChannelPolicySnapshot, policy_snapshot_id)
+        try:
+            policy = ChannelScopedPolicy.model_validate(
+                (snapshot.compiled_payload or {})["channel_scoped_policy"]
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ValidationFailureError("PUBLISH_POLICY_AUTHORITY_INVALID") from exc
+        return bool(policy.publish_policy.youtube_private_stage_required)
 
     def _decision_result(
         self, decision: FinalVideoDecision
@@ -2326,7 +2478,11 @@ class ProductionPublishService:
             )
 
         expected = candidate.publish_metadata_snapshot
-        expected_privacy = str(expected.get("privacy_status") or "").upper()
+        expected_privacy = str(
+            expected.get("public_privacy_status")
+            or expected.get("privacy_status")
+            or ""
+        ).upper()
         if expected_privacy and data.privacy_status != expected_privacy:
             reason_codes.append("PRIVACY_MISMATCH")
             metadata_diff["privacy_status"] = {

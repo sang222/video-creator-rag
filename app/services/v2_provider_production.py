@@ -54,7 +54,7 @@ _V2_REAL_ADAPTERS_BY_STAGE = {
     ProductionWorkflowStage.VISUAL: "v2-ai-visual-production",
     ProductionWorkflowStage.RENDER: "v2-local-native",
     ProductionWorkflowStage.QC: "v2-local-native",
-    ProductionWorkflowStage.ARCHIVE: "v2-google-drive-remote",
+    ProductionWorkflowStage.ARCHIVE: "v2-local-native",
 }
 V2_EFFECT_STAGES = frozenset(
     {
@@ -425,6 +425,7 @@ class PackageBoundV2StageGateway:
         if archive_operation.execution_mode != V2_REAL_PRODUCTION_MODE:
             raise ValidationFailureError("V2_QUALIFICATION_FINAL_REVIEW_FORBIDDEN")
         verified_drive_archive = None
+        local_caption_sidecar = None
         if archive_operation.adapter_key in {
             "v2-google-drive-archive",
             "v2-google-drive-remote",
@@ -446,6 +447,35 @@ class PackageBoundV2StageGateway:
                 expected_archive_hash=_required_run_hash(
                     run.archive_receipt_hash, "archive_receipt_hash"
                 ),
+            )
+        elif archive_operation.adapter_key == "v2-local-native":
+            from app.services.v2_native_effects import (
+                v2_local_caption_sidecar_review_metadata,
+            )
+
+            local_final_media = context.session.get(
+                FinalMediaRef,
+                _required_run_uuid(run.final_media_ref_id, "final_media_ref_id"),
+            )
+            local_cloud = (
+                context.session.get(
+                    CloudMediaRef, local_final_media.cloud_media_ref_id
+                )
+                if local_final_media is not None
+                and local_final_media.cloud_media_ref_id is not None
+                else None
+            )
+            if (
+                local_final_media is None
+                or local_final_media.provider_key != "v2-local-native"
+                or local_cloud is None
+                or local_cloud.checksum_sha256 != run.render_output_checksum
+            ):
+                raise ValidationFailureError(
+                    "V2_PROVIDER_LOCAL_ARCHIVE_AUTHORITY_REQUIRED"
+                )
+            local_caption_sidecar = v2_local_caption_sidecar_review_metadata(
+                local_cloud
             )
         final_review = _provider_plan(context).get("final_review")
         if not isinstance(final_review, dict):
@@ -516,6 +546,8 @@ class PackageBoundV2StageGateway:
             publish_metadata_snapshot["caption_sidecar"] = (
                 v2_drive_caption_sidecar_review_metadata(verified_drive_archive)
             )
+        elif local_caption_sidecar is not None:
+            publish_metadata_snapshot["caption_sidecar"] = local_caption_sidecar
         target_market_lineage = _required_mapping(final_review, "target_market_lineage")
         target_market_lineage.update(
             {
