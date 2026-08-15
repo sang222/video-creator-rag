@@ -57,7 +57,7 @@ jobs:
           tests/test_v2_renderer_reconciliation.py
       - name: Lint changed voice execution runtime
         run: >-
-          ruff check
+          ruff check --isolated
           app/services/voice_execution.py
           app/services/v2_elevenlabs_narration.py
           app/services/combined_replacement_budget.py
