@@ -2344,11 +2344,7 @@ def _is_nich1_strict_snapshot(snapshot: CompiledChannelPolicySnapshot) -> bool:
     )
     return (
         binding.get("schema_version") == "ch1-flex.visual-source-policy-binding.v2"
-        and scoped.get("policy_version")
-        in {
-            "small-team-ai.channel-policy.v2",
-            "small-team-ai.channel-policy.v3",
-        }
+        and bool(scoped.get("policy_version"))
     )
 
 

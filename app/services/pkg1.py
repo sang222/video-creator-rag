@@ -139,8 +139,8 @@ class PKG1PackageService:
         ):
             return {"status": "BLOCKED", "reason_codes": ["CH1_NOT_PASS"]}
         channel = self.session.get(ChannelWorkspace, channel_id)
-        if channel is None or channel.key != "small-team-ai":
-            return {"status": "BLOCKED", "reason_codes": ["CHANNEL_NOT_SMALL_TEAM_AI"]}
+        if channel is None:
+            return {"status": "BLOCKED", "reason_codes": ["CHANNEL_NOT_FOUND"]}
         snapshot = self.session.get(
             CompiledChannelPolicySnapshot, channel.active_policy_snapshot_id
         )

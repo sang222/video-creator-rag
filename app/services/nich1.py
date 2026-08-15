@@ -1275,20 +1275,6 @@ class VisualNicheAlignmentGate(_BaseNicheAlignmentGate):
                 else NicheReasonCode.VISUAL_DIRECTION_CHANNEL_MISMATCH,
             )
         )
-        small_team_profile_ok = not _same(digest.channel_key, "small-team-ai") or _same(
-            digest.visual_source_profile, "STOCK_ASSISTED"
-        )
-        checks.append(
-            _check(
-                "small_team_ai_visual_source_profile",
-                NicheGateVerdict.PASS
-                if small_team_profile_ok
-                else NicheGateVerdict.BLOCK,
-                None
-                if small_team_profile_ok
-                else NicheReasonCode.SMALL_TEAM_AI_STOCK_ASSISTED_REQUIRED,
-            )
-        )
         decisions = {
             str(item.get("scene_id")): item
             for item in data.visual_source_decisions
