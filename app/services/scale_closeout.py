@@ -40,17 +40,18 @@ class OneEngineManyProfilesAudit:
 
     def scan_active_source(self, root: Path) -> tuple[str, ...]:
         violations: list[str] = []
-        targets = [root / "app"]
-        for target in targets:
-            if not target.exists():
+        target = root / "app"
+        if not target.exists():
+            return ()
+        for path in target.rglob("*.py"):
+            if path.name == "scale_closeout.py" or any(
+                part in {"__pycache__", "migrations"} for part in path.parts
+            ):
                 continue
-            for path in target.rglob("*.py"):
-                if any(part in {"__pycache__", "migrations"} for part in path.parts):
-                    continue
-                text = path.read_text(encoding="utf-8")
-                for code, pattern in self.BANNED_LITERAL_PATTERNS.items():
-                    if pattern.search(text):
-                        violations.append(f"{code}:{path.relative_to(root)}")
+            text = path.read_text(encoding="utf-8")
+            for code, pattern in self.BANNED_LITERAL_PATTERNS.items():
+                if pattern.search(text):
+                    violations.append(f"{code}:{path.relative_to(root)}")
         return tuple(sorted(set(violations)))
 
     def database_isolation_violations(self) -> tuple[str, ...]:
@@ -60,7 +61,10 @@ class OneEngineManyProfilesAudit:
         orphan_profiles = int(
             self.session.scalar(
                 select(func.count(ChannelProfileVersion.id))
-                .outerjoin(ChannelWorkspace, ChannelWorkspace.id == ChannelProfileVersion.channel_workspace_id)
+                .outerjoin(
+                    ChannelWorkspace,
+                    ChannelWorkspace.id == ChannelProfileVersion.channel_workspace_id,
+                )
                 .where(ChannelWorkspace.id.is_(None))
             )
             or 0
@@ -70,7 +74,10 @@ class OneEngineManyProfilesAudit:
         orphan_memory = int(
             self.session.scalar(
                 select(func.count(ChannelMemoryItem.id))
-                .outerjoin(ChannelWorkspace, ChannelWorkspace.id == ChannelMemoryItem.channel_workspace_id)
+                .outerjoin(
+                    ChannelWorkspace,
+                    ChannelWorkspace.id == ChannelMemoryItem.channel_workspace_id,
+                )
                 .where(ChannelWorkspace.id.is_(None))
             )
             or 0
@@ -97,7 +104,7 @@ class OneEngineManyProfilesAudit:
                 self.session.scalar(
                     select(func.count(func.distinct(UploadedVideo.channel_workspace_id))).where(
                         UploadedVideo.actual_visibility == "PUBLIC",
-                        UploadedVideo.verification_status == "VERIFIED",
+                        UploadedVideo.verification_status.in_(["VERIFIED", "VERIFIED_PUBLIC"]),
                     )
                 )
                 or 0
