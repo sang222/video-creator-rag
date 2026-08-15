@@ -48,4 +48,13 @@ if source.count(old) != 1:
         f"expected exactly one protocol upload replacement, found {source.count(old)}"
     )
 fixed = source.replace(old, new, 1)
+
+old_eof = 'write(test_path, test_content.rstrip() + append_tests + "\\n")'
+new_eof = 'write(test_path, test_content.rstrip() + append_tests.rstrip() + "\\n")'
+if fixed.count(old_eof) != 1:
+    raise RuntimeError(
+        f"expected exactly one test EOF writer, found {fixed.count(old_eof)}"
+    )
+fixed = fixed.replace(old_eof, new_eof, 1)
+
 exec(compile(fixed, str(source_path), "exec"), {"__name__": "__main__"})
