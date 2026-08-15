@@ -64,6 +64,8 @@ jobs:
           app/services/learning_authority_closeout.py
           app/services/audience_delivery_closeout.py
           app/services/business_os.py
+          app/services/channel_runtime_bootstrap.py
+          app/services/runtime_bootstrap.py
           app/services/scale_closeout.py
           alembic/versions/0085_series_authority_closeout.py
           alembic/versions/0086_learning_authority_closeout.py
@@ -77,6 +79,8 @@ jobs:
           app/services/learning_authority_closeout.py
           app/services/audience_delivery_closeout.py
           app/services/business_os.py
+          app/services/channel_runtime_bootstrap.py
+          app/services/runtime_bootstrap.py
           app/services/scale_closeout.py
           alembic/versions/0085_series_authority_closeout.py
           alembic/versions/0086_learning_authority_closeout.py
