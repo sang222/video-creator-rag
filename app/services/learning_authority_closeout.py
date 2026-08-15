@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -17,11 +17,7 @@ from app.db.models.architecture_closeout import (
     LearningSystemPromotionReceipt,
     PlatformEnforcementIncident,
 )
-from app.db.models.m10 import (
-    LearningCandidate,
-    LearningCandidateGenerationRun,
-    LearningPromotionEligibilityRun,
-)
+from app.db.models.m10 import LearningCandidate, LearningPromotionEligibilityRun
 from app.db.models.m11 import LearningReviewDecision
 from app.services.config_registry import content_hash
 from app.services.m11 import M11LearningReviewService
@@ -45,27 +41,43 @@ class LearningAuthorityCloseoutService:
 
     @staticmethod
     def equivalence_fingerprint(candidate: LearningCandidate) -> str:
+        """Match the 0086 database trigger exactly.
+
+        This digest is an equivalence key, not a security primitive. Two MD5
+        digests are used because PostgreSQL core exposes md5() without an
+        extension; identity/security hashes elsewhere in VCOS remain SHA-256.
+        """
+
         normalized = " ".join((candidate.suggested_learning or "").lower().split())
-        return content_hash(
-            {
-                "schema_version": "vcos.learning-equivalence.v1",
-                "candidate_type": candidate.candidate_type,
-                "recommended_scope": candidate.recommended_scope,
-                "normalized_learning": normalized,
-            }
+        canonical = (
+            f"{candidate.candidate_type or ''}|{candidate.recommended_scope or ''}|"
+            f"{normalized}"
         )
+        first = hashlib.md5(canonical.encode("utf-8"), usedforsecurity=False).hexdigest()
+        second = hashlib.md5(
+            f"vcos|{canonical}".encode("utf-8"), usedforsecurity=False
+        ).hexdigest()
+        return first + second
 
     def sync_equivalence_fingerprint(self, candidate_id: uuid.UUID) -> str:
         candidate = self._candidate(candidate_id, lock=True)
         fingerprint = self.equivalence_fingerprint(candidate)
-        self.session.execute(
+        current = self.session.execute(
             text(
-                "UPDATE learning_candidates SET equivalence_fingerprint=:fingerprint "
+                "SELECT equivalence_fingerprint FROM learning_candidates "
                 "WHERE id=:candidate_id"
             ),
-            {"fingerprint": fingerprint, "candidate_id": candidate.id},
-        )
-        self.session.flush()
+            {"candidate_id": candidate.id},
+        ).scalar_one()
+        if current != fingerprint:
+            self.session.execute(
+                text(
+                    "UPDATE learning_candidates SET equivalence_fingerprint=:fingerprint "
+                    "WHERE id=:candidate_id"
+                ),
+                {"fingerprint": fingerprint, "candidate_id": candidate.id},
+            )
+            self.session.flush()
         return fingerprint
 
     def system_promotion_preflight(
@@ -177,14 +189,21 @@ class LearningAuthorityCloseoutService:
         }
         digest = content_hash(payload)
         by_command = self.session.scalar(
-            select(LearningReviewCommand).where(LearningReviewCommand.command_id == command_id)
+            select(LearningReviewCommand).where(
+                LearningReviewCommand.command_id == command_id
+            )
         )
         if by_command is not None:
-            if by_command.learning_candidate_id != candidate.id or by_command.decision_hash != digest:
+            if (
+                by_command.learning_candidate_id != candidate.id
+                or by_command.decision_hash != digest
+            ):
                 raise ConflictError("LEARNING_REVIEW_COMMAND_REUSE_CONFLICT")
             if by_command.learning_review_decision_id is None:
                 raise ConflictError("LEARNING_REVIEW_COMMAND_INCOMPLETE")
-            decision = self.session.get(LearningReviewDecision, by_command.learning_review_decision_id)
+            decision = self.session.get(
+                LearningReviewDecision, by_command.learning_review_decision_id
+            )
             if decision is None:
                 raise ConflictError("LEARNING_REVIEW_COMMAND_DECISION_MISSING")
             return decision
@@ -271,22 +290,30 @@ class LearningAuthorityCloseoutService:
         return bool(
             self.session.scalar(
                 select(func.count(PlatformEnforcementIncident.id)).where(
-                    PlatformEnforcementIncident.channel_workspace_id == candidate.channel_workspace_id,
+                    PlatformEnforcementIncident.channel_workspace_id
+                    == candidate.channel_workspace_id,
                     PlatformEnforcementIncident.freeze_learning.is_(True),
-                    PlatformEnforcementIncident.state.in_(["OPEN", "UNDER_REVIEW", "APPEAL_READY", "SUBMITTED"]),
+                    PlatformEnforcementIncident.state.in_(
+                        ["OPEN", "UNDER_REVIEW", "APPEAL_READY", "SUBMITTED"]
+                    ),
                     (
                         PlatformEnforcementIncident.uploaded_video_id.is_(None)
                         if candidate.uploaded_video_id is None
                         else (
                             PlatformEnforcementIncident.uploaded_video_id.is_(None)
-                            | (PlatformEnforcementIncident.uploaded_video_id == candidate.uploaded_video_id)
+                            | (
+                                PlatformEnforcementIncident.uploaded_video_id
+                                == candidate.uploaded_video_id
+                            )
                         )
                     ),
                 )
             )
         )
 
-    def _candidate(self, candidate_id: uuid.UUID, *, lock: bool) -> LearningCandidate:
+    def _candidate(
+        self, candidate_id: uuid.UUID, *, lock: bool
+    ) -> LearningCandidate:
         stmt = select(LearningCandidate).where(LearningCandidate.id == candidate_id)
         if lock:
             stmt = stmt.with_for_update()
