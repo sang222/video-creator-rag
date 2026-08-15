@@ -1,0 +1,142 @@
+name: Canonical Series Delivery Finalizer
+
+on:
+  push:
+    branches:
+      - feat/vcos-remaining-debt-closeout
+
+concurrency:
+  group: remaining-debt-closeout-write
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  finalize:
+    if: github.event.head_commit.message != 'fix: close canonical series delivery authority'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vcos
+          POSTGRES_PASSWORD: vcos
+          POSTGRES_DB: vcos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vcos -d vcos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      VCOS_DATABASE_URL: postgresql+psycopg://vcos:vcos@localhost:5432/vcos
+      VCOS_ENVIRONMENT: test
+      VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
+      VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/vcos-remaining-debt-closeout
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Apply canonical series delivery finalizer
+        run: python tools/finalize_remaining_debt_v5.py
+      - name: Validate single migration head
+        run: |
+          alembic upgrade head
+          test "$(alembic heads | wc -l | tr -d ' ')" = "1"
+          test "$(alembic heads | awk '{print $1}')" = "0087_business_os"
+      - name: Focused and private-delivery tests
+        run: |
+          pytest -q \
+            tests/test_remaining_debt_closeout.py \
+            tests/test_youtube_private_delivery.py
+      - name: Wider production regressions
+        shell: bash
+        run: |
+          files=()
+          for candidate in \
+            tests/test_long_form_launch_cadence.py \
+            tests/test_production_publish.py \
+            tests/test_editorial_novelty.py \
+            tests/test_cross_modal_lineage.py \
+            tests/test_v2_renderer_reconciliation.py \
+            tests/test_script_qualification.py \
+            tests/test_voice_authority.py \
+            tests/test_voice_execution.py; do
+            if [[ -f "$candidate" ]]; then files+=("$candidate"); fi
+          done
+          if [[ ${#files[@]} -gt 0 ]]; then pytest -q "${files[@]}"; fi
+      - name: Final static and architecture checks
+        run: |
+          ruff check \
+            app/db/models/remaining_debt.py \
+            app/services/remaining_debt_closeout.py \
+            app/services/production_publish.py \
+            app/services/youtube_delivery.py \
+            tests/test_remaining_debt_closeout.py \
+            alembic/versions/0085_series_authority.py \
+            alembic/versions/0086_learning_authority.py \
+            alembic/versions/0087_business_os.py
+          ruff format --check \
+            app/db/models/remaining_debt.py \
+            app/services/remaining_debt_closeout.py \
+            app/services/youtube_delivery.py \
+            tests/test_remaining_debt_closeout.py \
+            alembic/versions/0085_series_authority.py \
+            alembic/versions/0086_learning_authority.py \
+            alembic/versions/0087_business_os.py
+          python -m compileall -q \
+            app/db/models/remaining_debt.py \
+            app/services/remaining_debt_closeout.py \
+            app/services/production_publish.py \
+            app/services/youtube_delivery.py
+          python - <<'PY'
+          from pathlib import Path
+          from app.services.remaining_debt_closeout import ArchitectureDebtAuditService
+          result = ArchitectureDebtAuditService().audit(Path.cwd())
+          assert result.one_engine_many_profiles, result
+          print(result)
+          PY
+          git diff --check
+          for path in \
+            .github/workflows/debt-closeout-source.yml \
+            .github/workflows/apply-remaining-debt-closeout.yml \
+            .github/workflows/fix-remaining-debt-closeout.yml \
+            .github/workflows/complete-remaining-debt-closeout.yml \
+            .github/workflows/final-hardening-v2.yml \
+            .github/workflows/finalize-remaining-debt-v3.yml \
+            .github/workflows/finalize-remaining-debt-v4.yml \
+            tools/finalize_remaining_debt_closeout.py \
+            tools/harden_remaining_debt_closeout.py \
+            tools/complete_remaining_debt_closeout.py \
+            tools/final_hardening_v2.py \
+            tools/finalize_remaining_debt_v3.py \
+            tools/finalize_remaining_debt_v4.py \
+            tools/finalize_remaining_debt_v5.py; do
+            test ! -e "$path"
+          done
+      - name: Commit final canonical implementation
+        run: |
+          git config user.name "sang222"
+          git config user.email "quangsang222@gmail.com"
+          git add -A
+          git commit -m "fix: close canonical series delivery authority"
+          git push origin HEAD:feat/vcos-remaining-debt-closeout
+      - name: Mark PR ready after complete validation
+        run: |
+          gh pr ready 4 --repo sang222/video-creator-rag || true
+          head_sha=$(git rev-parse HEAD)
+          gh pr comment 4 --repo sang222/video-creator-rag --body "D15 canonical public-ordinal authority is now the sole source for YouTube playlist/episode projection. Full code-only D15 → P1 → P2 → P3 closeout passed migration, focused/private-delivery tests, production regressions, Ruff, compile, architecture audit, and temporary-surface cleanup on head \`${head_sha}\`. Local migration and live proof remain deferred."
