@@ -1,0 +1,130 @@
+name: Authoritative Remaining Debt Finalizer
+
+on:
+  push:
+    branches:
+      - feat/vcos-remaining-debt-closeout
+
+concurrency:
+  group: remaining-debt-closeout-write
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  finalize:
+    if: github.event.head_commit.message != 'fix: complete D15 P1 P2 P3 architecture closeout'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vcos
+          POSTGRES_PASSWORD: vcos
+          POSTGRES_DB: vcos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vcos -d vcos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      VCOS_DATABASE_URL: postgresql+psycopg://vcos:vcos@localhost:5432/vcos
+      VCOS_ENVIRONMENT: test
+      VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
+      VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/vcos-remaining-debt-closeout
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Finalize deterministic code surface
+        run: python tools/finalize_remaining_debt_v3.py
+      - name: Apply additive migrations in ephemeral PostgreSQL
+        run: |
+          alembic upgrade head
+          test "$(alembic heads | wc -l | tr -d ' ')" = "1"
+          test "$(alembic heads | awk '{print $1}')" = "0087_business_os"
+      - name: Focused authority tests
+        run: pytest -q tests/test_remaining_debt_closeout.py
+      - name: Existing production regressions
+        shell: bash
+        run: |
+          files=()
+          for candidate in \
+            tests/test_long_form_launch_cadence.py \
+            tests/test_production_publish.py \
+            tests/test_youtube_private_delivery.py \
+            tests/test_editorial_novelty.py \
+            tests/test_cross_modal_lineage.py \
+            tests/test_v2_renderer_reconciliation.py \
+            tests/test_script_qualification.py \
+            tests/test_voice_authority.py \
+            tests/test_voice_execution.py; do
+            if [[ -f "$candidate" ]]; then files+=("$candidate"); fi
+          done
+          if [[ ${#files[@]} -gt 0 ]]; then pytest -q "${files[@]}"; fi
+      - name: Static, compile, architecture and cleanup checks
+        run: |
+          ruff check \
+            app/db/models/remaining_debt.py \
+            app/services/remaining_debt_closeout.py \
+            app/services/production_publish.py \
+            tests/test_remaining_debt_closeout.py \
+            alembic/versions/0085_series_authority.py \
+            alembic/versions/0086_learning_authority.py \
+            alembic/versions/0087_business_os.py
+          ruff format --check \
+            app/db/models/remaining_debt.py \
+            app/services/remaining_debt_closeout.py \
+            tests/test_remaining_debt_closeout.py \
+            alembic/versions/0085_series_authority.py \
+            alembic/versions/0086_learning_authority.py \
+            alembic/versions/0087_business_os.py
+          python -m compileall -q \
+            app/db/models/remaining_debt.py \
+            app/services/remaining_debt_closeout.py \
+            app/services/production_publish.py
+          python - <<'PY'
+          from pathlib import Path
+          from app.services.remaining_debt_closeout import ArchitectureDebtAuditService
+          result = ArchitectureDebtAuditService().audit(Path.cwd())
+          assert result.one_engine_many_profiles, result
+          print(result)
+          PY
+          git diff --check
+          test ! -e .github/workflows/debt-closeout-source.yml
+          test ! -e .github/workflows/apply-remaining-debt-closeout.yml
+          test ! -e .github/workflows/fix-remaining-debt-closeout.yml
+          test ! -e .github/workflows/complete-remaining-debt-closeout.yml
+          test ! -e .github/workflows/final-hardening-v2.yml
+          test ! -e tools/finalize_remaining_debt_closeout.py
+          test ! -e tools/harden_remaining_debt_closeout.py
+          test ! -e tools/complete_remaining_debt_closeout.py
+          test ! -e tools/final_hardening_v2.py
+          test ! -e tools/finalize_remaining_debt_v3.py
+      - name: Commit final validated implementation
+        run: |
+          git config user.name "sang222"
+          git config user.email "quangsang222@gmail.com"
+          git add -A
+          git commit -m "fix: complete D15 P1 P2 P3 architecture closeout"
+          git push origin HEAD:feat/vcos-remaining-debt-closeout
+      - name: Mark PR ready and record validation boundary
+        run: |
+          gh pr ready 4 --repo sang222/video-creator-rag || true
+          head_sha=$(git rev-parse HEAD)
+          gh pr comment 4 --repo sang222/video-creator-rag --body "Authoritative code-only closeout passed PostgreSQL migrations through \`0087_business_os\`, focused D15/P1/P2/P3 tests, production regressions, Ruff, compile, one-engine-many-profiles audit, and temporary-bootstrap cleanup on head \`${head_sha}\`. No local production migration or live provider/platform canary was executed."
