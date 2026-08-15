@@ -10,3 +10,7 @@ Code and CI do not activate live delivery. Local production activation requires:
 6. Local purge only after immutable private-stage verification.
 
 Human publication remains outside the automated staging command. After the operator publishes in YouTube Studio, VCOS must observe and verify the public state before creating `PublicPublicationReceipt` and opening analytics/series/learning downstream effects.
+
+## Local activation authority
+
+The canonical local execution procedure is the master prompt in `youtube_private_delivery_local_codex_master_prompt.md`. The prompt is intentionally evidence-first, forbids public-release API calls, and stops at the human boundary before canonical publication verification.

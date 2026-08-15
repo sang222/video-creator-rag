@@ -1309,6 +1309,13 @@ class ProductionPublishService:
             "platform": data.observed_platform,
             "platform_channel_id": data.observed_platform_channel_id,
             "platform_video_id": data.observed_platform_video_id,
+            "tags": data.observed_tags,
+            "category_id": data.observed_category_id,
+            "default_language": data.observed_default_language,
+            "made_for_kids": data.observed_made_for_kids,
+            "contains_synthetic_media": data.observed_contains_synthetic_media,
+            "thumbnail_confirmed": data.observed_thumbnail_confirmed,
+            "caption_confirmed": data.observed_caption_confirmed,
         }
         from app.services.youtube_delivery import YouTubeDeliveryService
 
@@ -2935,6 +2942,13 @@ def _verification_evidence_payload(
             "privacy_status": data.observed_privacy_status,
             "published_at": data.observed_published_at,
             "duration_seconds": data.observed_duration_seconds,
+            "tags": data.observed_tags,
+            "category_id": data.observed_category_id,
+            "default_language": data.observed_default_language,
+            "made_for_kids": data.observed_made_for_kids,
+            "contains_synthetic_media": data.observed_contains_synthetic_media,
+            "thumbnail_confirmed": data.observed_thumbnail_confirmed,
+            "caption_confirmed": data.observed_caption_confirmed,
         },
     }
 

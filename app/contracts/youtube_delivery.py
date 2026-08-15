@@ -6,7 +6,7 @@ import uuid
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -308,9 +308,8 @@ class ResumableUploadStatus(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("platform_video_id")
-    @classmethod
-    def complete_requires_video_id(cls, value: str | None, info):
-        if info.data.get("state") == "COMPLETE" and not value:
+    @model_validator(mode="after")
+    def complete_requires_video_id(self) -> "ResumableUploadStatus":
+        if self.state == "COMPLETE" and not self.platform_video_id:
             raise ValueError("complete upload requires platform_video_id")
-        return value
+        return self

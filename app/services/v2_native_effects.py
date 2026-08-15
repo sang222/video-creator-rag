@@ -5187,7 +5187,7 @@ def v2_local_caption_sidecar_review_metadata(
         "schema_version": "vcos.v2-local-caption-sidecar-review.v1",
         "delivery_mode": "SIDECAR_ONLY",
         "label": "Download SRT sidecar",
-        "file_name": f"{cloud.file_name}.srt",
+        "file_name": Path(cloud.file_name).with_suffix(".srt").name,
         "caption_ref": appendix["caption_ref"],
         "caption_local_file_ref": appendix["caption_relative_ref"],
         "caption_checksum_sha256": appendix["caption_checksum"],

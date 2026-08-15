@@ -133,6 +133,137 @@ def _is_sha256(value: Any) -> bool:
     return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
 
 
+
+def _publishing_credential_identity_hash(
+    credential: YouTubePublishingCredential,
+) -> str:
+    return _hash(
+        {
+            "schema_version": "vcos.youtube-publishing-credential.v1",
+            "company_id": str(credential.company_id),
+            "channel_workspace_id": str(credential.channel_workspace_id),
+            "credential_reference_id": str(credential.credential_reference_id),
+            "platform_channel_id": credential.platform_channel_id,
+            "account_identity": credential.account_identity,
+            "oauth_scopes": sorted(str(item) for item in credential.oauth_scopes),
+            "capabilities": sorted(str(item) for item in credential.capabilities),
+            "public_release_allowed": False,
+            "delete_allowed": False,
+        }
+    )
+
+
+def _thumbnail_binding_identity_hash(
+    binding: ProductionThumbnailBinding,
+    *,
+    candidate: FinalReviewCandidate,
+) -> str:
+    return _hash(
+        {
+            "schema_version": "vcos.production-thumbnail-binding.v1",
+            "candidate_id": str(candidate.id),
+            "candidate_hash": candidate.candidate_hash,
+            "video_project_id": str(candidate.video_project_id),
+            "thumbnail_variant_id": (
+                str(binding.thumbnail_variant_id) if binding.thumbnail_variant_id else None
+            ),
+            "source_type": "AI_GENERATED",
+            "provider_key": binding.provider_key,
+            "provider_effect_ref": binding.provider_effect_ref,
+            "provider_effect_hash": binding.provider_effect_hash,
+            "file_ref": binding.file_ref,
+            "checksum_sha256": binding.checksum_sha256,
+            "mime_type": binding.mime_type,
+            "size_bytes": binding.size_bytes,
+            "width": binding.width,
+            "height": binding.height,
+            "state": "VERIFIED",
+        }
+    )
+
+
+def _private_stage_identity_hash(
+    stage: YouTubePrivateStage,
+    *,
+    decision: FinalVideoDecision,
+    candidate: FinalReviewCandidate,
+    final_media: FinalMediaRef,
+    credential: YouTubePublishingCredential,
+    thumbnail: ProductionThumbnailBinding,
+) -> str:
+    return _hash(
+        {
+            "schema_version": "vcos.youtube-private-stage.v1",
+            "decision_id": str(decision.id),
+            "decision_hash": decision.decision_hash,
+            "candidate_id": str(candidate.id),
+            "candidate_hash": candidate.candidate_hash,
+            "final_media_ref_id": str(final_media.id),
+            "final_media_checksum": candidate.final_media_hash,
+            "publishing_credential_id": str(credential.id),
+            "publishing_credential_hash": credential.content_hash,
+            "thumbnail_binding_id": str(thumbnail.id),
+            "thumbnail_binding_hash": thumbnail.content_hash,
+            "caption_ref": stage.caption_ref,
+            "caption_hash": stage.caption_hash,
+            "staging_metadata_hash": stage.staging_metadata_hash,
+            "public_release_expectation_hash": stage.public_release_expectation_hash,
+        }
+    )
+
+
+def _validate_public_release_observation(
+    *,
+    expectation: Mapping[str, Any],
+    observed: Mapping[str, Any],
+) -> None:
+    if expectation.get("manual_release_only") is not True:
+        raise ValidationFailureError("PUBLICATION_RECEIPT_RELEASE_AUTHORITY_INVALID")
+    required = (
+        "title",
+        "description",
+        "tags",
+        "category_id",
+        "default_language",
+        "made_for_kids",
+        "contains_synthetic_media",
+        "thumbnail_confirmed",
+        "caption_confirmed",
+        "privacy_status",
+    )
+    missing = [key for key in required if key not in observed or observed[key] is None]
+    if missing:
+        raise ValidationFailureError(
+            "PUBLICATION_RECEIPT_OBSERVATION_INCOMPLETE:" + ",".join(sorted(missing))
+        )
+    mismatches: list[str] = []
+    expected_pairs = {
+        "title": expectation.get("title"),
+        "description": expectation.get("description"),
+        "tags": list(expectation.get("tags") or []),
+        "category_id": expectation.get("category_id"),
+        "default_language": expectation.get("default_language"),
+        "made_for_kids": expectation.get("made_for_kids"),
+        "contains_synthetic_media": expectation.get("contains_synthetic_media"),
+        "thumbnail_confirmed": True,
+        "caption_confirmed": True,
+        "privacy_status": str(expectation.get("expected_privacy_status") or "").upper(),
+    }
+    for key, expected in expected_pairs.items():
+        actual = observed.get(key)
+        if key == "privacy_status":
+            actual = str(actual or "").upper()
+        elif key == "tags":
+            actual = list(actual or [])
+        if actual != expected:
+            mismatches.append(key)
+    if mismatches:
+        raise ValidationFailureError(
+            "PUBLICATION_RECEIPT_FROZEN_READBACK_MISMATCH:"
+            + ",".join(sorted(mismatches))
+        )
+
+
 def _append_delivery_event_once(
     session: Session,
     *,
@@ -221,12 +352,13 @@ class YouTubePrivateTransport(Protocol):
     ) -> str: ...
 
     def query_resumable_session(
-        self, *, session_uri: str, total_bytes: int
+        self, *, access_token: str, session_uri: str, total_bytes: int
     ) -> ResumableUploadStatus: ...
 
     def upload_media(
         self,
         *,
+        access_token: str,
         session_uri: str,
         media_path: Path,
         start_offset: int,
@@ -306,9 +438,17 @@ class LocalSessionSecretStore:
     def get(self, *, secret_ref: str, expected_hash: str) -> str:
         if not secret_ref.startswith("local_file://") or not _is_sha256(expected_hash):
             raise ValidationFailureError("YOUTUBE_RESUMABLE_SESSION_REF_INVALID")
-        path = Path(secret_ref.removeprefix("local_file://")).resolve()
-        if not path.is_relative_to(self.root) or not path.is_file() or path.is_symlink():
+        raw_path = Path(secret_ref.removeprefix("local_file://"))
+        if raw_path.is_symlink():
             raise ValidationFailureError("YOUTUBE_RESUMABLE_SESSION_REF_INVALID")
+        try:
+            path = raw_path.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise ValidationFailureError("YOUTUBE_RESUMABLE_SESSION_REF_INVALID") from exc
+        if not path.is_relative_to(self.root) or not path.is_file():
+            raise ValidationFailureError("YOUTUBE_RESUMABLE_SESSION_REF_INVALID")
+        if path.stat().st_mode & 0o077:
+            raise ValidationFailureError("YOUTUBE_RESUMABLE_SESSION_PERMISSION_INVALID")
         value = json.loads(path.read_text(encoding="utf-8")).get("session_uri")
         if (
             not isinstance(value, str)
@@ -400,11 +540,17 @@ class VerifiedMediaByteSourceResolver:
     def _verified_local(
         self, *, target: Path, expected_checksum: str, mime_type: str
     ) -> ResolvedMediaBytes:
+        if target.is_symlink():
+            raise ValidationFailureError("YOUTUBE_MEDIA_PATH_REJECTED")
         try:
             resolved = target.resolve(strict=True)
         except FileNotFoundError as exc:
             raise NotFoundError("verified media bytes not found") from exc
-        if not resolved.is_file() or resolved.is_symlink():
+        try:
+            resolved.relative_to(self.root)
+        except ValueError as exc:
+            raise ValidationFailureError("YOUTUBE_MEDIA_PATH_ESCAPE") from exc
+        if not resolved.is_file():
             raise ValidationFailureError("YOUTUBE_MEDIA_PATH_REJECTED")
         if _sha256_file(resolved) != expected_checksum:
             raise ValidationFailureError("YOUTUBE_MEDIA_READBACK_CHECKSUM_MISMATCH")
@@ -454,17 +600,22 @@ class YouTubeDataApiTransport:
         return session_uri
 
     def query_resumable_session(
-        self, *, session_uri: str, total_bytes: int
+        self, *, access_token: str, session_uri: str, total_bytes: int
     ) -> ResumableUploadStatus:
         response = self.client.put(
             session_uri,
-            headers={"Content-Length": "0", "Content-Range": f"bytes */{total_bytes}"},
+            headers={
+                **self._headers(access_token),
+                "Content-Length": "0",
+                "Content-Range": f"bytes */{total_bytes}",
+            },
         )
         return self._upload_status(response=response, total_bytes=total_bytes)
 
     def upload_media(
         self,
         *,
+        access_token: str,
         session_uri: str,
         media_path: Path,
         start_offset: int,
@@ -474,13 +625,16 @@ class YouTubeDataApiTransport:
         remaining = total_bytes - start_offset
         if remaining <= 0:
             return self.query_resumable_session(
-                session_uri=session_uri, total_bytes=total_bytes
+                access_token=access_token,
+                session_uri=session_uri,
+                total_bytes=total_bytes,
             )
         with media_path.open("rb") as stream:
             stream.seek(start_offset)
             response = self.client.put(
                 session_uri,
                 headers={
+                    **self._headers(access_token),
                     "Content-Type": mime_type,
                     "Content-Length": str(remaining),
                     "Content-Range": f"bytes {start_offset}-{total_bytes - 1}/{total_bytes}",
@@ -895,8 +1049,12 @@ class YouTubeDeliveryService:
             "title": title,
             "description": description,
             "tags": list(data.tags),
+            "category_id": data.category_id,
+            "default_language": language,
             "made_for_kids": data.made_for_kids,
             "contains_synthetic_media": data.contains_synthetic_media,
+            "thumbnail_confirmed": True,
+            "caption_confirmed": True,
             "platform_channel_id": credential.platform_channel_id,
         }
         identity = {
@@ -1140,18 +1298,67 @@ class YouTubeDeliveryService:
         privacy = str(observed_metadata.get("privacy_status") or "").upper()
         if privacy != "PUBLIC":
             raise ValidationFailureError("PUBLICATION_RECEIPT_REQUIRES_PUBLIC_VISIBILITY")
+        if (
+            decision.final_review_candidate_id != candidate.id
+            or decision.final_media_ref_id != candidate.final_media_ref_id
+            or decision.company_id != candidate.company_id
+            or decision.channel_workspace_id != candidate.channel_workspace_id
+            or decision.video_project_id != candidate.video_project_id
+            or confirmation.confirmation_state != "VERIFIED"
+            or confirmation.final_review_candidate_id != candidate.id
+            or confirmation.final_video_decision_id != decision.id
+            or confirmation.final_media_ref_id != candidate.final_media_ref_id
+            or confirmation.company_id != candidate.company_id
+            or confirmation.channel_workspace_id != candidate.channel_workspace_id
+            or confirmation.video_project_id != candidate.video_project_id
+        ):
+            raise ValidationFailureError("PUBLICATION_RECEIPT_AUTHORITY_LINEAGE_MISMATCH")
         stage = self.session.scalar(
             select(YouTubePrivateStage).where(
                 YouTubePrivateStage.final_video_decision_id == decision.id
             )
         )
-        if stage is not None and (
-            stage.state != "PRIVATE_VERIFIED"
-            or stage.platform_video_id != observed_platform_video_id
-            or stage.public_release_expectation.get("platform_channel_id")
-            != observed_platform_channel_id
-        ):
-            raise ValidationFailureError("PUBLICATION_RECEIPT_STAGE_LINEAGE_MISMATCH")
+        if stage is not None:
+            final_media = self.session.get(FinalMediaRef, stage.final_media_ref_id)
+            credential = self.session.get(
+                YouTubePublishingCredential, stage.publishing_credential_id
+            )
+            thumbnail = self.session.get(
+                ProductionThumbnailBinding, stage.production_thumbnail_binding_id
+            )
+            if (
+                final_media is None
+                or credential is None
+                or thumbnail is None
+                or stage.state != "PRIVATE_VERIFIED"
+                or stage.platform_video_id != observed_platform_video_id
+                or stage.public_release_expectation.get("platform_channel_id")
+                != observed_platform_channel_id
+                or stage.final_review_candidate_id != candidate.id
+                or stage.final_video_decision_id != decision.id
+                or stage.final_media_ref_id != candidate.final_media_ref_id
+                or stage.staging_metadata_hash != _hash(stage.staging_metadata)
+                or stage.public_release_expectation_hash
+                != _hash(stage.public_release_expectation)
+                or credential.content_hash
+                != _publishing_credential_identity_hash(credential)
+                or thumbnail.content_hash
+                != _thumbnail_binding_identity_hash(thumbnail, candidate=candidate)
+                or stage.identity_hash
+                != _private_stage_identity_hash(
+                    stage,
+                    decision=decision,
+                    candidate=candidate,
+                    final_media=final_media,
+                    credential=credential,
+                    thumbnail=thumbnail,
+                )
+            ):
+                raise ValidationFailureError("PUBLICATION_RECEIPT_STAGE_LINEAGE_MISMATCH")
+            _validate_public_release_observation(
+                expectation=stage.public_release_expectation,
+                observed=observed_metadata,
+            )
         payload = {
             "schema_version": "vcos.public-publication-receipt.v1",
             "candidate_id": str(candidate.id),
@@ -1231,7 +1438,14 @@ class YouTubeDeliveryService:
         credential = self.session.get(
             YouTubePublishingCredential, publishing_credential_id
         )
-        if plan is None or credential is None or credential.state != "ACTIVE":
+        if (
+            plan is None
+            or credential is None
+            or credential.state != "ACTIVE"
+            or plan.state != "APPROVED"
+            or plan.company_id != credential.company_id
+            or plan.channel_workspace_id != credential.channel_workspace_id
+        ):
             raise ValidationFailureError("YOUTUBE_SERIES_PLAYLIST_AUTHORITY_INVALID")
         if YouTubePublishingCapability.PLAYLIST_WRITE.value not in credential.capabilities:
             raise ValidationFailureError("YOUTUBE_PLAYLIST_WRITE_CAPABILITY_REQUIRED")
@@ -1280,6 +1494,23 @@ class YouTubeDeliveryService:
         binding = self.session.get(YouTubeSeriesEpisodeBinding, episode_binding_id)
         if binding is None:
             raise NotFoundError(f"series episode binding not found: {episode_binding_id}")
+        receipt = (
+            self.session.get(
+                PublicPublicationReceipt, binding.public_publication_receipt_id
+            )
+            if binding.public_publication_receipt_id is not None
+            else None
+        )
+        if (
+            receipt is None
+            or receipt.video_project_id != binding.video_project_id
+            or receipt.youtube_private_stage_id != binding.youtube_private_stage_id
+            or receipt.platform_video_id != binding.youtube_video_id
+            or binding.state not in {"PUBLICATION_VERIFIED", "PLAYLIST_BIND_PENDING"}
+        ):
+            raise ValidationFailureError(
+                "PUBLIC_EPISODE_ORDINAL_REQUIRES_VERIFIED_PUBLICATION"
+            )
         if binding.public_episode_ordinal is not None:
             if (
                 binding.public_episode_ordinal != data.public_episode_ordinal
@@ -1472,6 +1703,7 @@ class YouTubePrivateStageExecutor:
         if stage is None:
             raise NotFoundError(f"youtube private stage not found: {stage_id}")
         candidate = session.get(FinalReviewCandidate, stage.final_review_candidate_id)
+        decision = session.get(FinalVideoDecision, stage.final_video_decision_id)
         final_media = session.get(FinalMediaRef, stage.final_media_ref_id)
         credential = session.get(
             YouTubePublishingCredential, stage.publishing_credential_id
@@ -1486,14 +1718,49 @@ class YouTubePrivateStageExecutor:
         )
         if (
             candidate is None
+            or decision is None
             or final_media is None
             or credential is None
             or thumbnail is None
             or credential.state != "ACTIVE"
             or not _REQUIRED_PRIVATE_CAPABILITIES.issubset(set(credential.capabilities))
+            or stage.company_id != candidate.company_id
+            or stage.channel_workspace_id != candidate.channel_workspace_id
+            or stage.video_project_id != candidate.video_project_id
+            or decision.final_review_candidate_id != candidate.id
+            or decision.final_media_ref_id != final_media.id
+            or decision.company_id != candidate.company_id
+            or decision.channel_workspace_id != candidate.channel_workspace_id
+            or decision.video_project_id != candidate.video_project_id
+            or candidate.final_media_ref_id != final_media.id
+            or final_media.file_ref != stage.final_media_ref
             or final_media.checksum_sha256 != stage.final_media_checksum
             or candidate.final_media_hash != stage.final_media_checksum
+            or credential.company_id != candidate.company_id
+            or credential.channel_workspace_id != candidate.channel_workspace_id
+            or credential.platform_channel_id != candidate.destination_platform_channel_id
+            or credential.account_identity != candidate.destination_account_identity
+            or credential.content_hash
+            != _publishing_credential_identity_hash(credential)
+            or thumbnail.company_id != candidate.company_id
+            or thumbnail.channel_workspace_id != candidate.channel_workspace_id
+            or thumbnail.video_project_id != candidate.video_project_id
             or thumbnail.final_review_candidate_id != candidate.id
+            or thumbnail.state != "VERIFIED"
+            or thumbnail.content_hash
+            != _thumbnail_binding_identity_hash(thumbnail, candidate=candidate)
+            or stage.staging_metadata_hash != _hash(stage.staging_metadata)
+            or stage.public_release_expectation_hash
+            != _hash(stage.public_release_expectation)
+            or stage.identity_hash
+            != _private_stage_identity_hash(
+                stage,
+                decision=decision,
+                candidate=candidate,
+                final_media=final_media,
+                credential=credential,
+                thumbnail=thumbnail,
+            )
         ):
             raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_EXECUTION_SCOPE_INVALID")
         token = YouTubeCredentialResolver(session).access_token(credential)
@@ -1508,6 +1775,13 @@ class YouTubePrivateStageExecutor:
         access_token: str,
     ) -> str:
         with self.session_factory() as session:
+            stage_lock = session.scalar(
+                select(YouTubePrivateStage)
+                .where(YouTubePrivateStage.id == stage_id)
+                .with_for_update()
+            )
+            if stage_lock is None:
+                raise NotFoundError(f"youtube private stage not found: {stage_id}")
             attempt = session.scalar(
                 select(YouTubeUploadAttempt)
                 .where(YouTubeUploadAttempt.youtube_private_stage_id == stage_id)
@@ -1534,7 +1808,7 @@ class YouTubePrivateStageExecutor:
                     outcome_certainty="NOT_SUBMITTED",
                 )
                 session.add(attempt)
-                session.commit()
+                session.flush()
             elif (
                 attempt.request_hash != request_hash
                 or attempt.total_bytes != media.size_bytes
@@ -1542,19 +1816,20 @@ class YouTubePrivateStageExecutor:
             ):
                 raise ConflictError("YOUTUBE_UPLOAD_ATTEMPT_IDENTITY_MISMATCH")
             attempt_id = attempt.id
+            submit_session = attempt.state == "INTENDED"
+            if submit_session:
+                attempt.state = "SESSION_SUBMITTED"
+                attempt.outcome_certainty = "UNCERTAIN"
+                stage_lock.state = "UPLOADING"
+            session.commit()
         with self.session_factory() as session:
             attempt = session.get(YouTubeUploadAttempt, attempt_id)
             stage = session.get(YouTubePrivateStage, stage_id)
             if attempt.state == "VERIFIED":
                 return str(attempt.provider_video_id)
-            if attempt.state == "INTENDED":
-                # Seal the one allowed ``videos.insert`` intent before the
-                # provider receives it. A crash after this commit is
-                # deliberately ambiguous and may not create another session.
-                attempt.state = "SESSION_SUBMITTED"
-                attempt.outcome_certainty = "UNCERTAIN"
-                stage.state = "UPLOADING"
-                session.commit()
+            if submit_session:
+                # The one allowed videos.insert intent was durably sealed in
+                # the stage-locked transaction above before the provider call.
                 try:
                     session_uri = self.transport.create_resumable_session(
                         access_token=access_token,
@@ -1596,10 +1871,13 @@ class YouTubePrivateStageExecutor:
             )
         try:
             status = self.transport.query_resumable_session(
-                session_uri=session_uri, total_bytes=media.size_bytes
+                access_token=access_token,
+                session_uri=session_uri,
+                total_bytes=media.size_bytes,
             )
             if status.state == "INCOMPLETE":
                 status = self.transport.upload_media(
+                    access_token=access_token,
                     session_uri=session_uri,
                     media_path=media.path,
                     start_offset=status.committed_bytes,
@@ -1724,6 +2002,13 @@ class YouTubePrivateStageExecutor:
         request_hash = _hash(request_payload)
         effect_key = f"youtube:{stage_id}:{component_type.lower()}:{request_hash}"
         with self.session_factory() as session:
+            stage_lock = session.scalar(
+                select(YouTubePrivateStage)
+                .where(YouTubePrivateStage.id == stage_id)
+                .with_for_update()
+            )
+            if stage_lock is None:
+                raise NotFoundError(f"youtube private stage not found: {stage_id}")
             receipt = session.scalar(
                 select(YouTubeComponentReceipt).where(
                     YouTubeComponentReceipt.youtube_private_stage_id == stage_id,
@@ -1752,7 +2037,7 @@ class YouTubePrivateStageExecutor:
                     attempt_count=0,
                 )
                 session.add(attempt)
-                session.commit()
+                session.flush()
             elif attempt.request_hash != request_hash:
                 raise ConflictError("YOUTUBE_COMPONENT_ATTEMPT_IDENTITY_MISMATCH")
             if attempt.state == "VERIFIED":
@@ -2052,7 +2337,7 @@ class LocalMediaPurgeService:
 
 
 class LocalMediaPurgeExecutor:
-    """Remove active MP4 bytes with deterministic quarantine reconciliation."""
+    """Remove active MP4 bytes with durable, crash-reconcilable phases."""
 
     def __init__(
         self,
@@ -2064,6 +2349,7 @@ class LocalMediaPurgeExecutor:
         self.allowed_root = (allowed_root or _production_root()).resolve()
 
     def execute(self, *, attempt_id: uuid.UUID) -> LocalMediaPurgeReceipt:
+        # Phase 1: persist the one deletion intent before touching bytes.
         with self.session_factory() as session:
             attempt = session.scalar(
                 select(LocalMediaPurgeAttempt)
@@ -2085,48 +2371,21 @@ class LocalMediaPurgeExecutor:
                 raise ValidationFailureError(
                     "LOCAL_MEDIA_PURGE_REQUIRES_PRIVATE_VERIFIED"
                 )
-            original = _purge_path(
-                attempt.original_file_ref, root=self.allowed_root, kind="original"
-            )
-            quarantine = _purge_path(
-                attempt.quarantine_file_ref, root=self.allowed_root, kind="quarantine"
-            )
             if attempt.state == "INTENDED":
                 attempt.state = "SUBMITTED"
                 attempt.attempt_count = 1
                 attempt.error_code = None
                 session.commit()
+            elif attempt.state not in {"SUBMITTED", "QUARANTINED", "PURGED"}:
+                raise ValidationFailureError("LOCAL_MEDIA_PURGE_STATE_INVALID")
 
-        original_exists = original.is_file() and not original.is_symlink()
-        quarantine_exists = quarantine.is_file() and not quarantine.is_symlink()
-        if original_exists and quarantine_exists:
-            raise ValidationFailureError("LOCAL_MEDIA_PURGE_DUPLICATE_BYTES")
-        if original_exists:
-            if _sha256_file(original) != attempt.checksum_sha256:
-                raise ValidationFailureError("LOCAL_MEDIA_PURGE_BYTES_MISMATCH")
-            quarantine.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(original, quarantine)
-            original_exists = False
-            quarantine_exists = True
-        if quarantine_exists and _sha256_file(quarantine) != attempt.checksum_sha256:
-            raise ValidationFailureError("LOCAL_MEDIA_PURGE_QUARANTINE_MISMATCH")
-
+        # Phase 2: serialize quarantine reconciliation on the attempt row.
         with self.session_factory() as session:
-            attempt = session.get(LocalMediaPurgeAttempt, attempt_id)
-            if attempt is None:
-                raise NotFoundError(f"local purge attempt not found: {attempt_id}")
-            if quarantine_exists:
-                attempt.state = "QUARANTINED"
-                attempt.error_code = None
-                session.commit()
-
-        if quarantine_exists:
-            quarantine.unlink()
-        if original.exists() or quarantine.exists():
-            raise ValidationFailureError("LOCAL_MEDIA_PURGE_FILESYSTEM_NOT_EMPTY")
-
-        with self.session_factory() as session:
-            attempt = session.get(LocalMediaPurgeAttempt, attempt_id)
+            attempt = session.scalar(
+                select(LocalMediaPurgeAttempt)
+                .where(LocalMediaPurgeAttempt.id == attempt_id)
+                .with_for_update()
+            )
             if attempt is None:
                 raise NotFoundError(f"local purge attempt not found: {attempt_id}")
             existing = session.scalar(
@@ -2137,6 +2396,98 @@ class LocalMediaPurgeExecutor:
             )
             if existing is not None:
                 return existing
+            original = _purge_path(
+                attempt.original_file_ref, root=self.allowed_root, kind="original"
+            )
+            quarantine = _purge_path(
+                attempt.quarantine_file_ref, root=self.allowed_root, kind="quarantine"
+            )
+            original_exists = original.is_file() and not original.is_symlink()
+            quarantine_exists = quarantine.is_file() and not quarantine.is_symlink()
+            if original_exists and quarantine_exists:
+                raise ValidationFailureError("LOCAL_MEDIA_PURGE_DUPLICATE_BYTES")
+            if attempt.state == "SUBMITTED":
+                try:
+                    if original_exists:
+                        if _sha256_file(original) != attempt.checksum_sha256:
+                            raise ValidationFailureError(
+                                "LOCAL_MEDIA_PURGE_BYTES_MISMATCH"
+                            )
+                        quarantine.parent.mkdir(parents=True, exist_ok=True)
+                        os.replace(original, quarantine)
+                        quarantine_exists = True
+                    elif not quarantine_exists:
+                        attempt.error_code = (
+                            "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED"
+                        )
+                        session.commit()
+                        raise ValidationFailureError(attempt.error_code)
+                    if _sha256_file(quarantine) != attempt.checksum_sha256:
+                        raise ValidationFailureError(
+                            "LOCAL_MEDIA_PURGE_QUARANTINE_MISMATCH"
+                        )
+                except OSError as exc:
+                    attempt.error_code = "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED"
+                    session.commit()
+                    raise ValidationFailureError(attempt.error_code) from exc
+                attempt.state = "QUARANTINED"
+                attempt.error_code = None
+                session.commit()
+            elif attempt.state == "QUARANTINED":
+                if original_exists:
+                    raise ValidationFailureError(
+                        "LOCAL_MEDIA_PURGE_ORIGINAL_REAPPEARED"
+                    )
+                if quarantine_exists and _sha256_file(quarantine) != attempt.checksum_sha256:
+                    raise ValidationFailureError(
+                        "LOCAL_MEDIA_PURGE_QUARANTINE_MISMATCH"
+                    )
+
+        # Phase 3: unlink and atomically persist the receipt. A crash after
+        # unlink leaves QUARANTINED durable, so the next invocation can finish.
+        with self.session_factory() as session:
+            attempt = session.scalar(
+                select(LocalMediaPurgeAttempt)
+                .where(LocalMediaPurgeAttempt.id == attempt_id)
+                .with_for_update()
+            )
+            if attempt is None:
+                raise NotFoundError(f"local purge attempt not found: {attempt_id}")
+            existing = session.scalar(
+                select(LocalMediaPurgeReceipt).where(
+                    LocalMediaPurgeReceipt.youtube_private_stage_id
+                    == attempt.youtube_private_stage_id
+                )
+            )
+            if existing is not None:
+                return existing
+            if attempt.state != "QUARANTINED":
+                raise ValidationFailureError(
+                    "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED"
+                )
+            original = _purge_path(
+                attempt.original_file_ref, root=self.allowed_root, kind="original"
+            )
+            quarantine = _purge_path(
+                attempt.quarantine_file_ref, root=self.allowed_root, kind="quarantine"
+            )
+            if original.exists():
+                raise ValidationFailureError("LOCAL_MEDIA_PURGE_ORIGINAL_REAPPEARED")
+            try:
+                if quarantine.exists():
+                    if quarantine.is_symlink() or _sha256_file(quarantine) != attempt.checksum_sha256:
+                        raise ValidationFailureError(
+                            "LOCAL_MEDIA_PURGE_QUARANTINE_MISMATCH"
+                        )
+                    quarantine.unlink()
+            except OSError as exc:
+                attempt.error_code = "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED"
+                session.commit()
+                raise ValidationFailureError(attempt.error_code) from exc
+            if original.exists() or quarantine.exists():
+                attempt.error_code = "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED"
+                session.commit()
+                raise ValidationFailureError(attempt.error_code)
             body = {
                 "schema_version": "vcos.local-media-purge-receipt.v1",
                 "youtube_private_stage_id": str(attempt.youtube_private_stage_id),
@@ -2229,13 +2580,11 @@ class TelegramDeliveryService:
                 TelegramDeliveryNotification.notification_kind == notification_kind,
             )
         )
-        reference = self.session.scalar(
-            select(CredentialReference).where(
-                CredentialReference.provider_key == "telegram_bot",
-                CredentialReference.status.in_(["CONFIGURED", "ACTIVE"]),
-            )
+        reference = _select_telegram_reference(self.session, candidate=candidate)
+        reference_metadata = dict(reference.metadata_ or {}) if reference else {}
+        chat_ref = reference_metadata.get("chat_binding_ref") or os.getenv(
+            "VCOS_TELEGRAM_CHAT_ID_REF"
         )
-        chat_ref = os.getenv("VCOS_TELEGRAM_CHAT_ID_REF")
         if existing is not None:
             if existing.state == "BLOCKED_CONFIG" and reference is not None and chat_ref:
                 existing.credential_reference_id = reference.id
@@ -2331,7 +2680,16 @@ class TelegramDeliveryExecutor:
             if notice.state != "PENDING" or notice.attempt_count != 0:
                 raise ValidationFailureError("TELEGRAM_NOTIFICATION_NOT_SENDABLE")
             reference = session.get(CredentialReference, notice.credential_reference_id)
-            if reference is None or not reference.secret_ref or not notice.chat_binding_ref:
+            if (
+                reference is None
+                or not reference.secret_ref
+                or not notice.chat_binding_ref
+                or not _credential_reference_matches_scope(
+                    reference,
+                    company_id=notice.company_id,
+                    channel_workspace_id=notice.channel_workspace_id,
+                )
+            ):
                 notice.state = "BLOCKED_CONFIG"
                 notice.error_code = "TELEGRAM_CONFIG_REQUIRED"
                 session.commit()
@@ -2428,11 +2786,17 @@ def _resolve_local_ref(value: str, *, root: Path) -> Path:
     path = Path(raw)
     if not path.is_absolute():
         path = root / raw
+    if path.is_symlink():
+        raise ValidationFailureError("PRODUCTION_THUMBNAIL_PATH_REJECTED")
     try:
         resolved = path.resolve(strict=True)
     except FileNotFoundError as exc:
         raise NotFoundError("thumbnail file not found") from exc
-    if not resolved.is_file() or resolved.is_symlink():
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValidationFailureError("PRODUCTION_THUMBNAIL_PATH_ESCAPE") from exc
+    if not resolved.is_file():
         raise ValidationFailureError("PRODUCTION_THUMBNAIL_PATH_REJECTED")
     return resolved
 
@@ -2533,15 +2897,71 @@ def _candidate_budget_summary(
     }
 
 
+def _credential_reference_matches_scope(
+    reference: CredentialReference,
+    *,
+    company_id: uuid.UUID,
+    channel_workspace_id: uuid.UUID,
+) -> bool:
+    metadata = dict(reference.metadata_ or {})
+    if str(metadata.get("company_id") or "") != str(company_id):
+        return False
+    channel_value = metadata.get("channel_workspace_id")
+    return channel_value in {None, "", str(channel_workspace_id)}
+
+
+def _select_telegram_reference(
+    session: Session,
+    *,
+    candidate: FinalReviewCandidate,
+) -> CredentialReference | None:
+    references = list(
+        session.scalars(
+            select(CredentialReference)
+            .where(
+                CredentialReference.provider_key == "telegram_bot",
+                CredentialReference.status.in_(["CONFIGURED", "ACTIVE"]),
+            )
+            .order_by(CredentialReference.created_at.asc())
+        ).all()
+    )
+    exact: list[CredentialReference] = []
+    company_default: list[CredentialReference] = []
+    for reference in references:
+        metadata = dict(reference.metadata_ or {})
+        if str(metadata.get("company_id") or "") != str(candidate.company_id):
+            continue
+        channel_value = metadata.get("channel_workspace_id")
+        if str(channel_value or "") == str(candidate.channel_workspace_id):
+            exact.append(reference)
+        elif channel_value in {None, ""}:
+            company_default.append(reference)
+    selected = exact or company_default
+    if len(selected) > 1:
+        raise ValidationFailureError("TELEGRAM_CREDENTIAL_SCOPE_AMBIGUOUS")
+    return selected[0] if selected else None
+
+
 def _resolve_simple_secret(secret_ref: str) -> str:
     if secret_ref.startswith("env://"):
         value = os.getenv(secret_ref.removeprefix("env://"))
     elif secret_ref.startswith("env:"):
         value = os.getenv(secret_ref.removeprefix("env:"))
     elif secret_ref.startswith("local_file://"):
-        payload = json.loads(
-            Path(secret_ref.removeprefix("local_file://")).read_text(encoding="utf-8")
-        )
+        raw_path = Path(secret_ref.removeprefix("local_file://"))
+        if raw_path.is_symlink():
+            raise ValidationFailureError("DELIVERY_SECRET_PATH_REJECTED")
+        try:
+            path = raw_path.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise ValidationFailureError("DELIVERY_SECRET_UNAVAILABLE") from exc
+        try:
+            path.relative_to(_delivery_secret_root())
+        except ValueError as exc:
+            raise ValidationFailureError("DELIVERY_SECRET_PATH_ESCAPE") from exc
+        if not path.is_file() or path.stat().st_mode & 0o077:
+            raise ValidationFailureError("DELIVERY_SECRET_PERMISSION_INVALID")
+        payload = json.loads(path.read_text(encoding="utf-8"))
         value = payload.get("bot_token") or payload.get("access_token")
     else:
         value = None

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
+from typing import get_args
 
 import httpx
 import pytest
@@ -10,6 +13,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.contracts.channel_policy import ChannelScopedPolicy
+from app.contracts.production_publish import UploadedVideoReadV2
 from app.contracts.youtube_delivery import ResumableUploadStatus
 from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
@@ -23,9 +27,11 @@ from app.services.config_registry import ConfigRegistryService, content_hash
 from app.services.youtube_delivery import (
     LocalSessionSecretStore,
     ResolvedMediaBytes,
+    VerifiedMediaByteSourceResolver,
     YouTubeDataApiTransport,
     YouTubePrivateStageExecutor,
     _normalize_youtube_readback,
+    _validate_public_release_observation,
 )
 
 
@@ -322,3 +328,210 @@ def test_current_channel_policy_freezes_private_stage_and_human_public_release()
         "YOUTUBE_PRIVATE_VERIFIED"
     )
     assert policy.provider_usage_policy.youtube_public_release_api_allowed is False
+
+class _BlockingUploadTransport(_SuccessfulUploadTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = Event()
+        self.release = Event()
+
+    def create_resumable_session(self, **_kwargs) -> str:
+        self.create_calls += 1
+        self.entered.set()
+        if not self.release.wait(timeout=10):
+            raise RuntimeError("blocking upload transport timed out")
+        return "https://upload.youtube.test/session/concurrent"
+
+
+def test_complete_upload_status_requires_platform_video_id() -> None:
+    with pytest.raises(ValueError, match="platform_video_id"):
+        ResumableUploadStatus(state="COMPLETE", committed_bytes=1)
+
+
+def test_uploaded_video_read_contract_accepts_v3_rows() -> None:
+    annotation = UploadedVideoReadV2.model_fields["schema_version"].annotation
+    assert set(get_args(annotation)) == {"v2", "v3"}
+
+
+def test_resumable_query_and_upload_send_authorization(tmp_path: Path) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["Authorization"] == "Bearer exact-token"
+        if request.headers.get("Content-Range", "").startswith("bytes */"):
+            return httpx.Response(308, headers={"Range": "bytes=0-0"})
+        return httpx.Response(200, json={"id": "video-authenticated"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    transport = YouTubeDataApiTransport(client=client)
+    queried = transport.query_resumable_session(
+        access_token="exact-token",
+        session_uri="https://upload.youtube.test/session/auth",
+        total_bytes=2,
+    )
+    assert queried.committed_bytes == 1
+    media_path = tmp_path / "auth.mp4"
+    media_path.write_bytes(b"ab")
+    uploaded = transport.upload_media(
+        access_token="exact-token",
+        session_uri="https://upload.youtube.test/session/auth",
+        media_path=media_path,
+        start_offset=1,
+        total_bytes=2,
+        mime_type="video/mp4",
+    )
+    assert uploaded.platform_video_id == "video-authenticated"
+    assert len(requests) == 2
+
+
+def test_verified_media_resolver_rejects_path_escape(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.srt"
+    outside.write_text("1\n00:00:00,000 --> 00:00:01,000\nTest\n", encoding="utf-8")
+    checksum = hashlib.sha256(outside.read_bytes()).hexdigest()
+    resolver = VerifiedMediaByteSourceResolver(workspace_root=root)
+    with pytest.raises(ValidationFailureError, match="YOUTUBE_MEDIA_PATH_ESCAPE"):
+        with resolver.resolve_sidecar(
+            file_ref=f"file://{outside}",
+            expected_checksum=checksum,
+            mime_type="application/x-subrip",
+        ):
+            pass
+
+
+def test_public_release_observation_must_match_frozen_expectation() -> None:
+    expectation = {
+        "expected_privacy_status": "PUBLIC",
+        "manual_release_only": True,
+        "title": "Frozen title",
+        "description": "Frozen description",
+        "tags": ["one", "two"],
+        "category_id": "28",
+        "default_language": "en",
+        "made_for_kids": False,
+        "contains_synthetic_media": True,
+        "thumbnail_confirmed": True,
+        "caption_confirmed": True,
+    }
+    observed = {
+        "privacy_status": "PUBLIC",
+        "title": "Frozen title",
+        "description": "Frozen description",
+        "tags": ["one", "two"],
+        "category_id": "28",
+        "default_language": "en",
+        "made_for_kids": False,
+        "contains_synthetic_media": True,
+        "thumbnail_confirmed": True,
+        "caption_confirmed": True,
+    }
+    _validate_public_release_observation(
+        expectation=expectation,
+        observed=observed,
+    )
+    with pytest.raises(
+        ValidationFailureError,
+        match="PUBLICATION_RECEIPT_FROZEN_READBACK_MISMATCH",
+    ):
+        _validate_public_release_observation(
+            expectation=expectation,
+            observed={**observed, "tags": ["drifted"]},
+        )
+    with pytest.raises(
+        ValidationFailureError,
+        match="PUBLICATION_RECEIPT_OBSERVATION_INCOMPLETE",
+    ):
+        _validate_public_release_observation(
+            expectation=expectation,
+            observed={key: value for key, value in observed.items() if key != "category_id"},
+        )
+
+
+def test_concurrent_upload_cannot_create_second_resumable_session(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    stage = _insert_stage(db_session, label="concurrent-upload")
+    media_path = tmp_path / "concurrent.mp4"
+    media_path.write_bytes(b"concurrent-private-video-bytes")
+    media = ResolvedMediaBytes(
+        path=media_path,
+        checksum_sha256=hashlib.sha256(media_path.read_bytes()).hexdigest(),
+        size_bytes=media_path.stat().st_size,
+        mime_type="video/mp4",
+    )
+    transport = _BlockingUploadTransport()
+    executor = _executor(db_session, transport=transport, tmp_path=tmp_path)
+    snapshot = {
+        "identity_hash": stage.identity_hash,
+        "staging_metadata": stage.staging_metadata,
+    }
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(
+            executor._upload_video,
+            stage_id=stage.id,
+            stage_snapshot=snapshot,
+            media=media,
+            access_token="test-token",
+        )
+        assert transport.entered.wait(timeout=5)
+        with pytest.raises(
+            ValidationFailureError,
+            match="YOUTUBE_RESUMABLE_SESSION_OUTCOME_UNKNOWN",
+        ):
+            executor._upload_video(
+                stage_id=stage.id,
+                stage_snapshot=snapshot,
+                media=media,
+                access_token="test-token",
+            )
+        transport.release.set()
+        assert first.result(timeout=15) == "video-private-1"
+    assert transport.create_calls == 1
+
+
+def test_concurrent_component_write_is_fail_closed(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    stage = _insert_stage(db_session, label="concurrent-component")
+    executor = _executor(
+        db_session,
+        transport=_SuccessfulUploadTransport(),
+        tmp_path=tmp_path,
+    )
+    entered = Event()
+    release = Event()
+    calls: list[str] = []
+
+    def call() -> dict[str, str]:
+        calls.append("called")
+        entered.set()
+        if not release.wait(timeout=10):
+            raise RuntimeError("blocking component transport timed out")
+        return {"etag": "component-etag"}
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(
+            executor._write_component_once,
+            stage_id=stage.id,
+            component_type="CAPTION",
+            request_payload={"video_id": "video-1", "checksum": "d" * 64},
+            call=call,
+        )
+        assert entered.wait(timeout=5)
+        with pytest.raises(
+            ValidationFailureError,
+            match="YOUTUBE_COMPONENT_OUTCOME_UNKNOWN",
+        ):
+            executor._write_component_once(
+                stage_id=stage.id,
+                component_type="CAPTION",
+                request_payload={"video_id": "video-1", "checksum": "d" * 64},
+                call=lambda: {"etag": "must-not-run"},
+            )
+        release.set()
+        first.result(timeout=15)
+    assert calls == ["called"]
