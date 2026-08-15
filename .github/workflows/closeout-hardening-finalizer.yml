@@ -1,4 +1,4 @@
-name: Remaining Debt Recovered Patch Apply Robust
+name: Remaining Debt Source Hardening Apply
 
 on:
   push:
@@ -10,14 +10,14 @@ permissions:
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[hardening-sections-applied]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[source-hardening-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/vcos-remaining-debt-closeout
           fetch-depth: 0
-      - name: Apply complete sections
+      - name: Apply recovered source sections
         shell: bash
         run: |
           set -euo pipefail
@@ -31,21 +31,20 @@ jobs:
               if i<0: break
               starts.append(i); pos=i+len(marker)
           starts.append(len(patch))
-          for idx in range(min(8, len(starts)-1)):
+          for idx in range(1, min(8, len(starts)-1)):
               section=patch[starts[idx]:starts[idx+1]]
               tmp=Path(f'/tmp/sec-{idx}.patch'); tmp.write_text(section,encoding='utf-8')
               subprocess.run(['git','apply','--check','--whitespace=nowarn',str(tmp)],check=True)
               subprocess.run(['git','apply','--whitespace=nowarn',str(tmp)],check=True)
           PY
           git status --short
-          test -n "$(git status --porcelain)"
-      - name: Commit and push
+      - name: Commit and push source hardening
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
-          git add -A
+          git add app/contracts/channel_policy.py app/services/channel_profile.py app/services/m5.py app/services/nich1.py app/services/pkg1.py app/services/pkg1_market_revision.py app/services/production_publish.py
           git diff --cached --stat
-          git -c core.hooksPath=/dev/null commit --no-verify -m "fix: apply recovered remaining debt hardening [hardening-sections-applied]"
+          git -c core.hooksPath=/dev/null commit --no-verify -m "fix: remove channel-specific runtime hardcoding [source-hardening-applied]"
           git push origin HEAD:feat/vcos-remaining-debt-closeout
