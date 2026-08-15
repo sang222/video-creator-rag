@@ -1,5 +1,5 @@
 name: Apply PR3 Closeout Hardening
-# retry-generation: 3
+# retry-generation: 4
 
 on:
   push:
@@ -25,19 +25,19 @@ jobs:
           python-version: "3.13"
       - name: Apply deterministic patch
         run: python .github/scripts/pr3_closeout_runner.py
-      - name: Remove one-shot patch machinery
+      - name: Remove one-shot script machinery
         run: |
           rm -f .github/scripts/pr3_closeout_patch.py
           rm -f .github/scripts/pr3_closeout_runner.py
-          rm -f .github/workflows/pr3-closeout-apply.yml
+      - name: Restore workflow files for connector-managed closeout
+        run: git checkout HEAD -- .github/workflows
       - name: Validate patch shape
         run: |
           python -m compileall -q app tests/test_youtube_private_delivery.py
           git diff --check
           test ! -e .github/scripts/pr3_closeout_patch.py
           test ! -e .github/scripts/pr3_closeout_runner.py
-          test ! -e .github/workflows/pr3-closeout-apply.yml
-      - name: Commit and push
+      - name: Commit and push non-workflow closeout
         run: |
           git config user.name "VCOS Delivery Agent"
           git config user.email "actions@users.noreply.github.com"
