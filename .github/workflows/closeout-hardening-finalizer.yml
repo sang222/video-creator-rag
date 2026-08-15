@@ -62,8 +62,13 @@ jobs:
           set -euo pipefail
           rm -f app/services/runtime_bootstrap.py
           sed -i '/app\/services\/runtime_bootstrap.py/d' .github/workflows/youtube-private-delivery.yml
+      - name: Normalize qualification test package imports
+        run: |
+          touch tests/__init__.py
+          mkdir -p tests/qualification
+          touch tests/qualification/__init__.py
       - name: Compile source before DB tests
-        run: python -m compileall -q app tests/test_remaining_debt_closeout.py
+        run: python -m compileall -q app tests
       - name: Migrate PostgreSQL to one current head
         run: |
           alembic upgrade head
