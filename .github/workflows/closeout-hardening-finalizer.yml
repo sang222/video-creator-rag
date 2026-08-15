@@ -1,4 +1,4 @@
-name: Remaining Debt Patch Recovery
+name: Remaining Debt Recovered Patch Apply
 
 on:
   push:
@@ -9,34 +9,60 @@ permissions:
   contents: write
 
 jobs:
-  recover:
-    if: ${{ !contains(github.event.head_commit.message, '[patch-recovered]') }}
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[recovered-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/vcos-remaining-debt-closeout
           fetch-depth: 0
-      - name: Recover readable prefix from truncated payload
+      - name: Apply every complete recovered file patch
         shell: bash
         run: |
           python - <<'PY'
-          import base64
           from pathlib import Path
-          data = ''.join(Path('tools/closeout-hardening.patch.gz.b64').read_text(encoding='utf-8').split())
-          data += '=' * (-len(data) % 4)
-          Path('/tmp/hardening.gz').write_bytes(base64.b64decode(data, validate=False))
+          import subprocess
+
+          patch = Path('tools/closeout-hardening.recovered.patch').read_text(encoding='utf-8')
+          marker = 'diff --git '
+          starts = []
+          pos = 0
+          while True:
+              i = patch.find(marker, pos)
+              if i < 0:
+                  break
+              starts.append(i)
+              pos = i + len(marker)
+          starts.append(len(patch))
+          report = []
+          for idx in range(len(starts)-1):
+              section = patch[starts[idx]:starts[idx+1]]
+              header = section.splitlines()[0]
+              path = header.split(' b/', 1)[-1]
+              tmp = Path(f'/tmp/recovered-{idx}.patch')
+              tmp.write_text(section, encoding='utf-8')
+              check = subprocess.run(
+                  ['git','apply','--check','--whitespace=nowarn',str(tmp)],
+                  text=True, capture_output=True
+              )
+              if check.returncode == 0:
+                  apply = subprocess.run(
+                      ['git','apply','--whitespace=nowarn',str(tmp)],
+                      text=True, capture_output=True
+                  )
+                  report.append(f'APPLIED {path} rc={apply.returncode} {apply.stderr.strip()}')
+                  if apply.returncode != 0:
+                      raise SystemExit(apply.returncode)
+              else:
+                  report.append(f'SKIPPED {path} rc={check.returncode} {check.stderr.strip()}')
+          Path('tools/closeout-hardening.section-report.txt').write_text('\n'.join(report)+'\n', encoding='utf-8')
+          print('\n'.join(report))
           PY
-          set +e
-          gzip -dc /tmp/hardening.gz > tools/closeout-hardening.recovered.patch 2> tools/closeout-hardening.recovery.err
-          echo "gzip_exit=$?" >> tools/closeout-hardening.recovery.err
-          set -e
-          wc -c tools/closeout-hardening.recovered.patch >> tools/closeout-hardening.recovery.err
-          grep '^diff --git ' tools/closeout-hardening.recovered.patch >> tools/closeout-hardening.recovery.err || true
-      - name: Commit recovered payload
+      - name: Commit recovered source hardening
         run: |
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
-          git add tools/closeout-hardening.recovered.patch tools/closeout-hardening.recovery.err
-          git commit -m "chore: recover hardening payload prefix [patch-recovered]"
+          git add -A
+          git commit -m "fix: apply recoverable remaining debt hardening [recovered-applied]"
           git push origin HEAD:feat/vcos-remaining-debt-closeout
