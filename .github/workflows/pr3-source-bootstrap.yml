@@ -1,0 +1,22 @@
+name: PR3 Source Bootstrap
+
+on:
+  push:
+    branches:
+      - feat/youtube-private-delivery-closeout
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source
+        run: tar --exclude=.git -czf /tmp/video-creator-rag-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr3-source
+          path: /tmp/video-creator-rag-source.tgz
+          retention-days: 1
