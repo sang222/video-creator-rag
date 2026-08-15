@@ -63,6 +63,7 @@ jobs:
           app/contracts/channel_policy.py
           app/contracts/production_publish.py
           app/contracts/youtube_delivery.py
+          app/db/models/__init__.py
           app/db/models/m7.py
           app/db/models/youtube_delivery.py
           app/api/routes/youtube_delivery.py
@@ -72,6 +73,9 @@ jobs:
           app/services/long_form_analytics.py
           app/services/m9.py
           app/services/outbox_dispatcher.py
+          app/services/pkg1.py
+          app/services/production_start_readiness.py
+          app/services/runtime_bootstrap.py
           app/services/security_boundary.py
           app/services/v2_native_effects.py
           app/services/v2_package_readiness.py
