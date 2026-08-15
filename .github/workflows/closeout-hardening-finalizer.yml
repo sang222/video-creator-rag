@@ -50,10 +50,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Apply frozen hardening patch
+        shell: bash
         run: |
-          base64 --decode tools/closeout-hardening.patch.gz.b64 | gzip -d > /tmp/closeout-hardening.patch
-          git apply --check /tmp/closeout-hardening.patch
-          git apply /tmp/closeout-hardening.patch
+          set -euo pipefail
+          base64 --decode tools/closeout-hardening.patch.gz.b64 > /tmp/closeout-hardening.patch.gz
+          gzip -t /tmp/closeout-hardening.patch.gz
+          gzip -dc /tmp/closeout-hardening.patch.gz > /tmp/closeout-hardening.patch
+          test -s /tmp/closeout-hardening.patch
+          git apply --3way --whitespace=nowarn /tmp/closeout-hardening.patch
           rm -f tools/closeout-hardening.patch.gz.b64
           rm -f .github/workflows/closeout-hardening-finalizer.yml
       - name: Validate migration chain
