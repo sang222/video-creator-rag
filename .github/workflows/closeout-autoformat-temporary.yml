@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   format:
-    if: github.actor != 'github-actions[bot]' || github.event.head_commit.message != 'style: apply closeout formatter'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
