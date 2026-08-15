@@ -1,4 +1,4 @@
-name: Remaining Debt Recovered Patch Apply
+name: Remaining Debt Recovered Patch Apply Robust
 
 on:
   push:
@@ -10,16 +10,17 @@ permissions:
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[hardening-prefix-applied]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[hardening-sections-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/vcos-remaining-debt-closeout
           fetch-depth: 0
-      - name: Apply complete recovered patch sections
+      - name: Apply complete sections
         shell: bash
         run: |
+          set -euo pipefail
           python - <<'PY'
           from pathlib import Path
           import subprocess
@@ -34,17 +35,22 @@ jobs:
           for idx in range(min(8, len(starts)-1)):
               section=patch[starts[idx]:starts[idx+1]]
               path=section.splitlines()[0].split(' b/',1)[-1]
-              tmp=Path(f'/tmp/sec-{idx}.patch'); tmp.write_text(section,encoding='utf-8')
+              tmp=Path(f'/tmp/sec-{idx}.patch')
+              tmp.write_text(section,encoding='utf-8')
               subprocess.run(['git','apply','--check','--whitespace=nowarn',str(tmp)],check=True)
               subprocess.run(['git','apply','--whitespace=nowarn',str(tmp)],check=True)
               applied.append(path)
-          Path('tools/remaining-debt-diagnostic.log').write_text('APPLIED\n'+'\n'.join(applied)+'\n',encoding='utf-8')
+          print('APPLIED', *applied, sep='\n')
           PY
-      - name: Commit hardening prefix
+          git status --short
+          test -n "$(git status --porcelain)"
+      - name: Commit and push
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
           git add -A
-          git add -f tools/remaining-debt-diagnostic.log
-          git commit -m "fix: apply recovered remaining debt hardening prefix [hardening-prefix-applied]"
+          git commit -m "fix: apply recovered remaining debt hardening [hardening-sections-applied]"
+          git pull --rebase origin feat/vcos-remaining-debt-closeout
           git push origin HEAD:feat/vcos-remaining-debt-closeout
