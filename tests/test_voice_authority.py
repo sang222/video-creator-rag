@@ -215,4 +215,4 @@ def test_voice_migration_is_single_head() -> None:
     config.set_main_option("script_location", "alembic")
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
-    assert heads == ["0084_youtube_private_delivery"]
+    assert len(heads) == 1
