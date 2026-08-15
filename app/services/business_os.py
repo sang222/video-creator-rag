@@ -151,7 +151,13 @@ class BusinessOperatingService:
         source_updated_at: datetime,
         currency: str = "USD",
     ) -> RevenueSnapshot:
-        values = [estimated_amount, finalized_or_locked_amount, reversed_amount, cash_received_amount, cash_receivable_amount]
+        values = (
+            estimated_amount,
+            finalized_or_locked_amount,
+            reversed_amount,
+            cash_received_amount,
+            cash_receivable_amount,
+        )
         if period_end <= period_start or any(value < 0 for value in values):
             raise ValidationFailureError("REVENUE_SNAPSHOT_VALUES_INVALID")
         payload = {
@@ -200,17 +206,26 @@ class BusinessOperatingService:
     ) -> ChannelPnlSnapshot:
         if period_end <= period_start or shared_cost_allocated < 0:
             raise ValidationFailureError("CHANNEL_PNL_PERIOD_INVALID")
-        project_ids = select(VideoProject.id).where(VideoProject.channel_workspace_id == channel_workspace_id)
+        project_ids = select(VideoProject.id).where(
+            VideoProject.channel_workspace_id == channel_workspace_id
+        )
+        # Self-funding truth uses incurred/settled provider cost, never forecast
+        # or reservation occupancy. Refund/adjustment accounting can be added as
+        # separate signed business events; the legacy CostEvent amount is
+        # non-negative, so only ACTUAL is safe to aggregate here.
         direct_cost = Decimal(
             str(
                 self.session.scalar(
                     select(func.coalesce(func.sum(CostEvent.amount), 0)).where(
                         CostEvent.currency == currency,
+                        CostEvent.cost_type == "ACTUAL",
                         CostEvent.created_at >= period_start,
                         CostEvent.created_at < period_end,
                         or_(
-                            (CostEvent.cost_scope_type == "CHANNEL") & (CostEvent.cost_scope_id == channel_workspace_id),
-                            (CostEvent.cost_scope_type == "PROJECT") & CostEvent.cost_scope_id.in_(project_ids),
+                            (CostEvent.cost_scope_type == "CHANNEL")
+                            & (CostEvent.cost_scope_id == channel_workspace_id),
+                            (CostEvent.cost_scope_type == "PROJECT")
+                            & CostEvent.cost_scope_id.in_(project_ids),
                         ),
                     )
                 )
@@ -227,9 +242,24 @@ class BusinessOperatingService:
                 )
             ).all()
         )
-        estimated = sum((item.estimated_amount for item in snapshots), Decimal("0"))
-        finalized = sum((max(Decimal("0"), item.finalized_or_locked_amount - item.reversed_amount) for item in snapshots), Decimal("0"))
-        cash = sum((item.cash_received_amount for item in snapshots), Decimal("0"))
+        estimated = sum(
+            (item.estimated_amount for item in snapshots),
+            Decimal("0"),
+        )
+        finalized = sum(
+            (
+                max(
+                    Decimal("0"),
+                    item.finalized_or_locked_amount - item.reversed_amount,
+                )
+                for item in snapshots
+            ),
+            Decimal("0"),
+        )
+        cash = sum(
+            (item.cash_received_amount for item in snapshots),
+            Decimal("0"),
+        )
         contribution = finalized - direct_cost - shared_cost_allocated
         payload = {
             "schema_version": "vcos.channel-pnl-snapshot.v1",
@@ -260,7 +290,10 @@ class BusinessOperatingService:
             cash_received=cash,
             contribution_margin=contribution,
             burn_rate=direct_cost + shared_cost_allocated,
-            source_refs=[{"type": "revenue_snapshot", "id": str(item.id)} for item in snapshots],
+            source_refs=[
+                {"type": "revenue_snapshot", "id": str(item.id)}
+                for item in snapshots
+            ],
             content_hash=content_hash(payload),
         )
         self.session.add(row)
@@ -284,44 +317,72 @@ class BusinessOperatingService:
         )
         monetization = self.session.scalar(
             select(MonetizationAccountStatus)
-            .where(MonetizationAccountStatus.channel_workspace_id == channel_workspace_id)
+            .where(
+                MonetizationAccountStatus.channel_workspace_id
+                == channel_workspace_id
+            )
             .order_by(MonetizationAccountStatus.source_updated_at.desc())
             .limit(1)
         )
         if payment is None or payment.source_updated_at < cutoff:
             reasons.append("PAYMENT_PROFILE_MISSING_OR_STALE")
-        elif payment.tax_state != "VERIFIED" or payment.address_verification_state != "VERIFIED" or payment.payment_method_state != "READY" or payment.payment_hold_state not in {"NONE", "CLEAR"}:
+        elif (
+            payment.tax_state != "VERIFIED"
+            or payment.address_verification_state != "VERIFIED"
+            or payment.payment_method_state != "READY"
+            or payment.payment_hold_state not in {"NONE", "CLEAR"}
+        ):
             reasons.append("PAYMENT_PROFILE_NOT_READY")
         if monetization is None or monetization.source_updated_at < cutoff:
             reasons.append("MONETIZATION_STATUS_MISSING_OR_STALE")
-        elif monetization.enrollment_state != "ACTIVE" or monetization.restriction_state not in {"NONE", "CLEAR"} or monetization.country_eligibility_state not in {"ELIGIBLE", "READY"}:
+        elif (
+            monetization.enrollment_state != "ACTIVE"
+            or monetization.restriction_state not in {"NONE", "CLEAR"}
+            or monetization.country_eligibility_state not in {"ELIGIBLE", "READY"}
+        ):
             reasons.append("MONETIZATION_NOT_READY")
         pnl = list(
             self.session.scalars(
                 select(ChannelPnlSnapshot)
-                .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
+                .where(
+                    ChannelPnlSnapshot.channel_workspace_id
+                    == channel_workspace_id
+                )
                 .order_by(ChannelPnlSnapshot.period_end.desc())
                 .limit(2)
             ).all()
         )
         if len(pnl) < 2:
             reasons.append("SELF_FUNDING_TWO_REVIEW_CYCLES_REQUIRED")
-        elif any(item.finalized_revenue < item.direct_cost + item.shared_cost_allocated for item in pnl):
+        elif any(
+            item.finalized_revenue
+            < item.direct_cost + item.shared_cost_allocated
+            for item in pnl
+        ):
             reasons.append("FINALIZED_REVENUE_COST_COVERAGE_INSUFFICIENT")
         critical = int(
             self.session.scalar(
                 select(func.count(PlatformEnforcementIncident.id)).where(
-                    PlatformEnforcementIncident.channel_workspace_id == channel_workspace_id,
+                    PlatformEnforcementIncident.channel_workspace_id
+                    == channel_workspace_id,
                     PlatformEnforcementIncident.severity.in_(["HIGH", "CRITICAL"]),
-                    PlatformEnforcementIncident.state.in_(["OPEN", "UNDER_REVIEW", "APPEAL_READY", "SUBMITTED"]),
+                    PlatformEnforcementIncident.state.in_(
+                        ["OPEN", "UNDER_REVIEW", "APPEAL_READY", "SUBMITTED"]
+                    ),
                 )
             )
             or 0
         )
         if critical:
             reasons.append("CRITICAL_ENFORCEMENT_OPEN")
-        trailing_finalized = sum((item.finalized_revenue for item in pnl), Decimal("0"))
-        trailing_cost = sum((item.direct_cost + item.shared_cost_allocated for item in pnl), Decimal("0"))
+        trailing_finalized = sum(
+            (item.finalized_revenue for item in pnl),
+            Decimal("0"),
+        )
+        trailing_cost = sum(
+            (item.direct_cost + item.shared_cost_allocated for item in pnl),
+            Decimal("0"),
+        )
         cash = sum((item.cash_received for item in pnl), Decimal("0"))
         return SelfFundingDecision(
             result="SELF_FUNDING" if not reasons else "SUBSIDIZED_OR_RESTRICTED",
@@ -352,7 +413,9 @@ class BusinessOperatingService:
             "schema_version": "vcos.platform-enforcement-incident.v1",
             "company_id": str(company_id),
             "channel_workspace_id": str(channel_workspace_id),
-            "uploaded_video_id": str(uploaded_video_id) if uploaded_video_id else None,
+            "uploaded_video_id": (
+                str(uploaded_video_id) if uploaded_video_id else None
+            ),
             "platform": platform,
             "incident_type": incident_type,
             "scope": scope,
@@ -422,69 +485,106 @@ class BusinessOperatingService:
         return row
 
     def validate_affiliate_use(
-        self, *, channel_workspace_id: uuid.UUID, link_id: uuid.UUID, disclosure_present: bool
+        self,
+        *,
+        channel_workspace_id: uuid.UUID,
+        link_id: uuid.UUID,
+        disclosure_present: bool,
     ) -> AffiliateLinkRegistry:
         link = self.session.get(AffiliateLinkRegistry, link_id)
         if link is None or link.channel_workspace_id != channel_workspace_id:
             raise NotFoundError("affiliate link not found")
-        offer = self.session.get(AffiliateOfferSnapshot, link.affiliate_offer_snapshot_id)
+        offer = self.session.get(
+            AffiliateOfferSnapshot,
+            link.affiliate_offer_snapshot_id,
+        )
         if offer is None:
             raise ValidationFailureError("AFFILIATE_OFFER_SNAPSHOT_REQUIRED")
         now = utc_now()
-        if link.active_state != "ACTIVE" or offer.state != "ACTIVE" or (offer.expires_at is not None and offer.expires_at <= now):
+        if (
+            link.active_state != "ACTIVE"
+            or offer.state != "ACTIVE"
+            or (offer.expires_at is not None and offer.expires_at <= now)
+        ):
             raise ValidationFailureError("AFFILIATE_OFFER_OR_LINK_NOT_ACTIVE")
-        if (link.disclosure_required or offer.disclosure_required) and not disclosure_present:
+        if (
+            link.disclosure_required or offer.disclosure_required
+        ) and not disclosure_present:
             raise ValidationFailureError("AFFILIATE_DISCLOSURE_REQUIRED")
         return link
 
-    def _queue_enforcement_action(self, incident: PlatformEnforcementIncident) -> None:
+    def _queue_enforcement_action(
+        self,
+        incident: PlatformEnforcementIncident,
+    ) -> None:
         self.session.add(
             ManualAction(
                 action_type="PLATFORM_ENFORCEMENT_REVIEW",
                 target_type="platform_enforcement_incident",
                 target_id=incident.id,
-                priority="CRITICAL" if incident.severity == "CRITICAL" else "HIGH",
+                priority=(
+                    "CRITICAL" if incident.severity == "CRITICAL" else "HIGH"
+                ),
                 state="OPEN",
                 reason_code=incident.incident_type,
-                next_action="Review platform evidence and prepare a human appeal/dispute only when legally justified.",
+                next_action=(
+                    "Review platform evidence and prepare a human appeal/dispute "
+                    "only when legally justified."
+                ),
                 due_at=incident.deadline_at,
             )
         )
 
-    def action_first_snapshot(self, channel_workspace_id: uuid.UUID) -> dict[str, Any]:
+    def action_first_snapshot(
+        self,
+        channel_workspace_id: uuid.UUID,
+    ) -> dict[str, Any]:
         gate = self.self_funding_gate(
             company_id=self._company_id(channel_workspace_id),
             channel_workspace_id=channel_workspace_id,
         )
         latest_pnl = self.session.scalar(
             select(ChannelPnlSnapshot)
-            .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
+            .where(
+                ChannelPnlSnapshot.channel_workspace_id
+                == channel_workspace_id
+            )
             .order_by(ChannelPnlSnapshot.period_end.desc())
             .limit(1)
         )
         open_incidents = int(
             self.session.scalar(
                 select(func.count(PlatformEnforcementIncident.id)).where(
-                    PlatformEnforcementIncident.channel_workspace_id == channel_workspace_id,
-                    PlatformEnforcementIncident.state.in_(["OPEN", "UNDER_REVIEW", "APPEAL_READY", "SUBMITTED"]),
+                    PlatformEnforcementIncident.channel_workspace_id
+                    == channel_workspace_id,
+                    PlatformEnforcementIncident.state.in_(
+                        ["OPEN", "UNDER_REVIEW", "APPEAL_READY", "SUBMITTED"]
+                    ),
                 )
             )
             or 0
         )
-        return {
-            "channel_workspace_id": str(channel_workspace_id),
-            "self_funding": gate.result,
-            "self_funding_reasons": list(gate.reason_codes),
-            "open_enforcement_incidents": open_incidents,
-            "latest_pnl": None if latest_pnl is None else {
+        latest_payload = None
+        if latest_pnl is not None:
+            latest_payload = {
                 "period_end": latest_pnl.period_end,
                 "finalized_revenue": str(latest_pnl.finalized_revenue),
                 "cash_received": str(latest_pnl.cash_received),
                 "direct_cost": str(latest_pnl.direct_cost),
                 "shared_cost_allocated": str(latest_pnl.shared_cost_allocated),
                 "contribution_margin": str(latest_pnl.contribution_margin),
-            },
-            "next_action": "NO_ACTION_REQUIRED" if gate.result == "SELF_FUNDING" and open_incidents == 0 else "OPEN_BUSINESS_ACTION_QUEUE",
+            }
+        return {
+            "channel_workspace_id": str(channel_workspace_id),
+            "self_funding": gate.result,
+            "self_funding_reasons": list(gate.reason_codes),
+            "open_enforcement_incidents": open_incidents,
+            "latest_pnl": latest_payload,
+            "next_action": (
+                "NO_ACTION_REQUIRED"
+                if gate.result == "SELF_FUNDING" and open_incidents == 0
+                else "OPEN_BUSINESS_ACTION_QUEUE"
+            ),
         }
 
     def _company_id(self, channel_workspace_id: uuid.UUID) -> uuid.UUID:
@@ -495,7 +595,12 @@ class BusinessOperatingService:
         )
         if value is None:
             from app.db.models.channel import ChannelWorkspace
-            value = self.session.scalar(select(ChannelWorkspace.company_id).where(ChannelWorkspace.id == channel_workspace_id))
+
+            value = self.session.scalar(
+                select(ChannelWorkspace.company_id).where(
+                    ChannelWorkspace.id == channel_workspace_id
+                )
+            )
         if value is None:
             raise NotFoundError("channel workspace not found")
         return value
