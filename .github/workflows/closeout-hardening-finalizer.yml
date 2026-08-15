@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   diagnose:
-    if: ${{ !contains(github.event.head_commit.message, '[diagnostic-captured]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[diagnostic-v2]') }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -46,27 +46,28 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Migrate
         run: alembic upgrade head
-      - name: Capture tests
+      - name: Capture exact CI surface
         shell: bash
         run: |
           set +e
-          pytest -q tests/test_remaining_debt_closeout.py tests/test_long_form_launch_cadence.py tests/test_production_publish.py tests/test_youtube_private_delivery.py tests/test_editorial_novelty.py tests/test_cross_modal_lineage.py tests/test_v2_renderer_reconciliation.py > tools/remaining-debt-diagnostic.log 2>&1
+          files=(tests/test_remaining_debt_closeout.py)
+          for candidate in tests/test_long_form_launch_cadence.py tests/test_production_publish.py tests/test_youtube_private_delivery.py tests/test_editorial_novelty.py tests/test_cross_modal_lineage.py tests/test_v2_renderer_reconciliation.py; do
+            [[ -f "$candidate" ]] && files+=("$candidate")
+          done
+          echo "FILES=${files[*]}" > tools/remaining-debt-diagnostic.log
+          pytest -q "${files[@]}" >> tools/remaining-debt-diagnostic.log 2>&1
           echo "pytest_exit=$?" >> tools/remaining-debt-diagnostic.log
           python - <<'PY' >> tools/remaining-debt-diagnostic.log 2>&1
           from pathlib import Path
           from app.services.remaining_debt_closeout import ArchitectureDebtAuditService
-          try:
-              print('AUDIT', ArchitectureDebtAuditService().audit(Path.cwd()))
-          except Exception as exc:
-              print('AUDIT_EXCEPTION', type(exc).__name__, repr(exc))
+          print('AUDIT', ArchitectureDebtAuditService().audit(Path.cwd()))
           PY
-          ruff check app/db/models/remaining_debt.py app/services/remaining_debt_closeout.py tests/test_remaining_debt_closeout.py alembic/versions/0085_series_authority.py alembic/versions/0086_learning_authority.py alembic/versions/0087_business_os.py >> tools/remaining-debt-diagnostic.log 2>&1
-          echo "ruff_exit=$?" >> tools/remaining-debt-diagnostic.log
+          echo "audit_exit=$?" >> tools/remaining-debt-diagnostic.log
           set -e
       - name: Commit diagnostics
         run: |
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
           git add tools/remaining-debt-diagnostic.log
-          git commit -m "chore: capture closeout diagnostics [diagnostic-captured]"
+          git commit -m "chore: capture exact closeout diagnostics [diagnostic-v2]"
           git push origin HEAD:feat/vcos-remaining-debt-closeout
