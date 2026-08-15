@@ -1,4 +1,4 @@
-name: Remaining Debt Diagnostic Capture
+name: Remaining Debt Patch Recovery
 
 on:
   push:
@@ -9,65 +9,34 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
-    if: ${{ !contains(github.event.head_commit.message, '[diagnostic-v2]') }}
+  recover:
+    if: ${{ !contains(github.event.head_commit.message, '[patch-recovered]') }}
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: vcos
-          POSTGRES_PASSWORD: vcos
-          POSTGRES_DB: vcos
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U vcos -d vcos"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      VCOS_DATABASE_URL: postgresql+psycopg://vcos:vcos@localhost:5432/vcos
-      VCOS_ENVIRONMENT: test
-      VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
-      VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/vcos-remaining-debt-closeout
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-      - name: Migrate
-        run: alembic upgrade head
-      - name: Capture exact CI surface
+      - name: Recover readable prefix from truncated payload
         shell: bash
         run: |
-          set +e
-          files=(tests/test_remaining_debt_closeout.py)
-          for candidate in tests/test_long_form_launch_cadence.py tests/test_production_publish.py tests/test_youtube_private_delivery.py tests/test_editorial_novelty.py tests/test_cross_modal_lineage.py tests/test_v2_renderer_reconciliation.py; do
-            [[ -f "$candidate" ]] && files+=("$candidate")
-          done
-          echo "FILES=${files[*]}" > tools/remaining-debt-diagnostic.log
-          pytest -q "${files[@]}" >> tools/remaining-debt-diagnostic.log 2>&1
-          echo "pytest_exit=$?" >> tools/remaining-debt-diagnostic.log
-          python - <<'PY' >> tools/remaining-debt-diagnostic.log 2>&1
+          python - <<'PY'
+          import base64
           from pathlib import Path
-          from app.services.remaining_debt_closeout import ArchitectureDebtAuditService
-          print('AUDIT', ArchitectureDebtAuditService().audit(Path.cwd()))
+          data = ''.join(Path('tools/closeout-hardening.patch.gz.b64').read_text(encoding='utf-8').split())
+          data += '=' * (-len(data) % 4)
+          Path('/tmp/hardening.gz').write_bytes(base64.b64decode(data, validate=False))
           PY
-          echo "audit_exit=$?" >> tools/remaining-debt-diagnostic.log
+          set +e
+          gzip -dc /tmp/hardening.gz > tools/closeout-hardening.recovered.patch 2> tools/closeout-hardening.recovery.err
+          echo "gzip_exit=$?" >> tools/closeout-hardening.recovery.err
           set -e
-      - name: Commit diagnostics
+          wc -c tools/closeout-hardening.recovered.patch >> tools/closeout-hardening.recovery.err
+          grep '^diff --git ' tools/closeout-hardening.recovered.patch >> tools/closeout-hardening.recovery.err || true
+      - name: Commit recovered payload
         run: |
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
-          git add tools/remaining-debt-diagnostic.log
-          git commit -m "chore: capture exact closeout diagnostics [diagnostic-v2]"
+          git add tools/closeout-hardening.recovered.patch tools/closeout-hardening.recovery.err
+          git commit -m "chore: recover hardening payload prefix [patch-recovered]"
           git push origin HEAD:feat/vcos-remaining-debt-closeout
