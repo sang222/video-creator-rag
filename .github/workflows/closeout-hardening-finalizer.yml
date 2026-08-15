@@ -1,4 +1,4 @@
-name: Remaining Debt Source Hardening Apply
+name: Remaining Debt Profile Compiler Hardening
 
 on:
   push:
@@ -10,41 +10,49 @@ permissions:
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[source-hardening-applied]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[profile-hardening-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/vcos-remaining-debt-closeout
           fetch-depth: 0
-      - name: Apply recovered source sections
+      - name: Apply complete profile compiler hunks
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          import subprocess
+          import re, subprocess
           patch = Path('tools/closeout-hardening.recovered.patch').read_text(encoding='utf-8')
-          marker='diff --git '; starts=[]; pos=0
-          while True:
-              i=patch.find(marker,pos)
-              if i<0: break
-              starts.append(i); pos=i+len(marker)
-          starts.append(len(patch))
-          for idx in range(1, min(8, len(starts)-1)):
-              section=patch[starts[idx]:starts[idx+1]]
-              tmp=Path(f'/tmp/sec-{idx}.patch'); tmp.write_text(section,encoding='utf-8')
-              subprocess.run(['git','apply','--check','--whitespace=nowarn',str(tmp)],check=True)
-              subprocess.run(['git','apply','--whitespace=nowarn',str(tmp)],check=True)
+          start = patch.index('diff --git a/app/services/profile_compiler.py')
+          section = patch[start:]
+          lines = section.splitlines(keepends=True)
+          file_header = ''.join(lines[:4])
+          hunk_starts = [i for i,line in enumerate(lines) if line.startswith('@@ ')]
+          report=[]
+          for n, hstart in enumerate(hunk_starts):
+              hend = hunk_starts[n+1] if n+1 < len(hunk_starts) else len(lines)
+              hunk = ''.join(lines[hstart:hend])
+              tmp=Path(f'/tmp/profile-hunk-{n}.patch')
+              tmp.write_text(file_header+hunk, encoding='utf-8')
+              check=subprocess.run(['git','apply','--check','--whitespace=nowarn',str(tmp)],text=True,capture_output=True)
+              if check.returncode == 0:
+                  subprocess.run(['git','apply','--whitespace=nowarn',str(tmp)],check=True)
+                  report.append(f'APPLIED hunk {n}: {lines[hstart].strip()}')
+              else:
+                  report.append(f'SKIPPED hunk {n}: {lines[hstart].strip()} :: {check.stderr.strip()}')
+          print('\n'.join(report))
+          Path('/tmp/profile-report').write_text('\n'.join(report), encoding='utf-8')
           PY
-          git status --short
-      - name: Commit and push source hardening
+          git status --short app/services/profile_compiler.py
+          test -n "$(git status --porcelain app/services/profile_compiler.py)"
+      - name: Commit generic compiler hardening
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
-          git add app/contracts/channel_policy.py app/services/channel_profile.py app/services/m5.py app/services/nich1.py app/services/pkg1.py app/services/pkg1_market_revision.py app/services/production_publish.py
-          git diff --cached --stat
-          git -c core.hooksPath=/dev/null commit --no-verify -m "fix: remove channel-specific runtime hardcoding [source-hardening-applied]"
+          git add app/services/profile_compiler.py
+          git -c core.hooksPath=/dev/null commit --no-verify -m "fix: remove channel-specific profile compiler overlays [profile-hardening-applied]"
           git push origin HEAD:feat/vcos-remaining-debt-closeout
