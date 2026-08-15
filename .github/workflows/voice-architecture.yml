@@ -46,7 +46,8 @@ jobs:
       - name: Migrate to single head
         run: |
           alembic upgrade head
-          test "$(alembic heads | awk '{print $1}')" = "0084_youtube_private_delivery"
+          test "$(alembic heads | wc -l | tr -d ' ')" = "1"
+          alembic heads
       - name: Voice architecture and regression tests
         run: >-
           pytest -q
@@ -74,8 +75,6 @@ jobs:
         run: >-
           python -m compileall -q
           app
-          alembic/versions/0081_voice_execution_closeout.py
-          alembic/versions/0082_narration_segment_reconciliation_seed.py
-          alembic/versions/0083_combined_replacement_budget_authority.py
+          alembic/versions
           tests/test_voice_authority.py
           tests/test_voice_execution.py
