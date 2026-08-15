@@ -1,0 +1,44 @@
+name: Apply PR3 Closeout Hardening
+
+on:
+  push:
+    branches:
+      - feat/youtube-private-delivery-closeout
+    paths:
+      - .github/workflows/pr3-closeout-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/youtube-private-delivery-closeout
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply deterministic patch
+        run: python .github/scripts/pr3_closeout_patch.py
+      - name: Remove one-shot patch machinery
+        run: |
+          rm -f .github/scripts/pr3_closeout_patch.py
+          rm -f .github/workflows/pr3-closeout-apply.yml
+      - name: Validate patch shape
+        run: |
+          python -m compileall -q app tests/test_youtube_private_delivery.py
+          git diff --check
+          test ! -e .github/scripts/pr3_closeout_patch.py
+          test ! -e .github/workflows/pr3-closeout-apply.yml
+      - name: Commit and push
+        run: |
+          git config user.name "VCOS Delivery Agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: harden private delivery closeout"
+          git push origin HEAD:feat/youtube-private-delivery-closeout
