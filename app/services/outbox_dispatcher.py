@@ -53,6 +53,7 @@ from app.services.production_workflow import (
     semantic_hash,
 )
 from app.services.stale_workflow_recovery import STALE_WORKFLOW_RECOVERY_EVENT_TYPE
+from app.services.youtube_delivery import DELIVERY_EVENT_TYPES
 
 
 DEFAULT_QUEUE_NAME = "production-workflow"
@@ -175,6 +176,10 @@ class DurableOutboxDispatcher:
                             DomainEvent.aggregate_type == "production_workflow_run",
                             DomainEvent.workflow_run_id.is_not(None),
                         ),
+                        and_(
+                            DomainEvent.event_type.in_(DELIVERY_EVENT_TYPES),
+                            DomainEvent.workflow_run_id.is_(None),
+                        ),
                     ),
                     DomainEvent.delivered_at.is_(None),
                     DomainEvent.published_at.is_(None),
@@ -203,7 +208,14 @@ class DurableOutboxDispatcher:
             qualification_event = event.event_type in {SCRIPT_QUALIFICATION_EVENT_TYPE, BACKGROUND_EVENT_TYPE, BACKGROUND_POLL_EVENT_TYPE}
             analytics_event = event.event_type == ANALYTICS_WINDOW_EVENT_TYPE
             recovery_event = event.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE
-            if cadence_event or qualification_event or analytics_event or recovery_event:
+            delivery_event = event.event_type in DELIVERY_EVENT_TYPES
+            if (
+                cadence_event
+                or qualification_event
+                or analytics_event
+                or recovery_event
+                or delivery_event
+            ):
                 if event.command_id is None or not isinstance(event.payload, dict):
                     if qualification_event:
                         self._dead_letter_qualification_event(
@@ -212,6 +224,13 @@ class DurableOutboxDispatcher:
                             error_code="SCRIPT_QUALIFICATION_EVENT_IDENTITY_INVALID",
                             summary="qualification command identity or payload is invalid",
                             retry_eligible=False,
+                        )
+                    elif delivery_event:
+                        self._dead_letter_delivery_event(
+                            event,
+                            now=now,
+                            error_code="DELIVERY_EVENT_IDENTITY_INVALID",
+                            summary="delivery command identity or payload is invalid",
                         )
                     else:
                         self._dead_letter_cadence_event(
@@ -248,6 +267,13 @@ class DurableOutboxDispatcher:
                                 qualification is not None
                                 and qualification.state == "QUALIFIED"
                             ),
+                        )
+                    elif delivery_event:
+                        self._dead_letter_delivery_event(
+                            event,
+                            now=now,
+                            error_code="DELIVERY_RETRY_EXHAUSTED",
+                            summary="delivery event reached its bounded attempt limit",
                         )
                     else:
                         self._dead_letter_cadence_event(
@@ -524,6 +550,12 @@ class DurableOutboxDispatcher:
             # it; row locking plus owner identity preserves that race boundary.
             allow_expired=True,
         )
+        if event.event_type in DELIVERY_EVENT_TYPES:
+            return self._record_delivery_failure(
+                event=event,
+                error=error,
+                now=now,
+            )
         if event.event_type in {
             CADENCE_EVALUATION_EVENT_TYPE,
             ANALYTICS_WINDOW_EVENT_TYPE,
@@ -626,6 +658,60 @@ class DurableOutboxDispatcher:
         return FailureDisposition(
             event_id=event.id,
             classification=normalized.classification,
+            retry_scheduled=False,
+            next_attempt_at=None,
+            dead_letter_job_id=job.id,
+            incident_id=incident.id,
+        )
+
+    def _record_delivery_failure(
+        self,
+        *,
+        event: DomainEvent,
+        error: WorkflowStageError | Exception,
+        now: datetime,
+    ) -> FailureDisposition:
+        """Retry only deterministic same-effect delivery reconciliation."""
+
+        summary = _redact_summary(str(error) or type(error).__name__)
+        code = (str(error).split(":", 1)[0] or type(error).__name__)[:160]
+        retryable_codes = {
+            "YOUTUBE_PROCESSING_PENDING",
+            "YOUTUBE_UPLOAD_INCOMPLETE",
+            "YOUTUBE_UPLOAD_RECONCILIATION_REQUIRED",
+            "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED",
+        }
+        event.last_error_code = code
+        event.last_error_summary = summary
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        if code in retryable_codes and event.attempt_count < event.max_attempts:
+            event.next_attempt_at = now + timedelta(
+                seconds=self.retry_delay_seconds(event.attempt_count)
+            )
+            self.session.flush()
+            return FailureDisposition(
+                event_id=event.id,
+                classification=(
+                    WorkflowFailureClassification.AUTO_RETRY_WITHIN_POLICY
+                ),
+                retry_scheduled=True,
+                next_attempt_at=event.next_attempt_at,
+                dead_letter_job_id=None,
+                incident_id=None,
+            )
+        job, incident = self._dead_letter_delivery_event(
+            event,
+            now=now,
+            error_code=code,
+            summary=summary,
+        )
+        return FailureDisposition(
+            event_id=event.id,
+            classification=(
+                WorkflowFailureClassification.FAIL_PERMANENT_INTEGRITY
+            ),
             retry_scheduled=False,
             next_attempt_at=None,
             dead_letter_job_id=job.id,
@@ -1335,6 +1421,88 @@ class DurableOutboxDispatcher:
                 )
             )
         self.session.flush()
+
+    def _dead_letter_delivery_event(
+        self,
+        event: DomainEvent,
+        *,
+        now: datetime,
+        error_code: str,
+        summary: str,
+    ) -> tuple[DeadLetterJob, OpsIncident]:
+        event.dead_lettered_at = now
+        event.next_attempt_at = None
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        event.last_error_code = error_code
+        event.last_error_summary = _redact_summary(summary)
+        job = self.session.scalar(
+            select(DeadLetterJob).where(DeadLetterJob.domain_event_id == event.id)
+        )
+        if job is None:
+            job = DeadLetterJob(
+                queue_name=self.queue_name,
+                job_type=event.event_type,
+                payload_ref=f"domain-event:{event.id}",
+                target_type=event.aggregate_type,
+                target_id=event.aggregate_id,
+                domain_event_id=event.id,
+                workflow_run_id=None,
+                command_id=event.command_id,
+                fail_count=event.attempt_count,
+                first_failed_at=now,
+                last_failed_at=now,
+                replay_state="NOT_REPLAYABLE",
+                retry_eligible=False,
+                reason_code=error_code,
+                next_action=(
+                    "Inspect the exact delivery effect and reconcile provider "
+                    "or filesystem evidence without creating a second effect."
+                ),
+                metadata_={"learning_excluded": True},
+            )
+            self.session.add(job)
+            self.session.flush()
+        incident = self.session.scalar(
+            select(OpsIncident)
+            .where(
+                OpsIncident.domain_event_id == event.id,
+                OpsIncident.incident_type == "DEAD_LETTER_JOB",
+                OpsIncident.state.in_(["OPEN", "ACKNOWLEDGED"]),
+            )
+            .order_by(OpsIncident.created_at)
+        )
+        if incident is None:
+            incident = OpsIncident(
+                incident_type="DEAD_LETTER_JOB",
+                severity="ERROR",
+                state="OPEN",
+                workflow_run_id=None,
+                stage="DELIVERY",
+                domain_event_id=event.id,
+                command_id=event.command_id,
+                retry_eligible=False,
+                learning_excluded=True,
+                operator_visible_blocker=_redact_summary(summary),
+                resolution_evidence={},
+                impacted_refs=[
+                    {"type": event.aggregate_type, "id": str(event.aggregate_id)},
+                    {"type": "domain_event", "id": str(event.id)},
+                ],
+                reason_codes=[error_code],
+                next_action=job.next_action or "Inspect delivery authority.",
+                metadata_={
+                    "channel_workspace_id": (
+                        str(event.channel_workspace_id)
+                        if event.channel_workspace_id
+                        else None
+                    )
+                },
+            )
+            self.session.add(incident)
+        self.session.flush()
+        return job, incident
 
     def _dead_letter_cadence_event(
         self,

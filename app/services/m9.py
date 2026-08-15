@@ -27,6 +27,7 @@ from app.db.models import (
     PackagingDiagnosticRun,
     PolicyRightsDiagnosticRun,
     PostPublishHealthRun,
+    PublicPublicationReceipt,
     PostPublishObservationWindow,
     RecoveryProposal,
     RetentionCurveSnapshot,
@@ -1976,6 +1977,26 @@ def _require_uploaded(session: Session, uploaded_video_id: uuid.UUID) -> Uploade
     uploaded = session.get(UploadedVideo, uploaded_video_id)
     if uploaded is None:
         raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
+    receipt = (
+        session.get(PublicPublicationReceipt, uploaded.public_publication_receipt_id)
+        if uploaded.public_publication_receipt_id is not None
+        else None
+    )
+    if (
+        uploaded.schema_version not in {"v2", "v3"}
+        or uploaded.actual_visibility != "PUBLIC"
+        or uploaded.published_at is None
+        or (
+            uploaded.schema_version == "v3"
+            and (
+                receipt is None
+                or receipt.observed_privacy_status != "PUBLIC"
+                or receipt.platform_video_id != uploaded.platform_video_id
+                or receipt.observed_published_at != uploaded.published_at
+            )
+        )
+    ):
+        raise ValidationFailureError("POST_PUBLISH_REQUIRES_PUBLICATION_RECEIPT")
     return uploaded
 
 

@@ -140,8 +140,13 @@ class MediaProductionProfile(BaseModel):
     final_render_authority: Literal["native_ffmpeg_renderer"]
     final_narration_authority: Literal["elevenlabs"]
     canonical_media_timeline_required: Literal[True] = True
-    drive_verified_archive_only: Literal[True] = True
-    youtube_manual_upload_only: Literal[True] = True
+    # Historical snapshots may remain Drive/manual-upload based.  Current
+    # production compiles the local verified archive into a private YouTube
+    # staging lane while public release remains human-only.
+    drive_verified_archive_only: bool = True
+    youtube_manual_upload_only: bool = True
+    youtube_private_stage_authority: bool = False
+    youtube_public_release_manual_only: Literal[True] = True
 
     model_config = ConfigDict(extra="forbid")
 
@@ -270,8 +275,10 @@ class ProviderUsagePolicy(BaseModel):
         exclude_if=lambda value: value is None,
     )
     native_ffmpeg_final_render_authority: Literal[True] = True
-    drive_archive_required_before_cleanup: Literal[True] = True
-    youtube_manual_publish_only: Literal[True] = True
+    drive_archive_required_before_cleanup: bool = True
+    youtube_manual_publish_only: bool = True
+    youtube_private_stage_required_before_cleanup: bool = False
+    youtube_public_release_api_allowed: Literal[False] = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -321,13 +328,20 @@ class OriginalityPolicy(BaseModel):
 
 class PublishPolicy(BaseModel):
     primary_destination: Literal["YouTube"]
-    manual_upload_only: Literal[True] = True
+    manual_upload_only: bool = True
+    manual_public_release_only: Literal[True] = True
+    youtube_private_stage_required: bool = False
+    youtube_category_id: str = Field(default="28", min_length=1)
+    youtube_made_for_kids: Literal[False] = False
+    youtube_default_tags: list[str] = Field(default_factory=list, max_length=500)
     synthetic_media_disclosure_required: Literal[True] = True
     rights_license_complete_required: Literal[True] = True
     metadata_thumbnail_truthfulness_required: Literal[True] = True
     human_final_approval_required: Literal[True] = True
-    drive_archive_required: Literal[True] = True
-    local_purge_after_archive_state: Literal["ARCHIVE_VERIFIED"]
+    drive_archive_required: bool = True
+    local_purge_after_archive_state: Literal[
+        "ARCHIVE_VERIFIED", "YOUTUBE_PRIVATE_VERIFIED"
+    ]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -536,13 +550,28 @@ class ChannelScopedPolicy(BaseModel):
                 raise ValueError("CH1_FLEX_V2_NATIVE_COMPOSITION_AUTHORITY_REQUIRED")
             if not self.publish_policy.human_final_approval_required:
                 raise ValueError("CH1_FLEX_V2_HUMAN_FINAL_APPROVAL_REQUIRED")
-            if not self.publish_policy.drive_archive_required:
-                raise ValueError("CH1_FLEX_V2_DRIVE_ARCHIVE_REQUIRED")
-            if (
-                self.publish_policy.local_purge_after_archive_state
-                != "ARCHIVE_VERIFIED"
-            ):
-                raise ValueError("CH1_FLEX_V2_ARCHIVE_VERIFICATION_REQUIRED")
+            if self.publish_policy.youtube_private_stage_required:
+                if (
+                    self.publish_policy.manual_upload_only
+                    or not self.publish_policy.manual_public_release_only
+                    or self.publish_policy.drive_archive_required
+                    or not self.provider_usage_policy.youtube_private_stage_required_before_cleanup
+                    or self.provider_usage_policy.drive_archive_required_before_cleanup
+                    or not self.media_production_profile.youtube_private_stage_authority
+                    or self.media_production_profile.youtube_manual_upload_only
+                    or self.media_production_profile.drive_verified_archive_only
+                    or self.publish_policy.local_purge_after_archive_state
+                    != "YOUTUBE_PRIVATE_VERIFIED"
+                ):
+                    raise ValueError("YOUTUBE_PRIVATE_STAGE_POLICY_BINDING_INVALID")
+            else:
+                if not self.publish_policy.drive_archive_required:
+                    raise ValueError("CH1_FLEX_V2_DRIVE_ARCHIVE_REQUIRED")
+                if (
+                    self.publish_policy.local_purge_after_archive_state
+                    != "ARCHIVE_VERIFIED"
+                ):
+                    raise ValueError("CH1_FLEX_V2_ARCHIVE_VERIFICATION_REQUIRED")
         market_fields = (
             self.target_market_profile,
             self.target_market_digest,

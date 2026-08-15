@@ -660,7 +660,10 @@ class Phase1RuntimeBootstrapService:
             or pacing.maximum != 12
             or policy.media_production_profile.final_render_authority
             != "native_ffmpeg_renderer"
-            or policy.publish_policy.manual_upload_only is not True
+            or not (
+                policy.publish_policy.manual_upload_only
+                or policy.publish_policy.youtube_private_stage_required
+            )
         ):
             raise ValidationFailureError("PHASE1_SMALL_TEAM_AI_SCOPE_MISMATCH")
 

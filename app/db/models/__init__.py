@@ -305,6 +305,20 @@ from app.db.models.ai_visual import (
     AIVisualScenePlanSnapshot,
     AIVisualStyleBible,
 )
+from app.db.models.youtube_delivery import (
+    LocalMediaPurgeAttempt,
+    LocalMediaPurgeReceipt,
+    ProductionThumbnailBinding,
+    PublicPublicationReceipt,
+    TelegramDeliveryNotification,
+    YouTubeComponentAttempt,
+    YouTubeComponentReceipt,
+    YouTubePrivateStage,
+    YouTubePublishingCredential,
+    YouTubeSeriesEpisodeBinding,
+    YouTubeSeriesPlaylistBinding,
+    YouTubeUploadAttempt,
+)
 
 __all__ = [
     "VoiceMarketResearchArtifact",
@@ -547,4 +561,16 @@ __all__ = [
     "AIVisualRerenderAuthority",
     "AIVisualScenePlanSnapshot",
     "AIVisualStyleBible",
+    "YouTubePublishingCredential",
+    "ProductionThumbnailBinding",
+    "YouTubePrivateStage",
+    "YouTubeUploadAttempt",
+    "YouTubeComponentAttempt",
+    "YouTubeComponentReceipt",
+    "PublicPublicationReceipt",
+    "LocalMediaPurgeAttempt",
+    "LocalMediaPurgeReceipt",
+    "TelegramDeliveryNotification",
+    "YouTubeSeriesPlaylistBinding",
+    "YouTubeSeriesEpisodeBinding",
 ]

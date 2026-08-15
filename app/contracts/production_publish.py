@@ -363,7 +363,7 @@ class HumanUploadTaskReadV2(BaseModel):
     destination: str
     target_platform: str
     task_state: HumanUploadTaskStateV2
-    schema_version: Literal["v2"]
+    schema_version: Literal["v2", "v3"]
     final_review_candidate_id: uuid.UUID
     final_video_decision_id: uuid.UUID
     final_media_ref_id: uuid.UUID
@@ -452,6 +452,13 @@ class ManualPublishVerificationV2(BaseModel):
     observed_privacy_status: str = Field(min_length=1, max_length=40)
     observed_published_at: AwareDatetime
     observed_duration_seconds: Decimal = Field(gt=0)
+    observed_tags: list[str] | None = None
+    observed_category_id: str | None = Field(default=None, min_length=1)
+    observed_default_language: str | None = None
+    observed_made_for_kids: bool | None = None
+    observed_contains_synthetic_media: bool | None = None
+    observed_thumbnail_confirmed: bool | None = None
+    observed_caption_confirmed: bool | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -541,7 +548,7 @@ class UploadedVideoReadV2(BaseModel):
     lineage_refs: dict[str, Any]
     verification_status: Literal["VERIFIED"]
     analytics_sync_status: Literal["READY"]
-    schema_version: Literal["v2"]
+    schema_version: Literal["v2", "v3"]
     final_review_candidate_id: uuid.UUID
     final_video_decision_id: uuid.UUID
     final_media_ref_id: uuid.UUID
@@ -562,6 +569,7 @@ class UploadedVideoReadV2(BaseModel):
     verified_event_id: uuid.UUID
     analytics_ready_event_id: uuid.UUID
     analytics_ready_at: AwareDatetime
+    public_publication_receipt_id: uuid.UUID | None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 

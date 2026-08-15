@@ -48,6 +48,14 @@ from app.services.stale_workflow_recovery import (
     STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
     StaleWorkflowRecoveryService,
 )
+from app.services.youtube_delivery import (
+    LOCAL_MEDIA_PURGE_EVENT_TYPE,
+    TELEGRAM_DELIVERY_EVENT_TYPE,
+    YOUTUBE_PRIVATE_STAGE_EVENT_TYPE,
+    LocalMediaPurgeExecutor,
+    TelegramDeliveryExecutor,
+    YouTubePrivateStageExecutor,
+)
 
 
 SessionFactory = Callable[[], Session]
@@ -235,6 +243,33 @@ class ProductionWorkflowWorker:
                     command_key=str(event.payload["learning_command_key"]),
                     policy=dict(event.payload.get("learning_policy") or {}),
                     policy_hash=str(event.payload["learning_policy_hash"]),
+                )
+            elif event.event_type == YOUTUBE_PRIVATE_STAGE_EVENT_TYPE:
+                stage_id = uuid.UUID(
+                    str(event.payload["youtube_private_stage_id"])
+                )
+                if stage_id != event.aggregate_id:
+                    raise ValueError("YOUTUBE_PRIVATE_STAGE_EVENT_AUTHORITY_MISMATCH")
+                YouTubePrivateStageExecutor(self.session_factory).execute(
+                    stage_id=stage_id
+                )
+            elif event.event_type == TELEGRAM_DELIVERY_EVENT_TYPE:
+                notice_id = uuid.UUID(
+                    str(event.payload["telegram_delivery_notification_id"])
+                )
+                if notice_id != event.aggregate_id:
+                    raise ValueError("TELEGRAM_DELIVERY_EVENT_AUTHORITY_MISMATCH")
+                TelegramDeliveryExecutor(self.session_factory).execute(
+                    notification_id=notice_id
+                )
+            elif event.event_type == LOCAL_MEDIA_PURGE_EVENT_TYPE:
+                purge_id = uuid.UUID(
+                    str(event.payload["local_media_purge_attempt_id"])
+                )
+                if purge_id != event.aggregate_id:
+                    raise ValueError("LOCAL_MEDIA_PURGE_EVENT_AUTHORITY_MISMATCH")
+                LocalMediaPurgeExecutor(self.session_factory).execute(
+                    attempt_id=purge_id
                 )
             else:
                 coordinator = ProductionWorkflowCoordinator(

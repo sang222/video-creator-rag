@@ -175,7 +175,10 @@ class PKG1PackageService:
         if (
             policy.policy_status != "APPROVED"
             or not refs.get("creative_quality_policy")
-            or not policy.publish_policy.manual_upload_only
+            or not (
+                policy.publish_policy.manual_upload_only
+                or policy.publish_policy.youtube_private_stage_required
+            )
         ):
             return {
                 "status": "BLOCKED",

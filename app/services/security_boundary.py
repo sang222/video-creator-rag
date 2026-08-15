@@ -110,6 +110,13 @@ PROTECTED_READ_RULES = (
         r"uploaded-videos/[^/]+/v2)$",
         methods={"GET"},
     ),
+    _rule(
+        "production.read",
+        r"^/(?:youtube-private-stages/[^/]+|"
+        r"final-video-decisions/[^/]+/public-publication-receipt|"
+        r"final-review-candidates/[^/]+/telegram-notifications)$",
+        methods={"GET"},
+    ),
 )
 
 
@@ -151,7 +158,16 @@ PERMISSION_RULES = (
     ),
     _rule(
         "publish.prepare",
-        r"^/(?:publish-handoffs(?:/|$)|video-packages/[^/]+/upload-task$|human-upload-tasks(?:/|$))",
+        r"^/(?:publish-handoffs(?:/|$)|video-packages/[^/]+/upload-task$|"
+        r"human-upload-tasks(?:/|$)|"
+        r"final-review-candidates/[^/]+/production-thumbnail-binding$|"
+        r"final-video-decisions/[^/]+/youtube-private-stage$|"
+        r"series-plans/[^/]+/youtube-playlist-binding$|"
+        r"youtube-series-episode-bindings/[^/]+/public-ordinal$)",
+    ),
+    _rule(
+        "provider.execute",
+        r"^/channels/[^/]+/youtube-publishing-credentials$",
     ),
     _rule(
         "analytics.sync",
