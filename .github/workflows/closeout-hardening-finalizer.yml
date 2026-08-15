@@ -1,4 +1,4 @@
-name: Remaining Debt Recovered Patch Inspect
+name: Remaining Debt Recovered Patch Apply
 
 on:
   push:
@@ -9,42 +9,42 @@ permissions:
   contents: write
 
 jobs:
-  inspect:
-    if: ${{ !contains(github.event.head_commit.message, '[section-report]') }}
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[hardening-prefix-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/vcos-remaining-debt-closeout
           fetch-depth: 0
-      - name: Inspect recovered file patches
+      - name: Apply complete recovered patch sections
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
           import subprocess
           patch = Path('tools/closeout-hardening.recovered.patch').read_text(encoding='utf-8')
-          marker = 'diff --git '
-          starts=[]; pos=0
+          marker='diff --git '; starts=[]; pos=0
           while True:
               i=patch.find(marker,pos)
               if i<0: break
               starts.append(i); pos=i+len(marker)
           starts.append(len(patch))
-          report=[]
-          for idx in range(len(starts)-1):
+          applied=[]
+          for idx in range(min(8, len(starts)-1)):
               section=patch[starts[idx]:starts[idx+1]]
-              header=section.splitlines()[0]
-              path=header.split(' b/',1)[-1]
+              path=section.splitlines()[0].split(' b/',1)[-1]
               tmp=Path(f'/tmp/sec-{idx}.patch'); tmp.write_text(section,encoding='utf-8')
-              check=subprocess.run(['git','apply','--check','--whitespace=nowarn',str(tmp)],text=True,capture_output=True)
-              report.append(f'{path}\nRC={check.returncode}\nSTDERR={check.stderr.strip()}\n')
-          Path('tools/remaining-debt-diagnostic.log').write_text('\n'.join(report),encoding='utf-8')
+              subprocess.run(['git','apply','--check','--whitespace=nowarn',str(tmp)],check=True)
+              subprocess.run(['git','apply','--whitespace=nowarn',str(tmp)],check=True)
+              applied.append(path)
+          Path('tools/remaining-debt-diagnostic.log').write_text('APPLIED\n'+'\n'.join(applied)+'\n',encoding='utf-8')
           PY
-      - name: Commit report
+      - name: Commit hardening prefix
         run: |
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
+          git add -A
           git add -f tools/remaining-debt-diagnostic.log
-          git commit -m "chore: persist recovered patch section report [section-report]"
+          git commit -m "fix: apply recovered remaining debt hardening prefix [hardening-prefix-applied]"
           git push origin HEAD:feat/vcos-remaining-debt-closeout
