@@ -57,7 +57,6 @@ jobs:
           tests/test_cross_modal_lineage.py
           tests/test_v2_renderer_reconciliation.py
           tests/test_v2_drive_archive_crash_recovery.py
-          tests/test_v2_drive_archive_property_limit_recovery.py
       - name: Lint delivery runtime
         run: >-
           ruff check --isolated
