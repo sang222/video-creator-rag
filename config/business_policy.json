@@ -1,0 +1,30 @@
+{
+  "schema_version": "vcos.business-policy.v1",
+  "utm_policy": {
+    "version": "v1",
+    "required_params": ["utm_source", "utm_medium", "utm_campaign"],
+    "naming_rules": {
+      "lowercase": true,
+      "spaces": "underscore"
+    }
+  },
+  "disclosure_policy": {
+    "version": "v1",
+    "affiliate": {
+      "required_when_offer_requires_disclosure": true,
+      "placements": ["description_near_link"]
+    },
+    "paid_promotion": {
+      "require_platform_declaration_when_applicable": true
+    },
+    "synthetic_media": {
+      "evidence_driven": true,
+      "blanket_yes": false,
+      "blanket_no": false
+    }
+  },
+  "appeal_policy": {
+    "automatic_submission_allowed": false,
+    "counter_notification_requires_human_legal_action": true
+  }
+}
