@@ -4574,6 +4574,15 @@ def _required_text(value: dict[str, Any], key: str) -> str:
     return result
 
 
+def _required_hash(value: dict[str, Any], key: str) -> str:
+    result = _required_text(value, key)
+    if len(result) != 64 or any(
+        character not in "0123456789abcdef" for character in result
+    ):
+        raise ValidationFailureError(f"V2_EFFECT_JOURNAL_HASH_INVALID:{key}")
+    return result
+
+
 def _required_run_text(run: ProductionWorkflowRun, field: str) -> str:
     value = getattr(run, field, None)
     if not isinstance(value, str) or not value:

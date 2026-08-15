@@ -14,7 +14,6 @@ import os
 import re
 import tempfile
 import uuid
-from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
