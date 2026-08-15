@@ -1,0 +1,8 @@
+ERROR: file or directory not found: tests/test_production_publish.py
+
+
+no tests ran in 0.00s
+pytest_exit=4
+AUDIT ArchitectureAuditResult(hardcoded_channel_findings=('app/services/img_canary.py', 'app/services/mr1_local_production.py', 'app/services/mr1_real_production.py', 'app/services/mr1_reapproval.py', 'app/services/pkg1_market_revision.py', 'app/services/pkg1_market_revision_closeout.py', 'app/services/pkg1_sc07_sc09_revision.py', 'app/services/runtime_bootstrap.py'), niche_branch_findings=(), superseded_surface_findings=('app/services/remaining_debt_closeout.py',), one_engine_many_profiles=False)
+/home/runner/work/_temp/26078cf6-164a-404c-8412-6be92b0afced.sh: line 12: ruff: command not found
+ruff_exit=127
