@@ -1,4 +1,4 @@
-name: Remaining Debt Recovered Patch Apply
+name: Remaining Debt Recovered Patch Inspect
 
 on:
   push:
@@ -9,60 +9,42 @@ permissions:
   contents: write
 
 jobs:
-  apply:
-    if: ${{ !contains(github.event.head_commit.message, '[recovered-applied]') }}
+  inspect:
+    if: ${{ !contains(github.event.head_commit.message, '[section-report]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/vcos-remaining-debt-closeout
           fetch-depth: 0
-      - name: Apply every complete recovered file patch
+      - name: Inspect recovered file patches
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
           import subprocess
-
           patch = Path('tools/closeout-hardening.recovered.patch').read_text(encoding='utf-8')
           marker = 'diff --git '
-          starts = []
-          pos = 0
+          starts=[]; pos=0
           while True:
-              i = patch.find(marker, pos)
-              if i < 0:
-                  break
-              starts.append(i)
-              pos = i + len(marker)
+              i=patch.find(marker,pos)
+              if i<0: break
+              starts.append(i); pos=i+len(marker)
           starts.append(len(patch))
-          report = []
+          report=[]
           for idx in range(len(starts)-1):
-              section = patch[starts[idx]:starts[idx+1]]
-              header = section.splitlines()[0]
-              path = header.split(' b/', 1)[-1]
-              tmp = Path(f'/tmp/recovered-{idx}.patch')
-              tmp.write_text(section, encoding='utf-8')
-              check = subprocess.run(
-                  ['git','apply','--check','--whitespace=nowarn',str(tmp)],
-                  text=True, capture_output=True
-              )
-              if check.returncode == 0:
-                  apply = subprocess.run(
-                      ['git','apply','--whitespace=nowarn',str(tmp)],
-                      text=True, capture_output=True
-                  )
-                  report.append(f'APPLIED {path} rc={apply.returncode} {apply.stderr.strip()}')
-                  if apply.returncode != 0:
-                      raise SystemExit(apply.returncode)
-              else:
-                  report.append(f'SKIPPED {path} rc={check.returncode} {check.stderr.strip()}')
-          Path('tools/closeout-hardening.section-report.txt').write_text('\n'.join(report)+'\n', encoding='utf-8')
-          print('\n'.join(report))
+              section=patch[starts[idx]:starts[idx+1]]
+              header=section.splitlines()[0]
+              path=header.split(' b/',1)[-1]
+              tmp=Path(f'/tmp/sec-{idx}.patch'); tmp.write_text(section,encoding='utf-8')
+              check=subprocess.run(['git','apply','--check','--whitespace=nowarn',str(tmp)],text=True,capture_output=True)
+              report.append(f'{path}\nRC={check.returncode}\nSTDERR={check.stderr.strip()}\n')
+          Path('tools/remaining-debt-diagnostic.log').write_text('\n'.join(report),encoding='utf-8')
           PY
-      - name: Commit recovered source hardening
+      - name: Commit report
         run: |
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
-          git add -A
-          git commit -m "fix: apply recoverable remaining debt hardening [recovered-applied]"
+          git add -f tools/remaining-debt-diagnostic.log
+          git commit -m "chore: persist recovered patch section report [section-report]"
           git push origin HEAD:feat/vcos-remaining-debt-closeout
