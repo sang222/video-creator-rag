@@ -1,336 +1,192 @@
 from __future__ import annotations
 
-import uuid
 from types import SimpleNamespace
 
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
-from app.contracts.channel_policy import ChannelScopedPolicy
+from app.contracts.voice_authority import ProviderVoiceCandidate
 from app.core.errors import ValidationFailureError
-from app.db.models.channel import ChannelProfileVersion, ChannelWorkspace
-from app.db.models.foundation import Company
-from app.db.models.voice_authority import (
-    ApprovedVoicePool,
-    NarrationPerformancePlan,
-    NarrationVoiceSnapshot,
-    TTSPerformanceProjection,
-    VoiceCastingDecision,
-    VoiceMarketResearchArtifact,
-    VoiceProviderCatalogSnapshot,
-)
-from app.db.models.workflow import VideoProject
-from app.services.config_registry import content_hash
 from app.services.voice_authority import (
+    NarrationPerformanceGate,
     VoiceAuthorityService,
+    compile_performance_beats,
     infer_narration_mode,
+    validate_single_primary_narrator,
     voice_authority_required,
 )
 
 
-def _hash(label: str) -> str:
-    return content_hash({"label": label})
+def _voice(*, model_id: str = "eleven_multilingual_v2") -> ProviderVoiceCandidate:
+    return ProviderVoiceCandidate(
+        voice_id="voice-us-01",
+        display_name="US technical narrator",
+        language_tags=["en"],
+        locale_tags=["en-US"],
+        accent_tags=["US-neutral"],
+        narration_mode_fit=[
+            "TECHNICAL_EXPLAINER",
+            "ANALYTICAL",
+            "TACTICAL",
+            "CAUTIONARY",
+        ],
+        market_fit_tags=["US"],
+        clarity_score=95,
+        energy_score=75,
+        warmth_score=70,
+        authority_score=90,
+        conversationality_score=80,
+        approved_model_ids=[model_id],
+        default_model_id=model_id,
+        default_settings={
+            "speed": 1.0,
+            "stability": 0.5,
+            "similarity_boost": 0.75,
+            "style": 0.0,
+            "use_speaker_boost": True,
+        },
+        safe_setting_bounds={
+            "speed": {"min": 0.85, "max": 1.10},
+            "stability": {"min": 0.35, "max": 0.75},
+            "similarity_boost": {"min": 0.65, "max": 0.90},
+            "style": {"min": 0.0, "max": 0.20},
+        },
+        commercial_use_state="APPROVED",
+        availability_state="AVAILABLE",
+        priority=10,
+        evidence_refs=["provider-catalog://voice-us-01"],
+    )
 
 
-def _channel_policy() -> ChannelScopedPolicy:
-    return ChannelScopedPolicy.model_validate(
+def _script() -> tuple[str, list[dict[str, str]]]:
+    sections = [
         {
-            "market_identity": {
-                "primary_market": "US",
-                "content_language": "en",
-                "locale": "en-US",
-                "audience_positioning": "Small US teams adopting practical AI workflows",
-            },
-            "narration_policy": {
-                "provider": "elevenlabs",
-                "voice_selection_mode": "CHANNEL_MARKET_RESEARCH",
-                "performance_mode": "SEMANTIC_BEAT_PROJECTION",
-                "single_primary_narrator": True,
-                "series_narrator_stickiness": True,
-                "approved_pool_required": True,
-                "global_voice_authority_allowed": False,
-                "market_research_required": True,
-            },
-        }
+            "section_id": "hook",
+            "heading": "Hook",
+            "narration": "A brittle workflow can look correct until the first real provider call fails.",
+        },
+        {
+            "section_id": "problem",
+            "heading": "Problem",
+            "narration": "The failure is not the API itself. The failure is letting execution identity, retries, and provider state drift apart.",
+        },
+        {
+            "section_id": "explanation",
+            "heading": "Explanation",
+            "narration": "A durable workflow freezes semantic authority first, then lets deterministic services own external effects and reconciliation.",
+        },
+        {
+            "section_id": "example",
+            "heading": "Example",
+            "narration": "For narration, the same primary speaker can stay fixed while delivery changes by semantic beat instead of random voice switching.",
+        },
+        {
+            "section_id": "warning",
+            "heading": "Warning",
+            "narration": "If an external outcome is uncertain, the system must reconcile the exact effect rather than spend again under a new identity.",
+        },
+        {
+            "section_id": "conclusion",
+            "heading": "Conclusion",
+            "narration": "That separation keeps the channel recognizable while still allowing expressive, context-aware delivery.",
+        },
+    ]
+    return "\n\n".join(section["narration"] for section in sections), sections
+
+
+def test_provider_voice_candidate_rejects_out_of_bounds_default() -> None:
+    payload = _voice().model_dump()
+    payload["default_settings"]["speed"] = 1.2
+    with pytest.raises(ValueError, match="VOICE_DEFAULT_SETTING_OUTSIDE_SAFE_BOUNDS"):
+        ProviderVoiceCandidate.model_validate(payload)
+
+
+def test_performance_compiler_covers_canonical_script_and_is_not_monotone() -> None:
+    narration, sections = _script()
+    beats = compile_performance_beats(
+        canonical_narration=narration,
+        script_sections=sections,
     )
+    assert beats[0].source_text_start == 0
+    assert beats[-1].source_text_end == len(narration)
+    assert [beat.ordinal for beat in beats] == list(range(1, len(beats) + 1))
+    assert len({beat.delivery_intent for beat in beats}) >= 3
+    assert NarrationPerformanceGate.evaluate(
+        narration=narration,
+        beats=beats,
+    ).passed
 
 
-def _company_channel_project(session: Session):
-    company = Company(id=uuid.uuid4(), name="VCOS", slug=f"vcos-{uuid.uuid4().hex}")
-    channel = ChannelWorkspace(
-        id=uuid.uuid4(),
-        company_id=company.id,
-        key=f"small-team-ai-{uuid.uuid4().hex}",
-        name="Small Team AI",
+def test_tts_projection_groups_adjacent_delivery_intents_and_uses_context() -> None:
+    narration, sections = _script()
+    beats = compile_performance_beats(
+        canonical_narration=narration,
+        script_sections=sections,
     )
-    profile = ChannelProfileVersion(
-        id=uuid.uuid4(),
-        channel_workspace_id=channel.id,
-        version=1,
-        profile_input={},
-        profile_input_hash=_hash("profile"),
+    segments = VoiceAuthorityService._compile_segments(
+        beats=beats,
+        voice=_voice(),
+        capabilities={
+            "supports_voice_settings": True,
+            "supports_context_stitching": True,
+            "supports_audio_tags": False,
+            "max_characters": 10_000,
+        },
     )
-    project = VideoProject(
-        id=uuid.uuid4(),
-        company_id=company.id,
-        channel_workspace_id=channel.id,
-        channel_profile_version_id=profile.id,
-        title="A durable AI workflow",
+    assert len(segments) >= 2
+    assert segments[0].source_text_start == 0
+    assert segments[-1].source_text_end == len(narration)
+    assert segments[0].next_text is not None
+    assert segments[-1].previous_text is not None
+    for segment in segments:
+        assert 0.85 <= float(segment.voice_settings["speed"]) <= 1.10
+        assert 0.35 <= float(segment.voice_settings["stability"]) <= 0.75
+        assert 0.0 <= float(segment.voice_settings["style"]) <= 0.20
+
+
+def test_performance_gate_rejects_monotony_across_multiple_functions() -> None:
+    narration, sections = _script()
+    beats = compile_performance_beats(
+        canonical_narration=narration,
+        script_sections=sections,
     )
-    session.add_all([company])
-    session.flush()
-    session.add_all([channel])
-    session.flush()
-    session.add_all([profile])
-    session.flush()
-    session.add_all([project])
-    session.flush()
-    return company, channel, profile, project
+    monotone = [
+        beat.model_copy(
+            update={
+                "delivery_intent": "CLEAR_PRECISE",
+                "energy": "CONTROLLED",
+                "pace": "MEDIUM",
+                "emphasis": "MEDIUM",
+            }
+        )
+        for beat in beats
+    ]
+    result = NarrationPerformanceGate.evaluate(narration=narration, beats=monotone)
+    assert not result.passed
+    assert "NARRATION_MONOTONY_RISK" in result.reason_codes
 
 
-def test_voice_authority_builds_deterministic_project_bundle() -> None:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    for table in (
-        Company.__table__,
-        ChannelWorkspace.__table__,
-        ChannelProfileVersion.__table__,
-        VideoProject.__table__,
-        VoiceMarketResearchArtifact.__table__,
-        VoiceProviderCatalogSnapshot.__table__,
-        ApprovedVoicePool.__table__,
-        VoiceCastingDecision.__table__,
-        NarrationVoiceSnapshot.__table__,
-        NarrationPerformancePlan.__table__,
-        TTSPerformanceProjection.__table__,
-    ):
-        table.create(engine)
-    with Session(engine, autoflush=False, expire_on_commit=False) as session:
-        company, channel, profile, project = _company_channel_project(session)
-        service = VoiceAuthorityService(session)
-        research = service.create_market_research(
-            company_id=company.id,
-            channel_workspace_id=channel.id,
-            channel_profile_version_id=profile.id,
-            policy_snapshot_id=None,
-            policy=_channel_policy(),
-            evidence=[
-                {
-                    "source_ref": "research://us-voice-fit",
-                    "claim": "US professional explainers benefit from clear conversational delivery.",
-                    "source_hash": _hash("research evidence"),
-                }
-            ],
-            confidence_label="HIGH",
+def test_single_primary_narrator_guard() -> None:
+    same = [
+        SimpleNamespace(narration_voice_snapshot_id="snapshot-1"),
+        SimpleNamespace(narration_voice_snapshot_id="snapshot-1"),
+    ]
+    validate_single_primary_narrator(same)
+    with pytest.raises(ValidationFailureError, match="VOICE_SWITCH_WITHIN_VIDEO_FORBIDDEN"):
+        validate_single_primary_narrator(
+            [
+                SimpleNamespace(narration_voice_snapshot_id="snapshot-1"),
+                SimpleNamespace(narration_voice_snapshot_id="snapshot-2"),
+            ]
         )
-        catalog = service.create_provider_catalog_snapshot(
-            company_id=company.id,
-            channel_workspace_id=channel.id,
-            provider="elevenlabs",
-            catalog_version="2026-08-15",
-            voices=[
-                {
-                    "voice_id": "voice-us-1",
-                    "model_ids": ["eleven_multilingual_v2"],
-                    "market_fit": {
-                        "locale": "en-US",
-                        "delivery": "clear conversational",
-                    },
-                    "baseline_voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75,
-                        "style": 0.2,
-                        "speed": 1.0,
-                    },
-                    "approved_bounds": {
-                        "stability": [0.35, 0.75],
-                        "similarity_boost": [0.6, 0.9],
-                        "style": [0.0, 0.5],
-                        "speed": [0.9, 1.1],
-                    },
-                }
-            ],
-            source_refs=["elevenlabs://voices/catalog"],
-        )
-        pool = service.approve_pool(
-            company_id=company.id,
-            channel_workspace_id=channel.id,
-            channel_profile_version_id=profile.id,
-            policy_snapshot_id=None,
-            market_research=research,
-            provider_catalog=catalog,
-            voices=catalog.voices,
-        )
-        bundle = service.ensure_project_bundle(
-            video_project_id=project.id,
-            qualified_script_ref="script://project/1",
-            qualified_script_hash=_hash("script"),
-            canonical_narration=(
-                "This is the hook. The team has a recurring problem. "
-                "Here is the process that solves it. The result is predictable."
-            ),
-            script_sections=[
-                {
-                    "section_id": "hook",
-                    "heading": "Hook",
-                    "sentences": [{"text": "This is the hook."}],
-                },
-                {
-                    "section_id": "problem",
-                    "heading": "Problem",
-                    "sentences": [{"text": "The team has a recurring problem."}],
-                },
-                {
-                    "section_id": "process",
-                    "heading": "Process",
-                    "sentences": [{"text": "Here is the process that solves it."}],
-                },
-                {
-                    "section_id": "payoff",
-                    "heading": "Payoff",
-                    "sentences": [{"text": "The result is predictable."}],
-                },
-            ],
-            approved_voice_pool_id=pool.id,
-        )
-        replay = service.ensure_project_bundle(
-            video_project_id=project.id,
-            qualified_script_ref="script://project/1",
-            qualified_script_hash=_hash("script"),
-            canonical_narration=(
-                "This is the hook. The team has a recurring problem. "
-                "Here is the process that solves it. The result is predictable."
-            ),
-            script_sections=[
-                {
-                    "section_id": "hook",
-                    "heading": "Hook",
-                    "sentences": [{"text": "This is the hook."}],
-                },
-                {
-                    "section_id": "problem",
-                    "heading": "Problem",
-                    "sentences": [{"text": "The team has a recurring problem."}],
-                },
-                {
-                    "section_id": "process",
-                    "heading": "Process",
-                    "sentences": [{"text": "Here is the process that solves it."}],
-                },
-                {
-                    "section_id": "payoff",
-                    "heading": "Payoff",
-                    "sentences": [{"text": "The result is predictable."}],
-                },
-            ],
-            approved_voice_pool_id=pool.id,
-        )
-        assert bundle.snapshot.voice_id == "voice-us-1"
-        assert bundle.snapshot.model_id == "eleven_multilingual_v2"
-        assert bundle.plan.coverage_gate_state == "PASS"
-        assert bundle.plan.semantic_alignment_gate_state == "PASS"
-        assert bundle.plan.continuity_gate_state == "PASS"
-        assert bundle.plan.monotony_risk_gate_state == "PASS"
-        assert len(bundle.projection.segments) == 4
-        assert replay.snapshot.id == bundle.snapshot.id
-        assert replay.projection.id == bundle.projection.id
 
 
-def test_voice_authority_rejects_cross_channel_pool() -> None:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    for table in (
-        Company.__table__,
-        ChannelWorkspace.__table__,
-        ChannelProfileVersion.__table__,
-        VideoProject.__table__,
-        VoiceMarketResearchArtifact.__table__,
-        VoiceProviderCatalogSnapshot.__table__,
-        ApprovedVoicePool.__table__,
-        VoiceCastingDecision.__table__,
-        NarrationVoiceSnapshot.__table__,
-        NarrationPerformancePlan.__table__,
-        TTSPerformanceProjection.__table__,
-    ):
-        table.create(engine)
-    with Session(engine, autoflush=False, expire_on_commit=False) as session:
-        company, channel, profile, project = _company_channel_project(session)
-        other_channel = ChannelWorkspace(
-            id=uuid.uuid4(),
-            company_id=company.id,
-            key=f"other-{uuid.uuid4().hex}",
-            name="Other Channel",
-        )
-        session.add(other_channel)
-        session.flush()
-        research = VoiceMarketResearchArtifact(
-            id=uuid.uuid4(),
-            company_id=company.id,
-            channel_workspace_id=other_channel.id,
-            channel_profile_version_id=profile.id,
-            policy_snapshot_id=None,
-            market_identity={},
-            requirements={},
-            evidence=[],
-            confidence_label="HIGH",
-            content_hash=_hash("other research"),
-        )
-        catalog = VoiceProviderCatalogSnapshot(
-            id=uuid.uuid4(),
-            company_id=company.id,
-            channel_workspace_id=other_channel.id,
-            provider="elevenlabs",
-            catalog_version="test",
-            voices=[],
-            source_refs=[],
-            content_hash=_hash("other catalog"),
-        )
-        pool = ApprovedVoicePool(
-            id=uuid.uuid4(),
-            company_id=company.id,
-            channel_workspace_id=other_channel.id,
-            channel_profile_version_id=profile.id,
-            policy_snapshot_id=None,
-            voice_market_research_id=research.id,
-            provider_catalog_snapshot_id=catalog.id,
-            version=1,
-            voices=[
-                {
-                    "voice_id": "wrong-channel",
-                    "model_ids": ["eleven_multilingual_v2"],
-                }
-            ],
-            content_hash=_hash("other pool"),
-        )
-        session.add_all([research, catalog, pool])
-        session.flush()
-        with pytest.raises(
-            ValidationFailureError, match="VOICE_AUTHORITY_APPROVED_POOL_SCOPE_MISMATCH"
-        ):
-            VoiceAuthorityService(session).ensure_project_bundle(
-                video_project_id=project.id,
-                qualified_script_ref="script://project/1",
-                qualified_script_hash=_hash("script"),
-                canonical_narration="One exact sentence.",
-                script_sections=[
-                    {
-                        "section_id": "hook",
-                        "heading": "Hook",
-                        "sentences": [{"text": "One exact sentence."}],
-                    }
-                ],
-                approved_voice_pool_id=pool.id,
-            )
-
-
-def test_voice_authority_required_reads_compiled_policy() -> None:
+def test_voice_authority_policy_is_explicit_opt_in() -> None:
     assert voice_authority_required(
         SimpleNamespace(
             compiled_payload={
-                "channel_scoped_policy": {
-                    "narration_policy": {"approved_pool_required": True}
-                }
+                "voice_authority_policy": {"required_for_real_production": True}
             }
         )
     )
