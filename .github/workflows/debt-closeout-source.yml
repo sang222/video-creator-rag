@@ -1,0 +1,22 @@
+name: Debt Closeout Source
+
+on:
+  push:
+    branches:
+      - feat/vcos-remaining-debt-closeout
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source
+        run: tar --exclude=.git -czf /tmp/video-creator-rag-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debt-closeout-source
+          path: /tmp/video-creator-rag-source.tgz
+          retention-days: 1
