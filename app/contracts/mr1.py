@@ -9,7 +9,12 @@ from app.contracts.vcos_v2 import DurationContractV2
 
 
 class MR1ReapprovalCommand(BaseModel):
-    """Explicit operator authority for one exact MR1 production run."""
+    """Explicit operator authority for one exact MR1 production run.
+
+    Channel scope is derived from the frozen project/profile/snapshot lineage;
+    the human-readable channel key remains input metadata and is never a
+    product-specific runtime constant.
+    """
 
     project_id: uuid.UUID
     pkg1_approval_decision_id: uuid.UUID
@@ -24,7 +29,7 @@ class MR1ReapprovalCommand(BaseModel):
     )
     execution_mode: Literal["REAL_APPROVED_PRODUCTION"] = "REAL_APPROVED_PRODUCTION"
     run_type: Literal["MR1"] = "MR1"
-    channel_key: Literal["small-team-ai"] = "small-team-ai"
+    channel_key: str = Field(min_length=1, max_length=120)
     operator_decision_text: Literal["APPROVE_EXACT_MR1_EXECUTION"] = (
         "APPROVE_EXACT_MR1_EXECUTION"
     )
