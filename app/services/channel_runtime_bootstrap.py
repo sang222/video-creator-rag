@@ -112,7 +112,9 @@ class Phase1RuntimeBootstrapService:
         ):
             raise ValidationFailureError("CHANNEL_RUNTIME_ACTIVE_PROFILE_REQUIRED")
         self._require_exact_scoped_identity(channel=channel, snapshot=snapshot)
-        return Phase1RuntimeAuthority(channel=channel, profile=profile, snapshot=snapshot)
+        return Phase1RuntimeAuthority(
+            channel=channel, profile=profile, snapshot=snapshot
+        )
 
     def build_sanitized_profile_input(
         self,
@@ -150,7 +152,9 @@ class Phase1RuntimeBootstrapService:
         if not content_pillars:
             content_pillars = _clean_list_of_strings(editorial.get("content_pillars"))
         if not content_pillars:
-            fallback = str(identity.get("niche") or source.display_name or channel.name).strip()
+            fallback = str(
+                identity.get("niche") or source.display_name or channel.name
+            ).strip()
             content_pillars = [fallback]
         editorial["content_pillars"] = content_pillars
         audience.setdefault("primary_persona", "channel-defined target audience")
@@ -165,14 +169,10 @@ class Phase1RuntimeBootstrapService:
             or source.target_market
         )
         content_language = str(
-            channel.primary_language
-            or market.get("content_language")
-            or "en"
+            channel.primary_language or market.get("content_language") or "en"
         )
         locale = str(
-            market.get("audience_locale")
-            or market.get("locale")
-            or content_language
+            market.get("audience_locale") or market.get("locale") or content_language
         )
         channel_key = str(channel.key)
         channel_name = str(channel.name)
@@ -251,7 +251,8 @@ class Phase1RuntimeBootstrapService:
         channel_workspace_id: uuid.UUID | None = None,
     ) -> FirstChannelLaunchPolicyVersion:
         authority = self.resolve_channel_authority(
-            actor=actor, channel_workspace_id=channel_workspace_id or data.channel_workspace_id
+            actor=actor,
+            channel_workspace_id=channel_workspace_id or data.channel_workspace_id,
         )
         if (
             data.company_id != authority.channel.company_id
@@ -260,7 +261,9 @@ class Phase1RuntimeBootstrapService:
             or data.policy_snapshot_id != authority.snapshot.id
         ):
             raise ValidationFailureError("CHANNEL_LAUNCH_POLICY_AUTHORITY_MISMATCH")
-        return FirstChannelLaunchPolicyService(self.session).create(data=data, actor=actor)
+        return FirstChannelLaunchPolicyService(self.session).create(
+            data=data, actor=actor
+        )
 
     def create_launch_run(
         self,
@@ -374,7 +377,9 @@ class Phase1RuntimeBootstrapService:
             )
         snapshot = self.session.scalars(
             select(CompiledChannelPolicySnapshot)
-            .where(CompiledChannelPolicySnapshot.channel_profile_version_id == profile.id)
+            .where(
+                CompiledChannelPolicySnapshot.channel_profile_version_id == profile.id
+            )
             .order_by(CompiledChannelPolicySnapshot.snapshot_version.desc())
         ).first()
         if snapshot is None:
@@ -382,7 +387,9 @@ class Phase1RuntimeBootstrapService:
                 profile_version_id=profile.id,
                 correlation_id=f"channel-runtime-bootstrap-profile-compile:{authority.channel.id}",
             )
-            snapshot = self.session.get(CompiledChannelPolicySnapshot, compiled.snapshot_id)
+            snapshot = self.session.get(
+                CompiledChannelPolicySnapshot, compiled.snapshot_id
+            )
         if snapshot is None:
             raise ValidationFailureError("CHANNEL_PROFILE_COMPILE_SNAPSHOT_REQUIRED")
         approval_ref = f"operator-authorization://runtime-bootstrap/{authority.channel.id}/{profile.id}"
@@ -401,7 +408,9 @@ class Phase1RuntimeBootstrapService:
                 correlation_id=f"channel-runtime-bootstrap-profile-activate:{authority.channel.id}",
             )
         refreshed_profile = self.session.get(ChannelProfileVersion, profile.id)
-        refreshed_snapshot = self.session.get(CompiledChannelPolicySnapshot, snapshot.id)
+        refreshed_snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, snapshot.id
+        )
         if (
             refreshed_profile is None
             or refreshed_snapshot is None
@@ -435,7 +444,9 @@ class Phase1RuntimeBootstrapService:
         next_version = (
             self.session.scalar(
                 select(FirstChannelLaunchPolicyVersion.policy_version)
-                .where(FirstChannelLaunchPolicyVersion.channel_workspace_id == channel.id)
+                .where(
+                    FirstChannelLaunchPolicyVersion.channel_workspace_id == channel.id
+                )
                 .order_by(FirstChannelLaunchPolicyVersion.policy_version.desc())
                 .limit(1)
             )
@@ -500,12 +511,16 @@ class Phase1RuntimeBootstrapService:
             .limit(1)
         )
         if has_project is not None or has_slot is not None:
-            raise ValidationFailureError("CHANNEL_ACTIVE_LAUNCH_POLICY_SUPERSESSION_UNSAFE")
+            raise ValidationFailureError(
+                "CHANNEL_ACTIVE_LAUNCH_POLICY_SUPERSESSION_UNSAFE"
+            )
         open_runs = list(
             self.session.scalars(
                 select(LaunchRun).where(
                     LaunchRun.launch_policy_version_id == policy.id,
-                    LaunchRun.state.in_(["PREPARING", "READY_TO_LAUNCH", "ACTIVE", "PAUSED"]),
+                    LaunchRun.state.in_(
+                        ["PREPARING", "READY_TO_LAUNCH", "ACTIVE", "PAUSED"]
+                    ),
                 )
             ).all()
         )
@@ -514,7 +529,9 @@ class Phase1RuntimeBootstrapService:
                 launch_run_id=run.id,
                 data=LaunchRunTransition(
                     target_state="CANCELED",
-                    reason_codes=["CHANNEL_RUNTIME_POLICY_SUPERSEDED_BEFORE_PRODUCTION"],
+                    reason_codes=[
+                        "CHANNEL_RUNTIME_POLICY_SUPERSEDED_BEFORE_PRODUCTION"
+                    ],
                 ),
                 actor=actor,
             )
@@ -584,7 +601,8 @@ class Phase1RuntimeBootstrapService:
         identity = policy.channel_identity_policy
         if (
             identity.channel_key != channel.key
-            or identity.primary_market != (channel.target_market or channel.primary_region)
+            or identity.primary_market
+            != (channel.target_market or channel.primary_region)
             or identity.content_language != channel.primary_language
             or identity.primary_platform != "YouTube"
             or "long-form" not in identity.primary_format.lower()
@@ -619,14 +637,20 @@ def _clean_value(value: Any) -> Any:
     if isinstance(value, dict):
         return _clean_mapping(value)
     if isinstance(value, list):
-        return [_clean_value(item) for item in value if not _is_removed_short_value(item)]
+        return [
+            _clean_value(item) for item in value if not _is_removed_short_value(item)
+        ]
     return deepcopy(value)
 
 
 def _clean_list_of_strings(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(item) for item in value if str(item).strip() and not _is_removed_short_value(item)]
+    return [
+        str(item)
+        for item in value
+        if str(item).strip() and not _is_removed_short_value(item)
+    ]
 
 
 def _is_removed_short_value(value: Any) -> bool:

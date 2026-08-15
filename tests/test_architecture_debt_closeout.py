@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -49,9 +49,7 @@ def db_session():
         engine.dispose()
 
 
-def _identity(
-    session: Session, label: str
-) -> tuple[Company, ChannelWorkspace, User]:
+def _identity(session: Session, label: str) -> tuple[Company, ChannelWorkspace, User]:
     company = Company(
         name=f"Closeout {label}",
         slug=f"closeout-{label}-{uuid.uuid4().hex[:8]}",
@@ -285,9 +283,7 @@ def test_public_ordinals_continue_across_runs_and_completion_uses_public_target(
                 video_project_id=uuid.uuid4(),
                 public_publication_receipt_id=uuid.uuid4(),
                 public_episode_ordinal=ordinal,
-                authority_hash=content_hash(
-                    {"ordinal": ordinal, "plan": str(plan.id)}
-                ),
+                authority_hash=content_hash({"ordinal": ordinal, "plan": str(plan.id)}),
             )
         )
     db_session.flush()
@@ -332,10 +328,7 @@ def _equivalence_fingerprint(
     scope: str,
     learning: str,
 ) -> str:
-    canonical = (
-        f"{candidate_type}|{scope}|"
-        f"{' '.join(learning.lower().split())}"
-    )
+    canonical = f"{candidate_type}|{scope}|{' '.join(learning.lower().split())}"
     first = hashlib.md5(
         canonical.encode("utf-8"),
         usedforsecurity=False,
@@ -500,9 +493,7 @@ def test_system_learning_is_frozen_by_platform_enforcement(
         evidence_refs=[{"ref": "studio://fixture"}],
         freeze_learning=True,
     )
-    preflight = LearningAuthorityCloseoutService(
-        db_session
-    ).system_promotion_preflight(
+    preflight = LearningAuthorityCloseoutService(db_session).system_promotion_preflight(
         candidate_id=candidates[-1],
         policy_version="learning-v1",
         policy_hash="b" * 64,

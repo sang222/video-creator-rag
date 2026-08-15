@@ -291,8 +291,7 @@ class BusinessOperatingService:
             contribution_margin=contribution,
             burn_rate=direct_cost + shared_cost_allocated,
             source_refs=[
-                {"type": "revenue_snapshot", "id": str(item.id)}
-                for item in snapshots
+                {"type": "revenue_snapshot", "id": str(item.id)} for item in snapshots
             ],
             content_hash=content_hash(payload),
         )
@@ -318,8 +317,7 @@ class BusinessOperatingService:
         monetization = self.session.scalar(
             select(MonetizationAccountStatus)
             .where(
-                MonetizationAccountStatus.channel_workspace_id
-                == channel_workspace_id
+                MonetizationAccountStatus.channel_workspace_id == channel_workspace_id
             )
             .order_by(MonetizationAccountStatus.source_updated_at.desc())
             .limit(1)
@@ -344,10 +342,7 @@ class BusinessOperatingService:
         pnl = list(
             self.session.scalars(
                 select(ChannelPnlSnapshot)
-                .where(
-                    ChannelPnlSnapshot.channel_workspace_id
-                    == channel_workspace_id
-                )
+                .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
                 .order_by(ChannelPnlSnapshot.period_end.desc())
                 .limit(2)
             ).all()
@@ -355,8 +350,7 @@ class BusinessOperatingService:
         if len(pnl) < 2:
             reasons.append("SELF_FUNDING_TWO_REVIEW_CYCLES_REQUIRED")
         elif any(
-            item.finalized_revenue
-            < item.direct_cost + item.shared_cost_allocated
+            item.finalized_revenue < item.direct_cost + item.shared_cost_allocated
             for item in pnl
         ):
             reasons.append("FINALIZED_REVENUE_COST_COVERAGE_INSUFFICIENT")
@@ -522,9 +516,7 @@ class BusinessOperatingService:
                 action_type="PLATFORM_ENFORCEMENT_REVIEW",
                 target_type="platform_enforcement_incident",
                 target_id=incident.id,
-                priority=(
-                    "CRITICAL" if incident.severity == "CRITICAL" else "HIGH"
-                ),
+                priority=("CRITICAL" if incident.severity == "CRITICAL" else "HIGH"),
                 state="OPEN",
                 reason_code=incident.incident_type,
                 next_action=(
@@ -545,10 +537,7 @@ class BusinessOperatingService:
         )
         latest_pnl = self.session.scalar(
             select(ChannelPnlSnapshot)
-            .where(
-                ChannelPnlSnapshot.channel_workspace_id
-                == channel_workspace_id
-            )
+            .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
             .order_by(ChannelPnlSnapshot.period_end.desc())
             .limit(1)
         )
