@@ -5,10 +5,6 @@ on:
     branches:
       - feat/vcos-remaining-debt-closeout
 
-concurrency:
-  group: remaining-debt-hardening-finalizer
-  cancel-in-progress: false
-
 permissions:
   contents: write
 
@@ -49,21 +45,28 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      - name: Apply frozen hardening patch
-        shell: bash
+      - name: Decode hardening payload
         run: |
-          set -euo pipefail
           python - <<'PY'
           import base64
           from pathlib import Path
-          src = Path('tools/closeout-hardening.patch.gz.b64')
-          data = ''.join(src.read_text(encoding='utf-8').split())
+          data = ''.join(Path('tools/closeout-hardening.patch.gz.b64').read_text(encoding='utf-8').split())
           data += '=' * (-len(data) % 4)
-          Path('/tmp/closeout-hardening.patch.gz').write_bytes(base64.b64decode(data, validate=True))
+          raw = base64.b64decode(data, validate=False)
+          Path('/tmp/closeout-hardening.patch.gz').write_bytes(raw)
+          print('decoded_bytes', len(raw))
           PY
-          gzip -t /tmp/closeout-hardening.patch.gz
+      - name: Validate hardening gzip
+        run: gzip -t /tmp/closeout-hardening.patch.gz
+      - name: Extract hardening patch
+        run: |
           gzip -dc /tmp/closeout-hardening.patch.gz > /tmp/closeout-hardening.patch
           test -s /tmp/closeout-hardening.patch
+          grep '^diff --git ' /tmp/closeout-hardening.patch
+      - name: Check hardening patch applies
+        run: git apply --check --3way --whitespace=nowarn /tmp/closeout-hardening.patch
+      - name: Apply hardening patch
+        run: |
           git apply --3way --whitespace=nowarn /tmp/closeout-hardening.patch
           rm -f tools/closeout-hardening.patch.gz.b64
           rm -f .github/workflows/closeout-hardening-finalizer.yml
@@ -75,21 +78,9 @@ jobs:
       - name: Validate focused and production regressions
         shell: bash
         run: |
-          files=(
-            tests/test_remaining_debt_closeout.py
-            tests/test_youtube_private_delivery.py
-            tests/test_production_publish.py
-            tests/test_long_form_launch_cadence.py
-            tests/test_editorial_novelty.py
-            tests/test_cross_modal_lineage.py
-            tests/test_v2_renderer_reconciliation.py
-            tests/test_voice_authority.py
-            tests/test_voice_execution.py
-          )
+          files=(tests/test_remaining_debt_closeout.py tests/test_youtube_private_delivery.py tests/test_production_publish.py tests/test_long_form_launch_cadence.py tests/test_editorial_novelty.py tests/test_cross_modal_lineage.py tests/test_v2_renderer_reconciliation.py tests/test_voice_authority.py tests/test_voice_execution.py)
           existing=()
-          for candidate in "${files[@]}"; do
-            [[ -f "$candidate" ]] && existing+=("$candidate")
-          done
+          for candidate in "${files[@]}"; do [[ -f "$candidate" ]] && existing+=("$candidate"); done
           pytest -q "${existing[@]}"
       - name: Validate static authority
         run: |
