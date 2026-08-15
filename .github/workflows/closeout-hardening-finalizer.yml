@@ -46,18 +46,22 @@ jobs:
           python -m pip install -e ".[dev]" ruff==0.15.12
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
-      - name: Verify removed compiler overlays have no external callers
+      - name: Verify dead bootstrap is not imported
         shell: bash
         run: |
           set -euo pipefail
-          for symbol in build_ch1_market_v3_profile_input build_ch1_market_v3_policy refresh_qualified_visual_source_binding; do
-            if git grep -n "$symbol" -- 'app/**' ':!app/services/profile_compiler.py'; then
-              echo "unexpected active caller for $symbol" >&2
-              exit 1
-            fi
-          done
+          if git grep -n 'runtime_bootstrap' -- 'app/**' ':!app/services/runtime_bootstrap.py'; then
+            echo "runtime_bootstrap still has an active app caller" >&2
+            exit 1
+          fi
       - name: Apply frozen debt and gap fixes
         run: python tools/finalize_remaining_debt.py
+      - name: Remove superseded per-channel bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f app/services/runtime_bootstrap.py
+          sed -i '/app\/services\/runtime_bootstrap.py/d' .github/workflows/youtube-private-delivery.yml
       - name: Compile source before DB tests
         run: python -m compileall -q app tests/test_remaining_debt_closeout.py
       - name: Migrate PostgreSQL to one current head
