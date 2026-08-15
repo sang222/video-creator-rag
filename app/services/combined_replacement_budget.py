@@ -27,11 +27,17 @@ from app.services.config_registry import content_hash
 from app.services.google_gemini_image_catalog import GoogleGeminiImageModelPriceCatalog
 from app.services.google_veo_catalog import GoogleVeoModelPriceCatalog
 from app.services.v2_ai_visual_provider import (
+    V2_GEMINI_IMAGE_CONSERVATIVE_UNIT_COST_USD,
     V2_GEMINI_IMAGE_2K_OUTPUT_TOKENS,
     V2_GEMINI_IMAGE_INPUT_PRICE_PER_MILLION_TOKENS_USD,
     V2_GEMINI_IMAGE_MAX_OUTPUT_TOKENS,
     V2_GEMINI_IMAGE_MAX_PROVIDER_INPUT_BYTES,
     V2_GEMINI_IMAGE_TEXT_THINKING_PRICE_PER_MILLION_TOKENS_USD,
+)
+from app.services.v2_ai_visual_stage import (
+    V2_AI_VISUAL_PROVIDER_KEY,
+    V2_AI_VISUAL_VIDEO_PROVIDER_KEY,
+    compile_pre_tts_ai_visual_cost_preflight,
 )
 
 _SCHEMA = "vcos.combined-replacement-budget.v1"
@@ -105,33 +111,8 @@ def _segment_text_cost(
     }
 
 
-def _visual_preflight(
-    *, sections: Sequence[Mapping[str, Any]], visual_policy_hash: str | None
-) -> tuple[Decimal, Decimal, dict[str, Any]]:
-    """Seal the current package visual owner plan before any MEDIA effect.
-
-    At package readiness the only sealed visual owner plan is one AI-image
-    owner per canonical section.  It authorizes no AI-video owner; a later
-    change to that plan must create a new package/combined authority rather
-    than silently spending against this one.
-    """
-
-    owners: list[dict[str, str]] = []
-    for index, section in enumerate(sections, start=1):
-        section_id = section.get("section_id")
-        section_hash = section.get("section_hash") or content_hash(dict(section))
-        if (
-            not isinstance(section_id, str)
-            or not section_id
-            or not isinstance(section_hash, str)
-        ):
-            raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PLAN_INVALID")
-        owners.append({"owner_id": section_id, "section_hash": section_hash})
-    if not owners or not visual_policy_hash:
-        raise ValidationFailureError(
-            "COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED"
-        )
-
+def _current_visual_prices() -> tuple[Decimal, Decimal, dict[str, Any]]:
+    """Resolve the two current catalog prices; neither can silently be zero."""
     image_catalog = GoogleGeminiImageModelPriceCatalog()
     image_row = image_catalog.row(
         model_id="gemini-3.1-flash-image", image_size="2K", aspect_ratio="16:9"
@@ -148,18 +129,24 @@ def _visual_preflight(
         * V2_GEMINI_IMAGE_TEXT_THINKING_PRICE_PER_MILLION_TOKENS_USD
     ) / Decimal(1000000)
     image_unit = _money(
-        catalog_unit + semantic_upper_bound,
+        V2_GEMINI_IMAGE_CONSERVATIVE_UNIT_COST_USD,
         code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
         positive=True,
     )
     veo_catalog = GoogleVeoModelPriceCatalog()
+    video_unit = _money(
+        veo_catalog.estimate(
+            model_id="veo-3.1-fast-generate-preview",
+            resolution="720p",
+            duration_seconds=8,
+            output_count=1,
+            hard_cap=Decimal("1000000"),
+            approval_amount=Decimal("1000000"),
+        ).estimated_amount,
+        code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+        positive=True,
+    )
     source = {
-        "schema_version": "vcos.package-ai-visual-cost-preflight.v1",
-        "state": "SEALED",
-        "visual_policy_hash": visual_policy_hash,
-        "image_owner_count": len(owners),
-        "video_owner_count": 0,
-        "image_owners": owners,
         "image_price_catalog_ref": image_catalog.ref,
         "image_price_catalog_hash": content_hash(image_catalog.payload),
         "image_model_id": "gemini-3.1-flash-image",
@@ -170,15 +157,26 @@ def _visual_preflight(
         "image_unit_projected_cost_usd": _money_text(image_unit),
         "video_price_catalog_ref": veo_catalog.ref,
         "video_price_catalog_hash": content_hash(veo_catalog.payload),
-        "video_owner_cost_state": "EXACT_ZERO_NO_VIDEO_OWNER_IN_SEALED_PACKAGE_PLAN",
+        "video_model_id": "veo-3.1-fast-generate-preview",
+        "video_resolution": "720p",
+        "video_duration_seconds": "8",
+        "video_output_count": 1,
+        "video_unit_projected_cost_usd": _money_text(video_unit),
     }
-    return (
-        _money(
-            image_unit * len(owners), code="COMBINED_REPLACEMENT_VISUAL_COST_INVALID"
-        ),
-        Decimal("0.000000"),
-        {**source, "content_hash": content_hash(source)},
+    return image_unit, video_unit, source
+
+
+def _active_visual_policy_hash() -> str:
+    from pathlib import Path
+
+    from app.services.config_registry import ConfigRegistryService
+
+    loaded = ConfigRegistryService(None).validate_catalog(
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "production_visual_policy_catalog.yaml"
     )
+    return loaded.content_hash
 
 
 class CombinedReplacementBudgetAuthorityService:
@@ -187,6 +185,256 @@ class CombinedReplacementBudgetAuthorityService:
     def __init__(self, session: Session, *, settings: Settings | Any | None = None):
         self.session = session
         self.settings = settings or get_settings()
+
+    def compile_normal_visual_preflight(
+        self,
+        *,
+        project_id: uuid.UUID,
+        projection: TTSPerformanceProjection,
+        canonical_narration: str,
+        estimated_duration_ms: int,
+        production_visual_policy_ref: str,
+        production_visual_policy_hash: str,
+        maximum_image_submissions: int,
+        maximum_video_submissions: int,
+    ) -> dict[str, Any]:
+        """Produce the one pre-TTS visual/cost projection for normal production.
+
+        This is intentionally compiled through the production
+        ``UnifiedAIVisualPlanner`` path.  It records unique owner slots, not
+        script sections, and therefore carries both Gemini-image and Veo
+        authority when the capability projection selects video.
+        """
+
+        if (
+            projection.video_project_id != project_id
+            or projection.state != "FROZEN"
+            or not production_visual_policy_ref
+            or len(production_visual_policy_hash) != 64
+            or production_visual_policy_hash != _active_visual_policy_hash()
+        ):
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_VISUAL_POLICY_AUTHORITY_REQUIRED"
+            )
+        tts_rate = _money(
+            getattr(self.settings, "elevenlabs_tts_cost_per_character_usd", None),
+            code="COMBINED_REPLACEMENT_TTS_COST_AUTHORITY_REQUIRED",
+            positive=True,
+        )
+        alignment_cost = _money(
+            getattr(self.settings, "elevenlabs_forced_alignment_cost_usd", None),
+            code="COMBINED_REPLACEMENT_ALIGNMENT_COST_AUTHORITY_REQUIRED",
+            positive=True,
+        )
+        tts_cost, tts_source = _segment_text_cost(
+            projection=projection,
+            canonical_narration=canonical_narration,
+            rate=tts_rate,
+        )
+        artifacts, preflight_timeline = compile_pre_tts_ai_visual_cost_preflight(
+            video_project_id=project_id,
+            preflight_id=projection.id,
+            canonical_narration=canonical_narration,
+            estimated_duration_ms=estimated_duration_ms,
+            maximum_image_submissions=maximum_image_submissions,
+            maximum_video_submissions=maximum_video_submissions,
+        )
+        image_count = artifacts.scene_plan.unique_ai_image_asset_slot_count
+        video_count = artifacts.scene_plan.unique_ai_video_asset_slot_count
+        if image_count < 0 or video_count < 0 or image_count + video_count <= 0:
+            raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PLAN_INVALID")
+        image_unit, video_unit, prices = _current_visual_prices()
+        image_cost = _money(
+            image_unit * image_count,
+            code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+        )
+        video_cost = _money(
+            video_unit * video_count,
+            code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+        )
+        provider_allocations = {
+            "elevenlabs": _money_text(tts_cost + alignment_cost),
+            **(
+                {V2_AI_VISUAL_PROVIDER_KEY: _money_text(image_cost)}
+                if image_cost > 0
+                else {}
+            ),
+            **(
+                {V2_AI_VISUAL_VIDEO_PROVIDER_KEY: _money_text(video_cost)}
+                if video_cost > 0
+                else {}
+            ),
+        }
+        total = _money(
+            tts_cost + alignment_cost + image_cost + video_cost,
+            code="COMBINED_REPLACEMENT_TOTAL_INVALID",
+        )
+        body = {
+            "schema_version": "vcos.combined-replacement-preflight.v2",
+            "state": "FROZEN",
+            "execution_kind": "NORMAL_PRODUCTION",
+            "visual_authority_kind": "UNIFIED_AI_VISUAL_PLANNER_PRE_TTS",
+            "tts_performance_projection_id": str(projection.id),
+            "tts_performance_projection_hash": projection.content_hash,
+            "tts_projection": tts_source,
+            "forced_alignment": {
+                "provider": "elevenlabs_forced_alignment",
+                "pricing_basis": "CURRENT_REVIEWED_RUNTIME_FLAT_RATE",
+                "projected_cost_usd": _money_text(alignment_cost),
+            },
+            "production_visual_policy_ref": production_visual_policy_ref,
+            "production_visual_policy_hash": production_visual_policy_hash,
+            "visual_plan_compilation": artifacts.scene_plan.model_dump(mode="json"),
+            "visual_plan_compilation_hash": artifacts.scene_plan.content_hash,
+            "pre_tts_timeline_hash": preflight_timeline["content_hash"],
+            "unique_ai_image_asset_slot_count": image_count,
+            "unique_ai_video_asset_slot_count": video_count,
+            "maximum_image_submissions": maximum_image_submissions,
+            "maximum_video_submissions": maximum_video_submissions,
+            "ai_image_projected_cost_usd": _money_text(image_cost),
+            "ai_video_projected_cost_usd": _money_text(video_cost),
+            "new_tts_projected_cost_usd": _money_text(tts_cost),
+            "forced_alignment_projected_cost_usd": _money_text(alignment_cost),
+            "combined_replacement_projected_cost_usd": _money_text(total),
+            "provider_allocations_usd": provider_allocations,
+            "pricing_authorities": prices,
+        }
+        return {**body, "content_hash": content_hash(body)}
+
+    @staticmethod
+    def governed_rerender_visual_authority(*, authority: Any) -> dict[str, Any]:
+        """Bind the existing governed-rerender visual authority without inference.
+
+        A rerender is not allowed to derive "14 images / 0 video" from a
+        script or a deployment constant.  Those values are read only from the
+        durable ``AIVisualRerenderAuthority`` that authorized the replacement.
+        """
+
+        required = (
+            "id",
+            "authority_hash",
+            "production_visual_policy_ref",
+            "production_visual_policy_hash",
+            "maximum_image_submissions",
+            "maximum_video_submissions",
+            "maximum_total_cost_usd",
+            "budget_reservation_ref",
+            "budget_authority_hash",
+        )
+        if any(getattr(authority, key, None) is None for key in required):
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_GOVERNED_RERENDER_AUTHORITY_REQUIRED"
+            )
+        image_unit, video_unit, prices = _current_visual_prices()
+        image_count = int(authority.maximum_image_submissions)
+        video_count = int(authority.maximum_video_submissions)
+        maximum = _money(
+            authority.maximum_total_cost_usd,
+            code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_AUTHORITY_REQUIRED",
+            positive=True,
+        )
+        projected = _money(
+            image_unit * image_count + video_unit * video_count,
+            code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_AUTHORITY_REQUIRED",
+        )
+        if (
+            image_count < 0
+            or video_count < 0
+            or image_count + video_count <= 0
+            or projected > maximum
+            or authority.production_visual_policy_hash != _active_visual_policy_hash()
+        ):
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_GOVERNED_RERENDER_AUTHORITY_DRIFT"
+            )
+        body = {
+            "schema_version": "vcos.governed-rerender-visual-authority.v1",
+            "execution_kind": "GOVERNED_RERENDER",
+            "visual_authority_kind": "AI_VISUAL_RERENDER_AUTHORITY",
+            "ai_visual_rerender_authority_id": str(authority.id),
+            "ai_visual_rerender_authority_hash": authority.authority_hash,
+            "production_visual_policy_ref": authority.production_visual_policy_ref,
+            "production_visual_policy_hash": authority.production_visual_policy_hash,
+            "maximum_image_submissions": image_count,
+            "maximum_video_submissions": video_count,
+            "maximum_total_cost_usd": _money_text(maximum),
+            "budget_reservation_ref": authority.budget_reservation_ref,
+            "budget_authority_hash": authority.budget_authority_hash,
+            "pricing_authorities": prices,
+            "ai_image_projected_cost_usd": _money_text(image_unit * image_count),
+            "ai_video_projected_cost_usd": _money_text(video_unit * video_count),
+        }
+        return {**body, "content_hash": content_hash(body)}
+
+    @staticmethod
+    def _validate_normal_preflight(
+        *,
+        preflight: Mapping[str, Any],
+        projection: TTSPerformanceProjection,
+        visual_policy_hash: str | None,
+        tts_cost: Decimal,
+        alignment_cost: Decimal,
+    ) -> tuple[Decimal, Decimal, dict[str, Any]]:
+        body = {key: value for key, value in preflight.items() if key != "content_hash"}
+        if (
+            preflight.get("content_hash") != content_hash(body)
+            or preflight.get("schema_version")
+            != "vcos.combined-replacement-preflight.v2"
+            or preflight.get("state") != "FROZEN"
+            or preflight.get("execution_kind") != "NORMAL_PRODUCTION"
+            or preflight.get("visual_authority_kind")
+            != "UNIFIED_AI_VISUAL_PLANNER_PRE_TTS"
+            or preflight.get("tts_performance_projection_id") != str(projection.id)
+            or preflight.get("tts_performance_projection_hash") != projection.content_hash
+            or preflight.get("production_visual_policy_hash") != visual_policy_hash
+            or visual_policy_hash != _active_visual_policy_hash()
+        ):
+            raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PREFLIGHT_DRIFT")
+        image_count = preflight.get("unique_ai_image_asset_slot_count")
+        video_count = preflight.get("unique_ai_video_asset_slot_count")
+        if (
+            not isinstance(image_count, int)
+            or not isinstance(video_count, int)
+            or image_count < 0
+            or video_count < 0
+            or image_count + video_count <= 0
+        ):
+            raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PLAN_INVALID")
+        image_unit, video_unit, current_prices = _current_visual_prices()
+        if preflight.get("pricing_authorities") != current_prices:
+            raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_CATALOG_DRIFT")
+        image_cost = _money(
+            preflight.get("ai_image_projected_cost_usd"),
+            code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+        )
+        video_cost = _money(
+            preflight.get("ai_video_projected_cost_usd"),
+            code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+        )
+        expected_image = _money(
+            image_unit * image_count,
+            code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+        )
+        expected_video = _money(
+            video_unit * video_count,
+            code="COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED",
+        )
+        if (
+            image_cost != expected_image
+            or video_cost != expected_video
+            or _money(
+                preflight.get("new_tts_projected_cost_usd"),
+                code="COMBINED_REPLACEMENT_TTS_COST_AUTHORITY_REQUIRED",
+            )
+            != tts_cost
+            or _money(
+                preflight.get("forced_alignment_projected_cost_usd"),
+                code="COMBINED_REPLACEMENT_ALIGNMENT_COST_AUTHORITY_REQUIRED",
+            )
+            != alignment_cost
+        ):
+            raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PREFLIGHT_DRIFT")
+        return image_cost, video_cost, dict(preflight)
 
     def freeze(
         self,
@@ -197,8 +445,8 @@ class CombinedReplacementBudgetAuthorityService:
         route_budget_authority_hash: str,
         projection: TTSPerformanceProjection,
         canonical_narration: str,
-        sections: Sequence[Mapping[str, Any]],
         visual_policy_hash: str | None,
+        visual_preflight: Mapping[str, Any] | None,
         routes: Sequence[Any],
         approved_ceiling_usd: Any,
     ) -> CombinedReplacementBudgetAuthority:
@@ -229,16 +477,6 @@ class CombinedReplacementBudgetAuthorityService:
             code="COMBINED_REPLACEMENT_APPROVED_CEILING_INVALID",
             positive=True,
         )
-        if (
-            _money(
-                reservation.reserved_amount,
-                code="COMBINED_REPLACEMENT_BUDGET_RESERVATION_REQUIRED",
-            )
-            != ceiling
-        ):
-            raise ValidationFailureError(
-                "COMBINED_REPLACEMENT_BUDGET_RESERVATION_DRIFT"
-            )
         tts_rate = _money(
             getattr(self.settings, "elevenlabs_tts_cost_per_character_usd", None),
             code="COMBINED_REPLACEMENT_TTS_COST_AUTHORITY_REQUIRED",
@@ -254,8 +492,16 @@ class CombinedReplacementBudgetAuthorityService:
             canonical_narration=canonical_narration,
             rate=tts_rate,
         )
-        image_cost, video_cost, visual_source = _visual_preflight(
-            sections=sections, visual_policy_hash=visual_policy_hash
+        if visual_preflight is None:
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_VISUAL_COST_AUTHORITY_REQUIRED"
+            )
+        image_cost, video_cost, visual_source = self._validate_normal_preflight(
+            preflight=visual_preflight,
+            projection=projection,
+            visual_policy_hash=visual_policy_hash,
+            tts_cost=tts_cost,
+            alignment_cost=alignment_cost,
         )
         paid_routes = {
             str(route.stage): str(route.route_hash)
@@ -319,17 +565,56 @@ class CombinedReplacementBudgetAuthorityService:
                 "non_metered_routes": nonpaid_routes,
                 "projected_cost_state": "EXACT_ZERO_ALL_OTHER_SEALED_ROUTES_NON_METERED",
             },
-            "approved_ceiling": {
-                "reservation_id": str(reservation.id),
-                "reservation_ref": reservation.reservation_ref,
-                "reservation_request_hash": reservation.request_hash,
-                "reserved_amount_usd": _money_text(ceiling),
-            },
         }
         total = _money(
             tts_cost + alignment_cost + image_cost + video_cost + other_cost,
             code="COMBINED_REPLACEMENT_TOTAL_INVALID",
         )
+        allocations = {
+            "elevenlabs": _money_text(tts_cost + alignment_cost),
+            **(
+                {V2_AI_VISUAL_PROVIDER_KEY: _money_text(image_cost)}
+                if image_cost > 0
+                else {}
+            ),
+            **(
+                {V2_AI_VISUAL_VIDEO_PROVIDER_KEY: _money_text(video_cost)}
+                if video_cost > 0
+                else {}
+            ),
+        }
+        reservation_allocations = {
+            str(key): _money_text(
+                _money(value, code="COMBINED_REPLACEMENT_BUDGET_RESERVATION_REQUIRED")
+            )
+            for key, value in (reservation.provider_allocations_json or {}).items()
+        }
+        if (
+            total > ceiling
+            or _money(
+                reservation.reserved_amount,
+                code="COMBINED_REPLACEMENT_BUDGET_RESERVATION_REQUIRED",
+            )
+            != total
+            or reservation_allocations != allocations
+            or visual_source.get("provider_allocations_usd") != allocations
+            or _money(
+                visual_source.get("combined_replacement_projected_cost_usd"),
+                code="COMBINED_REPLACEMENT_TOTAL_INVALID",
+            )
+            != total
+        ):
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_PROVIDER_ALLOCATION_AUTHORITY_REQUIRED"
+            )
+        sources["approved_ceiling"] = {
+            "reservation_id": str(reservation.id),
+            "reservation_ref": reservation.reservation_ref,
+            "reservation_request_hash": reservation.request_hash,
+            "reserved_amount_usd": _money_text(total),
+            "policy_ceiling_usd": _money_text(ceiling),
+            "provider_allocations_usd": allocations,
+        }
         shortfall = max(Decimal(0), total - ceiling)
         identity = {
             "project_id": str(project_id),

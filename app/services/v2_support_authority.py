@@ -13,8 +13,8 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Iterable
-from decimal import Decimal
+from collections.abc import Iterable, Mapping
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal, Protocol, Self, runtime_checkable
 
@@ -832,6 +832,7 @@ class V2ZeroCostBudgetAuthority(_StrictFrozenModel):
     monthly_reserved_usd: Decimal | None = Field(default=None, ge=0, le=250)
     reservation_ref: str | None = None
     reservation_evidence: dict[str, Any] | None = None
+    combined_replacement_preflight: dict[str, Any] | None = None
     operation_ids: list[str] = Field(min_length=4, max_length=5)
     route_hashes: list[str] = Field(min_length=4, max_length=5)
     content_hash: str = Field(pattern=_SHA256_PATTERN)
@@ -861,6 +862,18 @@ class V2ZeroCostBudgetAuthority(_StrictFrozenModel):
             or not isinstance(self.reservation_evidence, dict)
             or self.reservation_evidence.get("reservation_ref") != self.reservation_ref
             or self.reservation_evidence.get("status") != "RESERVED"
+            or not isinstance(self.combined_replacement_preflight, dict)
+            or self.combined_replacement_preflight.get("state") != "FROZEN"
+            or self.combined_replacement_preflight.get("execution_kind")
+            != "NORMAL_PRODUCTION"
+            or self.combined_replacement_preflight.get("content_hash")
+            != semantic_hash(
+                {
+                    key: value
+                    for key, value in self.combined_replacement_preflight.items()
+                    if key != "content_hash"
+                }
+            )
         ):
             raise ValueError("V2_REAL_PROVIDER_BUDGET_MODE_INVALID")
         return self
@@ -1310,17 +1323,6 @@ class V2SupportAuthorityService:
                 requested_ceiling_usd=command.max_budget_usd,
                 reservation_run_id=command.budget_reservation_run_id,
             )
-        budget = _build_zero_cost_budget(
-            session=self.session,
-            routes=routes,
-            requested_ceiling_usd=command.max_budget_usd,
-            execution_mode=resolved.execution_mode,
-            policy_snapshot=self.session.get(
-                CompiledChannelPolicySnapshot, project.policy_snapshot_id
-            ),
-            project_id=project.id,
-            reservation_run_id=command.budget_reservation_run_id,
-        )
         if qualification_receipt is not None:
             # Qualification owns the script's memory boundary.  Do not fetch
             # a later digest and misrepresent it as writer influence.
@@ -1381,6 +1383,72 @@ class V2SupportAuthorityService:
             _production_visual_policy_projection()
             if resolved.execution_mode == "REAL_LONG_FORM_PRODUCTION"
             else None
+        )
+        combined_preflight = None
+        if resolved.execution_mode == "REAL_LONG_FORM_PRODUCTION":
+            if visual_policy is None:
+                raise ValidationFailureError(
+                    "V2_REAL_PROVIDER_COMBINED_PREFLIGHT_REQUIRED"
+                )
+            from app.services.combined_replacement_budget import (
+                CombinedReplacementBudgetAuthorityService,
+            )
+            from app.services.voice_authority import VoiceAuthorityService
+
+            script_authority = validated["script"]
+            voice_bundle = VoiceAuthorityService(self.session).ensure_project_bundle(
+                video_project_id=project.id,
+                qualified_script_ref=f"v2-approved-script:{script_authority.script_hash}",
+                qualified_script_hash=script_authority.script_hash,
+                canonical_narration=script_authority.approved_script_text,
+                script_sections=[
+                    {
+                        "section_id": section.section_id,
+                        "heading": section.heading,
+                        "sentences": [
+                            {"text": sentence}
+                            for sentence in _sentences(section.narration)
+                        ],
+                    }
+                    for section in script_authority.sections
+                ],
+                created_by_user_id=project.created_by_user_id,
+            )
+            try:
+                scoped = ChannelScopedPolicy.model_validate(
+                    (self.session.get(
+                        CompiledChannelPolicySnapshot, project.policy_snapshot_id
+                    ).compiled_payload or {}).get("channel_scoped_policy")
+                )
+            except (AttributeError, ValidationError) as exc:
+                raise ValidationFailureError(
+                    "V2_REAL_PROVIDER_BUDGET_POLICY_INVALID"
+                ) from exc
+            combined_preflight = CombinedReplacementBudgetAuthorityService(
+                self.session
+            ).compile_normal_visual_preflight(
+                project_id=project.id,
+                projection=voice_bundle.projection,
+                canonical_narration=script_authority.approved_script_text,
+                estimated_duration_ms=script_authority.estimated_duration_ms,
+                production_visual_policy_ref=visual_policy["ref"],
+                production_visual_policy_hash=visual_policy["hash"],
+                maximum_image_submissions=512,
+                maximum_video_submissions=min(
+                    512, int(scoped.budget_policy.max_veo_clips_per_video)
+                ),
+            )
+        budget = _build_zero_cost_budget(
+            session=self.session,
+            routes=routes,
+            requested_ceiling_usd=command.max_budget_usd,
+            execution_mode=resolved.execution_mode,
+            policy_snapshot=self.session.get(
+                CompiledChannelPolicySnapshot, project.policy_snapshot_id
+            ),
+            project_id=project.id,
+            reservation_run_id=command.budget_reservation_run_id,
+            combined_replacement_preflight=combined_preflight,
         )
         gate_receipts = self._gate_receipts(
             resolved=resolved,
@@ -4427,6 +4495,7 @@ def _build_zero_cost_budget(
     policy_snapshot: CompiledChannelPolicySnapshot | None,
     project_id: uuid.UUID,
     reservation_run_id: uuid.UUID | None,
+    combined_replacement_preflight: Mapping[str, Any] | None = None,
 ) -> V2ZeroCostBudgetAuthority:
     if execution_mode == "REAL_LONG_FORM_PRODUCTION":
         try:
@@ -4445,38 +4514,93 @@ def _build_zero_cost_budget(
             requested_ceiling_usd < per_video
             or per_video <= 0
             or reservation_run_id is None
+            or not isinstance(combined_replacement_preflight, Mapping)
         ):
             raise ValidationFailureError("V2_REAL_PROVIDER_BUDGET_RESERVATION_BLOCKED")
+        preflight = dict(combined_replacement_preflight)
+        preflight_body = {
+            key: value for key, value in preflight.items() if key != "content_hash"
+        }
+        try:
+            aggregate = Decimal(
+                str(preflight["combined_replacement_projected_cost_usd"])
+            )
+            allocations = {
+                str(key): Decimal(str(value))
+                for key, value in dict(preflight["provider_allocations_usd"]).items()
+            }
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise ValidationFailureError(
+                "V2_REAL_PROVIDER_COMBINED_PREFLIGHT_REQUIRED"
+            ) from exc
+        if (
+            preflight.get("content_hash") != semantic_hash(preflight_body)
+            or aggregate <= 0
+            or aggregate > per_video
+            or sum(allocations.values(), Decimal("0")) != aggregate
+            or Decimal(str(allocations.get("elevenlabs", 0))) <= 0
+            or Decimal(str(preflight.get("ai_image_projected_cost_usd", 0)))
+            != Decimal(str(allocations.get("google_gemini_image", 0)))
+            or Decimal(str(preflight.get("ai_video_projected_cost_usd", 0)))
+            != Decimal(str(allocations.get("google_veo", 0)))
+        ):
+            raise ValidationFailureError(
+                "V2_REAL_PROVIDER_COMBINED_PREFLIGHT_AUTHORITY_INVALID"
+            )
         settings = get_settings()
         environment_cap = Decimal(str(settings.monthly_ai_budget_usd or 0))
         elevenlabs_cap = Decimal(str(settings.elevenlabs_monthly_cap_usd or 0))
-        if environment_cap <= 0 or elevenlabs_cap <= 0:
+        gemini_cap = Decimal(str(settings.extra_ai_image_monthly_budget_usd or 0))
+        if (
+            environment_cap <= 0
+            or elevenlabs_cap <= 0
+            or ("google_gemini_image" in allocations and gemini_cap <= 0)
+        ):
             raise ValidationFailureError("V2_REAL_PROVIDER_BUDGET_CAP_REQUIRED")
+        provider_caps = {
+            "elevenlabs": elevenlabs_cap,
+            **(
+                {"google_gemini_image": gemini_cap}
+                if "google_gemini_image" in allocations
+                else {}
+            ),
+            # Veo's exact per-video allocation is bound above; environment
+            # capacity is the durable monthly ceiling when the separate Veo
+            # policy catalog exposes no independent dollar cap.
+            **(
+                {"google_veo": environment_cap}
+                if "google_veo" in allocations
+                else {}
+            ),
+        }
         evidence = MR1MonthlyBudgetAuthority(session).reserve_run(
             run_id=reservation_run_id,
             project_id=project_id,
-            reservation_amount_usd=per_video,
+            reservation_amount_usd=aggregate,
             environment_cap_usd=environment_cap,
             company_cap_usd=environment_cap,
             channel_cap_usd=monthly,
-            provider_allocations_usd={
-                "elevenlabs": per_video,
-                "google_drive": Decimal("0"),
-            },
-            provider_caps_usd={
-                "elevenlabs": elevenlabs_cap,
-                "google_drive": environment_cap,
-            },
+            provider_allocations_usd=allocations,
+            provider_caps_usd=provider_caps,
             provider_aliases={
                 "elevenlabs": ["elevenlabs", "forced_alignment"],
-                "google_drive": ["google_drive"],
+                **(
+                    {"google_gemini_image": ["google_gemini_image", "gemini_image"]}
+                    if "google_gemini_image" in allocations
+                    else {}
+                ),
+                **(
+                    {"google_veo": ["google_veo", "veo"]}
+                    if "google_veo" in allocations
+                    else {}
+                ),
             },
         )
         if (
             evidence.get("run_id") != str(reservation_run_id)
             or evidence.get("project_id") != str(project_id)
             or evidence.get("status") != "RESERVED"
-            or Decimal(str(evidence.get("reserved_amount_usd"))) != per_video
+            or Decimal(str(evidence.get("reserved_amount_usd"))) != aggregate
         ):
             raise ValidationFailureError("V2_REAL_PROVIDER_BUDGET_RESERVATION_INVALID")
         payload = {
@@ -4484,7 +4608,7 @@ def _build_zero_cost_budget(
             "policy_mode": "REAL_PROVIDER_PER_VIDEO_RESERVATION",
             "execution_mode": execution_mode,
             "requested_ceiling_usd": _decimal_string(requested_ceiling_usd),
-            "authorized_cost_usd": _decimal_string(per_video),
+            "authorized_cost_usd": _decimal_string(aggregate),
             "paid_provider_calls_allowed": True,
             "monthly_budget_usd": _decimal_string(monthly),
             "monthly_used_usd": str(
@@ -4495,6 +4619,7 @@ def _build_zero_cost_budget(
             "monthly_reserved_usd": evidence["reserved_amount_usd"],
             "reservation_ref": evidence["reservation_ref"],
             "reservation_evidence": evidence,
+            "combined_replacement_preflight": preflight,
             "operation_ids": sorted(route.operation_id for route in routes),
             "route_hashes": sorted(route.route_hash for route in routes),
         }
@@ -4514,6 +4639,7 @@ def _build_zero_cost_budget(
         "monthly_reserved_usd": None,
         "reservation_ref": None,
         "reservation_evidence": None,
+        "combined_replacement_preflight": None,
         "operation_ids": sorted(route.operation_id for route in routes),
         "route_hashes": sorted(route.route_hash for route in routes),
     }

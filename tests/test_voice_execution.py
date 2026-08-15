@@ -35,11 +35,13 @@ from app.db.models.voice_authority import (
 from app.db.models.workflow import VideoProject
 from app.services.combined_replacement_budget import (
     CombinedReplacementBudgetAuthorityService,
+    _active_visual_policy_hash,
 )
 from app.services.config_registry import content_hash
 from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
 from app.services.v2_elevenlabs_narration import V2ElevenLabsNarrationAdapter
 from app.services.v2_package_readiness import _combined_replacement_budget_binding
+from app.services.v2_ai_visual_stage import compile_pre_tts_ai_visual_cost_preflight
 from app.services.voice_execution import (
     CombinedReplacementBudget,
     NarrationSegmentExecutionService,
@@ -387,19 +389,6 @@ def test_combined_budget_authority_requires_every_current_component() -> None:
 
 def test_package_creates_and_binds_durable_combined_cost_authority(db_session) -> None:
     lineage = _db_voice_lineage(db_session)
-    reservation_run_id = uuid.uuid4()
-    evidence = MR1MonthlyBudgetAuthority(db_session).reserve_run(
-        run_id=reservation_run_id,
-        project_id=lineage.project.id,
-        reservation_amount_usd=Decimal("10.000000"),
-        environment_cap_usd=Decimal("100.000000"),
-        company_cap_usd=Decimal("100.000000"),
-        channel_cap_usd=Decimal("100.000000"),
-        provider_allocations_usd={"elevenlabs": Decimal("10.000000")},
-        provider_caps_usd={"elevenlabs": Decimal("100.000000")},
-        provider_aliases={"elevenlabs": ["elevenlabs", "forced_alignment"]},
-    )
-    db_session.commit()
     routes = [
         SimpleNamespace(stage="MEDIA", paid_provider_call=True, route_hash=_hash("media")),
         SimpleNamespace(stage="VISUAL", paid_provider_call=True, route_hash=_hash("visual")),
@@ -412,6 +401,36 @@ def test_package_creates_and_binds_durable_combined_cost_authority(db_session) -
         elevenlabs_forced_alignment_cost_usd=Decimal("0.250000"),
     )
     service = CombinedReplacementBudgetAuthorityService(db_session, settings=settings)
+    visual_policy_hash = _active_visual_policy_hash()
+    preflight = service.compile_normal_visual_preflight(
+        project_id=lineage.project.id,
+        projection=lineage.projection,
+        canonical_narration=lineage.narration,
+        estimated_duration_ms=60_000,
+        production_visual_policy_ref="config://test/production-visual-policy",
+        production_visual_policy_hash=visual_policy_hash,
+        maximum_image_submissions=512,
+        maximum_video_submissions=512,
+    )
+    reservation_run_id = uuid.uuid4()
+    allocations = {
+        key: Decimal(value)
+        for key, value in preflight["provider_allocations_usd"].items()
+    }
+    evidence = MR1MonthlyBudgetAuthority(db_session).reserve_run(
+        run_id=reservation_run_id,
+        project_id=lineage.project.id,
+        reservation_amount_usd=Decimal(
+            preflight["combined_replacement_projected_cost_usd"]
+        ),
+        environment_cap_usd=Decimal("100.000000"),
+        company_cap_usd=Decimal("100.000000"),
+        channel_cap_usd=Decimal("100.000000"),
+        provider_allocations_usd=allocations,
+        provider_caps_usd={key: Decimal("100.000000") for key in allocations},
+        provider_aliases={key: [key] for key in allocations},
+    )
+    db_session.commit()
     authority = service.freeze(
         project_id=lineage.project.id,
         reservation_ref=evidence["reservation_ref"],
@@ -419,8 +438,8 @@ def test_package_creates_and_binds_durable_combined_cost_authority(db_session) -
         route_budget_authority_hash=_hash("route-budget"),
         projection=lineage.projection,
         canonical_narration=lineage.narration,
-        sections=[{"section_id": "scene-1", "section_hash": _hash("scene-1")}],
-        visual_policy_hash=_hash("visual-policy"),
+        visual_policy_hash=visual_policy_hash,
+        visual_preflight=preflight,
         routes=routes,
         approved_ceiling_usd=Decimal("10.000000"),
     )
@@ -429,10 +448,10 @@ def test_package_creates_and_binds_durable_combined_cost_authority(db_session) -
     assert ref == authority.authority_ref
     assert digest == authority.content_hash
     assert budget.ai_image_projected_cost_usd > 0
-    assert budget.ai_video_projected_cost_usd == 0
-    assert authority.source_refs["ai_visual_preflight"]["video_owner_cost_state"].startswith(
-        "EXACT_ZERO"
+    assert budget.ai_video_projected_cost_usd == Decimal(
+        preflight["ai_video_projected_cost_usd"]
     )
+    assert authority.source_refs["ai_visual_preflight"]["visual_plan_compilation_hash"] == preflight["visual_plan_compilation_hash"]
     assert db_session.scalar(select(MR1MonthlyBudgetReservation)).reservation_ref == evidence["reservation_ref"]
     authority.shortfall_usd = Decimal("1.000000")
     with pytest.raises(DatabaseError, match="append-only"):
@@ -450,11 +469,198 @@ def test_package_creates_and_binds_durable_combined_cost_authority(db_session) -
             route_budget_authority_hash=_hash("route-budget"),
             projection=lineage.projection,
             canonical_narration=lineage.narration,
-            sections=[{"section_id": "scene-1", "section_hash": _hash("scene-1")}],
-            visual_policy_hash=None,
+            visual_policy_hash=visual_policy_hash,
+            visual_preflight=None,
             routes=routes,
             approved_ceiling_usd=Decimal("10.000000"),
         )
+
+    policy_drift = {
+        **preflight,
+        "production_visual_policy_hash": _hash("drifted-visual-policy"),
+    }
+    policy_drift["content_hash"] = content_hash(
+        {key: value for key, value in policy_drift.items() if key != "content_hash"}
+    )
+    with pytest.raises(
+        ValidationFailureError,
+        match="COMBINED_REPLACEMENT_VISUAL_PREFLIGHT_DRIFT",
+    ):
+        service.freeze(
+            project_id=lineage.project.id,
+            reservation_ref=evidence["reservation_ref"],
+            support_envelope_hash=_hash("support-policy-drift"),
+            route_budget_authority_hash=_hash("route-budget"),
+            projection=lineage.projection,
+            canonical_narration=lineage.narration,
+            visual_policy_hash=visual_policy_hash,
+            visual_preflight=policy_drift,
+            routes=routes,
+            approved_ceiling_usd=Decimal("10.000000"),
+        )
+
+    catalog_drift = {**preflight, "pricing_authorities": {"drift": True}}
+    catalog_drift["content_hash"] = content_hash(
+        {key: value for key, value in catalog_drift.items() if key != "content_hash"}
+    )
+    with pytest.raises(
+        ValidationFailureError,
+        match="COMBINED_REPLACEMENT_VISUAL_CATALOG_DRIFT",
+    ):
+        service.freeze(
+            project_id=lineage.project.id,
+            reservation_ref=evidence["reservation_ref"],
+            support_envelope_hash=_hash("support-catalog-drift"),
+            route_budget_authority_hash=_hash("route-budget"),
+            projection=lineage.projection,
+            canonical_narration=lineage.narration,
+            visual_policy_hash=visual_policy_hash,
+            visual_preflight=catalog_drift,
+            routes=routes,
+            approved_ceiling_usd=Decimal("10.000000"),
+        )
+
+
+def test_visual_cost_preflight_uses_unified_owner_slots_and_veo() -> None:
+    artifacts, _timeline = compile_pre_tts_ai_visual_cost_preflight(
+        video_project_id=uuid.uuid4(),
+        preflight_id=uuid.uuid4(),
+        canonical_narration=(
+            "The material transforms into a verified output. "
+            "First it moves through validation, then it reaches storage. "
+            "A separate control protects the budget. "
+            "The final receipt records the result. "
+            "Operators review the completed lineage."
+        ),
+        estimated_duration_ms=60_000,
+        maximum_image_submissions=128,
+        maximum_video_submissions=128,
+    )
+    compilation = artifacts.scene_plan
+    # Four editorial sections would not be a cost authority here: the real
+    # planner produced its own owner slots, including a paid Veo owner.
+    assert compilation.unique_asset_slot_count != 4
+    assert compilation.unique_ai_video_asset_slot_count > 0
+    projection = SimpleNamespace(
+        id=uuid.uuid4(),
+        video_project_id=uuid.uuid4(),
+        state="FROZEN",
+        model_id="eleven_multilingual_v2",
+        content_hash=_hash("preflight-projection"),
+        segments=[
+            {
+                "ordinal": 1,
+                "segment_id": "preflight-segment",
+                "source_text_start": 0,
+                "source_text_end": len(
+                    "The asset transforms into a final output."
+                ),
+                "text_hash": content_hash(
+                    {"text": "The asset transforms into a final output."}
+                ),
+            }
+        ],
+    )
+    preflight = CombinedReplacementBudgetAuthorityService(
+        None,
+        settings=SimpleNamespace(
+            elevenlabs_tts_cost_per_character_usd=Decimal("0.010000"),
+            elevenlabs_forced_alignment_cost_usd=Decimal("0.250000"),
+        ),
+    ).compile_normal_visual_preflight(
+        project_id=projection.video_project_id,
+        projection=projection,
+        canonical_narration="The asset transforms into a final output.",
+        estimated_duration_ms=30_000,
+        production_visual_policy_ref="config://test/production-visual-policy",
+        production_visual_policy_hash=_active_visual_policy_hash(),
+        maximum_image_submissions=128,
+        maximum_video_submissions=128,
+    )
+    assert Decimal(preflight["ai_video_projected_cost_usd"]) > 0
+    assert "google_veo" in preflight["provider_allocations_usd"]
+
+
+def test_combined_authority_rejects_missing_gemini_partition_before_media(
+    db_session,
+) -> None:
+    lineage = _db_voice_lineage(db_session)
+    settings = SimpleNamespace(
+        elevenlabs_tts_cost_per_character_usd=Decimal("0.010000"),
+        elevenlabs_forced_alignment_cost_usd=Decimal("0.250000"),
+    )
+    service = CombinedReplacementBudgetAuthorityService(db_session, settings=settings)
+    policy_hash = _active_visual_policy_hash()
+    preflight = service.compile_normal_visual_preflight(
+        project_id=lineage.project.id,
+        projection=lineage.projection,
+        canonical_narration=lineage.narration,
+        estimated_duration_ms=60_000,
+        production_visual_policy_ref="config://test/production-visual-policy",
+        production_visual_policy_hash=policy_hash,
+        maximum_image_submissions=128,
+        maximum_video_submissions=128,
+    )
+    total = Decimal(preflight["combined_replacement_projected_cost_usd"])
+    evidence = MR1MonthlyBudgetAuthority(db_session).reserve_run(
+        run_id=uuid.uuid4(),
+        project_id=lineage.project.id,
+        reservation_amount_usd=total,
+        environment_cap_usd=Decimal("100.000000"),
+        company_cap_usd=Decimal("100.000000"),
+        channel_cap_usd=Decimal("100.000000"),
+        # The aggregate amount is sufficient, but Gemini has no partition.
+        provider_allocations_usd={"elevenlabs": total},
+        provider_caps_usd={"elevenlabs": Decimal("100.000000")},
+        provider_aliases={"elevenlabs": ["elevenlabs", "forced_alignment"]},
+    )
+    db_session.commit()
+    routes = [
+        SimpleNamespace(stage="MEDIA", paid_provider_call=True, route_hash=_hash("media")),
+        SimpleNamespace(stage="VISUAL", paid_provider_call=True, route_hash=_hash("visual")),
+        SimpleNamespace(stage="RENDER", paid_provider_call=False, route_hash=_hash("render")),
+        SimpleNamespace(stage="QC", paid_provider_call=False, route_hash=_hash("qc")),
+        SimpleNamespace(stage="ARCHIVE", paid_provider_call=False, route_hash=_hash("archive")),
+    ]
+    with pytest.raises(
+        ValidationFailureError,
+        match="COMBINED_REPLACEMENT_PROVIDER_ALLOCATION_AUTHORITY_REQUIRED",
+    ):
+        service.freeze(
+            project_id=lineage.project.id,
+            reservation_ref=evidence["reservation_ref"],
+            support_envelope_hash=_hash("missing-gemini"),
+            route_budget_authority_hash=_hash("route-budget"),
+            projection=lineage.projection,
+            canonical_narration=lineage.narration,
+            visual_policy_hash=policy_hash,
+            visual_preflight=preflight,
+            routes=routes,
+            approved_ceiling_usd=Decimal("10.000000"),
+        )
+
+
+def test_governed_rerender_uses_durable_visual_authority_not_section_count() -> None:
+    policy_hash = _active_visual_policy_hash()
+    authority = SimpleNamespace(
+        id=uuid.uuid4(),
+        authority_hash=_hash("rerender"),
+        production_visual_policy_ref="config://test/production-visual-policy",
+        production_visual_policy_hash=policy_hash,
+        maximum_image_submissions=14,
+        maximum_video_submissions=0,
+        maximum_total_cost_usd=Decimal("2.000000"),
+        budget_reservation_ref="mr1://rerender",
+        budget_authority_hash=_hash("rerender-budget"),
+    )
+    governed = CombinedReplacementBudgetAuthorityService.governed_rerender_visual_authority(
+        authority=authority
+    )
+    assert governed["maximum_image_submissions"] == 14
+    assert governed["maximum_video_submissions"] == 0
+    assert Decimal(governed["ai_image_projected_cost_usd"]) <= Decimal(
+        governed["maximum_total_cost_usd"]
+    )
 
 
 def test_real_postgresql_segment_ledger_reconciles_and_never_resends(db_session) -> None:

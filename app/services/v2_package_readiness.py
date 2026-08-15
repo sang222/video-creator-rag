@@ -1360,8 +1360,8 @@ def _support_payloads(
             route_budget_authority_hash=envelope.zero_cost_budget.content_hash,
             projection=voice_bundle.projection,
             canonical_narration=script["narration_text"],
-            sections=sections,
             visual_policy_hash=envelope.production_visual_policy_hash,
+            visual_preflight=envelope.zero_cost_budget.combined_replacement_preflight,
             routes=envelope.native_routes,
             approved_ceiling_usd=envelope.zero_cost_budget.authorized_cost_usd,
         )
@@ -1482,6 +1482,9 @@ def _support_payloads(
                 "idempotency_key": f"{operation_id}:ai-visual-asset-set",
                 "estimated_cost_usd": max_cost_usd,
                 "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
+                "combined_replacement_budget_authority": (
+                    combined_replacement_budget
+                ),
                 "package_support_envelope_hash": support_envelope_hash,
             }
         if real_production and stage == "ARCHIVE":

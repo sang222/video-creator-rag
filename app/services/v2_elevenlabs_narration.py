@@ -412,6 +412,10 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             "provider_request_id": audio.get("provider_request_id"),
             "estimated_cost_usd": audio["estimated_cost_usd"],
             "actual_cost_usd": audio["actual_cost_usd"],
+            "actual_cost_components_complete": audio[
+                "actual_cost_components_complete"
+            ],
+            "actual_cost_components_usd": audio["actual_cost_components_usd"],
             "combined_replacement_budget_authority_ref": audio[
                 "combined_replacement_budget_authority_ref"
             ],
@@ -442,6 +446,9 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
                     "alignment_method": audio["alignment_method"],
                     "provider_request_id": audio.get("provider_request_id"),
                     "actual_cost_usd": audio["actual_cost_usd"],
+                    "actual_cost_components_complete": audio[
+                        "actual_cost_components_complete"
+                    ],
                     "tts_provider_call_count": audio["tts_provider_call_count"],
                     "forced_alignment_provider_call_count": audio[
                         "forced_alignment_provider_call_count"
@@ -1121,18 +1128,28 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
         executions: Sequence[_NarrationSegmentAudio],
         budget: CombinedReplacementBudget,
         forced_alignment_provider_call_count: int,
+        forced_alignment_actual_cost_usd: Decimal | None = None,
         budget_authority_ref: str,
         budget_authority_hash: str,
         segment_evidence_hash: str,
     ) -> dict[str, Any]:
         tts_provider_call_count = len(executions)
-        actual_cost = (
+        tts_actual = (
             sum(
                 (execution.actual_cost_usd for execution in executions),
                 Decimal(0),
             )
             if all(execution.actual_cost_usd is not None for execution in executions)
             else None
+        )
+        alignment_actual = (
+            forced_alignment_actual_cost_usd
+            if forced_alignment_provider_call_count > 0
+            else Decimal("0")
+        )
+        components_complete = tts_actual is not None and alignment_actual is not None
+        actual_cost = (
+            tts_actual + alignment_actual if components_complete else None
         )
         return {
             "tts_provider_call_count": tts_provider_call_count,
@@ -1149,6 +1166,13 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
                 + budget.forced_alignment_projected_cost_usd
             ),
             "actual_cost_usd": str(actual_cost) if actual_cost is not None else None,
+            "actual_cost_components_complete": components_complete,
+            "actual_cost_components_usd": {
+                "tts": str(tts_actual) if tts_actual is not None else None,
+                "forced_alignment": (
+                    str(alignment_actual) if alignment_actual is not None else None
+                ),
+            },
             "combined_replacement_budget_authority_ref": budget_authority_ref,
             "combined_replacement_budget_authority_hash": budget_authority_hash,
             "combined_replacement_budget_projection": budget.report(),

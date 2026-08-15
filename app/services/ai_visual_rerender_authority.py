@@ -23,6 +23,12 @@ from typing import Any, Mapping
 
 from sqlalchemy.orm import Session
 
+from app.core.config import (
+    VEO_DEFAULT_DURATION_SECONDS,
+    VEO_DEFAULT_MODEL_ID,
+    VEO_DEFAULT_OUTPUT_COUNT,
+    VEO_DEFAULT_RESOLUTION,
+)
 from app.core.errors import ValidationFailureError
 from app.db.models.ai_visual import (
     AI_VISUAL_POLICY_VERSION,
@@ -38,6 +44,7 @@ from app.db.models.v2_effect import (
 )
 from app.db.models.workflow import Artifact, ArtifactVersion
 from app.services.config_registry import ConfigRegistryService
+from app.services.google_veo_catalog import GoogleVeoModelPriceCatalog
 from app.services.production_package import ProductionPackageService, semantic_hash
 from app.services.v2_ai_visual_provider import (
     V2_GEMINI_IMAGE_CONSERVATIVE_UNIT_COST_USD,
@@ -68,6 +75,32 @@ AI_VISUAL_RERENDER_MAXIMUM_COST_USD = (
 _POLICY_PATH = Path("config/production_visual_policy_catalog.yaml")
 _HASH_FIELD = "authority_hash"
 _ALLOWED_BUDGET_STATES = frozenset({"RESERVED", "SUBMITTED", "SETTLED_CONSERVATIVE"})
+
+
+def _durable_visual_allocations(
+    authority: AIVisualRerenderAuthority,
+) -> dict[str, Decimal]:
+    """Price the authority's durable image/video caps, never module constants."""
+
+    video_unit = GoogleVeoModelPriceCatalog().estimate(
+        model_id=VEO_DEFAULT_MODEL_ID,
+        resolution=VEO_DEFAULT_RESOLUTION,
+        duration_seconds=VEO_DEFAULT_DURATION_SECONDS,
+        output_count=VEO_DEFAULT_OUTPUT_COUNT,
+        hard_cap=Decimal("1000000"),
+        approval_amount=Decimal("1000000"),
+    ).estimated_amount
+    return {
+        key: value
+        for key, value in {
+            "google_gemini_image": (
+                V2_GEMINI_IMAGE_CONSERVATIVE_UNIT_COST_USD
+                * authority.maximum_image_submissions
+            ),
+            "google_veo": video_unit * authority.maximum_video_submissions,
+        }.items()
+        if value > 0
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +271,8 @@ def _validate_exact_authority(
         str(key): Decimal(str(value))
         for key, value in dict(budget.provider_allocations_json or {}).items()
     }
+    durable_allocations = _durable_visual_allocations(authority)
+    durable_total = sum(durable_allocations.values(), Decimal("0"))
     if (
         authority.authority_hash != seal_ai_visual_rerender_authority_hash(authority)
         or authority.authorized_visual_production_run_id != visual_run.id
@@ -275,10 +310,12 @@ def _validate_exact_authority(
         or visual_run.production_visual_policy_version != policy["version"]
         or visual_run.production_visual_policy_ref != policy["ref"]
         or visual_run.production_visual_policy_hash != policy["hash"]
-        or authority.maximum_total_cost_usd != AI_VISUAL_RERENDER_MAXIMUM_COST_USD
-        or authority.maximum_scene_count != AI_VISUAL_RERENDER_MAXIMUM_SCENES
-        or authority.maximum_image_submissions != AI_VISUAL_RERENDER_MAXIMUM_IMAGES
-        or authority.maximum_video_submissions != AI_VISUAL_RERENDER_MAXIMUM_VIDEOS
+        or authority.maximum_total_cost_usd != durable_total
+        or authority.maximum_scene_count <= 0
+        or authority.maximum_image_submissions < 0
+        or authority.maximum_video_submissions < 0
+        or authority.maximum_image_submissions + authority.maximum_video_submissions
+        <= 0
         or authority.maximum_tts_submissions != 0
         or authority.maximum_forced_alignment_submissions != 0
         or authority.automatic_publish is not False
@@ -292,16 +329,8 @@ def _validate_exact_authority(
         or visual_run.budget_reservation_ref != authority.budget_reservation_ref
         or capacity.get("content_hash") != authority.budget_authority_hash
         or visual_run.budget_authority_hash != authority.budget_authority_hash
-        or Decimal(budget.reserved_amount) != AI_VISUAL_RERENDER_MAXIMUM_COST_USD
-        or allocations
-        != {
-            provider: amount
-            for provider, amount in {
-                "google_gemini_image": AI_VISUAL_RERENDER_IMAGE_COST_USD,
-                "google_veo": AI_VISUAL_RERENDER_VIDEO_COST_USD,
-            }.items()
-            if amount > 0
-        }
+        or Decimal(budget.reserved_amount) != durable_total
+        or allocations != durable_allocations
         or budget.status not in _ALLOWED_BUDGET_STATES
         or timing is None
         or timing_receipt is None
@@ -398,7 +427,7 @@ def _derived_operation_plans(
             "VISUAL",
             "v2-ai-visual-production",
             True,
-            format(AI_VISUAL_RERENDER_MAXIMUM_COST_USD, "f"),
+            format(Decimal(authority.maximum_total_cost_usd), "f"),
         ),
         ("RENDER", "v2-local-native", False, "0"),
         ("QC", "v2-local-native", False, "0"),
@@ -534,7 +563,7 @@ def _derived_operation_plans(
         "max_attempts": 1,
         "retry_cost_usd": "0",
         "remaining_budget_usd": (
-            format(AI_VISUAL_RERENDER_MAXIMUM_COST_USD, "f")
+            format(Decimal(authority.maximum_total_cost_usd), "f")
             if budget.status in {"RESERVED", "SUBMITTED"}
             else "0"
         ),
@@ -542,7 +571,7 @@ def _derived_operation_plans(
         # VERIFIED slot effects.  The gateway recognizes this separate ceiling
         # while the stage/store forbid a new submission after settlement.
         "visual_reconciliation_ceiling_usd": format(
-            AI_VISUAL_RERENDER_MAXIMUM_COST_USD,
+            Decimal(authority.maximum_total_cost_usd),
             "f",
         ),
         "execution_mode": AI_VISUAL_RERENDER_EXECUTION_MODE,
