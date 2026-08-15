@@ -60,6 +60,8 @@ jobs:
           fi
       - name: Apply frozen debt and gap fixes
         run: python tools/finalize_remaining_debt.py
+      - name: Recover generic test harness and semantic regressions
+        run: python tools/finalize_remaining_debt_harness.py
       - name: Remove superseded per-channel bootstrap
         shell: bash
         run: |
@@ -82,9 +84,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          files=(tests/test_remaining_debt_closeout.py)
+          files=(tests/test_remaining_debt_closeout.py tests/test_one_engine_many_profiles.py)
           for candidate in \
             tests/test_long_form_launch_cadence.py \
+            tests/test_production_publish.py \
             tests/test_youtube_private_delivery.py \
             tests/test_editorial_novelty.py \
             tests/test_cross_modal_lineage.py \
@@ -95,6 +98,8 @@ jobs:
           done
           printf 'running: %s\n' "${files[*]}"
           pytest -q "${files[@]}"
+      - name: Run full repository regression
+        run: pytest -q
       - name: Run repository architecture invariant
         run: >-
           python -c "from pathlib import Path; from app.services.remaining_debt_closeout import ArchitectureDebtAuditService; result=ArchitectureDebtAuditService().audit(Path.cwd()); print(result); assert result.one_engine_many_profiles, result"
@@ -104,12 +109,19 @@ jobs:
           app/services/profile_compiler.py
           app/services/production_publish.py
           app/services/remaining_debt_closeout.py
+          tests/conftest.py
+          tests/qualification/conftest.py
+          tests/test_one_engine_many_profiles.py
           tests/test_remaining_debt_closeout.py
+          tests/test_voice_authority.py
       - name: Remove one-shot staging and push verified hardening
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/workflows/closeout-hardening-finalizer.yml tools/finalize_remaining_debt.py
+          rm -f \
+            .github/workflows/closeout-hardening-finalizer.yml \
+            tools/finalize_remaining_debt.py \
+            tools/finalize_remaining_debt_harness.py
           git config user.name "sang222"
           git config user.email "quangsang222@gmail.com"
           git add -A
