@@ -22,22 +22,11 @@ from app.contracts.channel_policy import (
     ChannelVisualSourcePolicyBinding,
     ChannelScopedPolicy,
     CompilerInputManifest,
-    DestinationBindingPolicy,
-    GeoEvaluationPolicy,
     GeminiImageUsagePolicy,
     LaunchRestrictions,
-    MarketAlignmentPolicy,
-    MarketPackageFreezePolicy,
     NativeRenderPolicySnapshot,
     PolicyRef,
     PolicySnapshotRefs,
-    PublishTimingLocalizationPolicy,
-)
-from app.contracts.geo_market import (
-    MARKET_GATE_STRICT_ORDER,
-    DestinationBinding,
-    TargetMarketDigest,
-    TargetMarketProfile,
 )
 from app.contracts.visual_routing import NicheVisualSourceProfile, VisualSourceRoute
 from app.core.errors import ValidationFailureError
@@ -57,13 +46,6 @@ from app.services.channel_contract import (
 )
 from app.services.creative_quality_policy import CreativeQualityPolicyCatalog
 
-
-CH1_FLEX_V2_MASTER_APPROVAL_REF = (
-    "operator-approval://ch1-flex-v2/small-team-ai/master-prompt-2026-07-19"
-)
-CH1_MARKET_V3_MASTER_APPROVAL_REF = (
-    "operator-approval://ch1-market-v3/small-team-ai/master-prompt-2026-07-19"
-)
 
 
 @dataclass(frozen=True)
@@ -107,71 +89,7 @@ class ChannelProfileCompiler:
         )
         return profile_input, catalogs
 
-    def build_ch1_flex_v2_profile_input(
-        self,
-        *,
-        active_profile_input: ChannelProfileInput | dict[str, Any],
-        approval_ref: str,
-    ) -> ChannelProfileInput:
-        """Copy the effective v1 input and add only the approved CH1-FLEX v2 overlay."""
 
-        parsed = ChannelProfileInput.model_validate(active_profile_input)
-        if parsed.channel_policy is None:
-            raise ValidationFailureError(
-                "effective active channel policy is required for CH1-FLEX v2"
-            )
-        payload = deepcopy(parsed.model_dump(mode="json"))
-        payload["channel_policy"] = self.build_ch1_flex_v2_policy(
-            active_policy=parsed.channel_policy,
-            approval_ref=approval_ref,
-        ).model_dump(mode="json")
-        return ChannelProfileInput.model_validate(payload)
-
-    def build_ch1_flex_v2_policy(
-        self,
-        *,
-        active_policy: ChannelScopedPolicy | dict[str, Any],
-        approval_ref: str,
-    ) -> ChannelScopedPolicy:
-        """Build a deterministic v2 policy overlay from immutable evidence."""
-
-        policy = ChannelScopedPolicy.model_validate(active_policy)
-        if (
-            policy.channel_key != "small-team-ai"
-            or approval_ref != CH1_FLEX_V2_MASTER_APPROVAL_REF
-        ):
-            raise ValidationFailureError(
-                "CH1-FLEX v2 requires its exact scoped operator approval"
-            )
-        binding = self._qualified_visual_source_binding()
-        raw = deepcopy(policy.model_dump(mode="json"))
-        raw["policy_version"] = f"{policy.channel_key}.channel-policy.v2"
-        raw["policy_status"] = "APPROVED"
-        raw["approval_ref"] = approval_ref
-        raw["visual_source_policy_binding"] = binding.model_dump(mode="json")
-        raw["provider_usage_policy"]["google_gemini_image"] = (
-            GeminiImageUsagePolicy().model_dump(mode="json")
-        )
-        required = list(raw["capability_requirements"]["required"])
-        for capability in (
-            "visual_source_routing",
-            "google_gemini_image_planning",
-            "image_visual_quality_control",
-            "drive_verified_image_canary",
-        ):
-            if capability not in required:
-                required.append(capability)
-        raw["capability_requirements"]["required"] = required
-        derivation_refs = list(raw["budget_policy"]["derivation_refs"])
-        for ref in (
-            binding.gemini_image_model_catalog.ref,
-            binding.image_canary_v3_qualification.ref,
-            approval_ref,
-        ):
-            if ref not in derivation_refs:
-                derivation_refs.append(ref)
-        raw["budget_policy"]["derivation_refs"] = derivation_refs
-        return ChannelScopedPolicy.model_validate(raw)
 
     def refresh_qualified_visual_source_binding(
         self,
