@@ -367,6 +367,166 @@ class CombinedReplacementBudgetAuthorityService:
         return {**body, "content_hash": content_hash(body)}
 
     @staticmethod
+    def governed_rerender_visual_partition(
+        *,
+        authority: CombinedReplacementBudgetAuthority,
+        reservation: MR1MonthlyBudgetReservation,
+        production_visual_policy_ref: str,
+        production_visual_policy_hash: str,
+        image_owner_count: int,
+        video_owner_count: int,
+    ) -> dict[str, Any]:
+        """Bind one governed rerender to already-occupied visual partitions.
+
+        A controlled rerender is a replacement effect of the same project, not
+        a second MR1 run.  Its durable owner counts are therefore charged only
+        against the Gemini/Veo partitions that were frozen before narration.
+        This function deliberately validates the complete aggregate envelope
+        before returning a zero-additional-occupancy child binding.
+        """
+
+        if image_owner_count < 0 or video_owner_count < 0:
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID"
+            )
+        binding = CombinedReplacementBudgetAuthorityService.provider_execution_binding(
+            authority
+        )
+        preflight = dict((authority.source_refs or {}).get("ai_visual_preflight") or {})
+        preflight_body = {
+            key: value for key, value in preflight.items() if key != "content_hash"
+        }
+        image_unit, video_unit, current_prices = _current_visual_prices()
+        aggregate_allocations = {
+            "elevenlabs": _money_text(
+                _money(
+                    authority.new_tts_projected_cost_usd
+                    + authority.forced_alignment_projected_cost_usd,
+                    code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID",
+                )
+            ),
+            **(
+                {
+                    V2_AI_VISUAL_PROVIDER_KEY: _money_text(
+                        _money(
+                            authority.ai_image_projected_cost_usd,
+                            code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID",
+                        )
+                    )
+                }
+                if Decimal(authority.ai_image_projected_cost_usd) > 0
+                else {}
+            ),
+            **(
+                {
+                    V2_AI_VISUAL_VIDEO_PROVIDER_KEY: _money_text(
+                        _money(
+                            authority.ai_video_projected_cost_usd,
+                            code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID",
+                        )
+                    )
+                }
+                if Decimal(authority.ai_video_projected_cost_usd) > 0
+                else {}
+            ),
+        }
+        reservation_allocations = {
+            str(key): _money_text(
+                _money(
+                    value,
+                    code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID",
+                )
+            )
+            for key, value in dict(reservation.provider_allocations_json or {}).items()
+        }
+        image_cost = _money(
+            image_unit * image_owner_count,
+            code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID",
+        )
+        video_cost = _money(
+            video_unit * video_owner_count,
+            code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID",
+        )
+        visual_allocations = {
+            **(
+                {V2_AI_VISUAL_PROVIDER_KEY: _money_text(image_cost)}
+                if image_cost > 0
+                else {}
+            ),
+            **(
+                {V2_AI_VISUAL_VIDEO_PROVIDER_KEY: _money_text(video_cost)}
+                if video_cost > 0
+                else {}
+            ),
+        }
+        expected_total = _money(
+            authority.new_tts_projected_cost_usd
+            + authority.forced_alignment_projected_cost_usd
+            + authority.ai_image_projected_cost_usd
+            + authority.ai_video_projected_cost_usd
+            + authority.other_metered_effects_projected_cost_usd,
+            code="COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_INVALID",
+        )
+        if (
+            authority.state != "FROZEN"
+            or authority.video_project_id != reservation.video_project_id
+            or authority.budget_reservation_id != reservation.id
+            or authority.budget_reservation_ref != reservation.reservation_ref
+            or authority.combined_replacement_projected_cost_usd != expected_total
+            or Decimal(reservation.reserved_amount) != expected_total
+            or reservation_allocations != aggregate_allocations
+            or sum(
+                (Decimal(value) for value in reservation_allocations.values()),
+                Decimal("0"),
+            )
+            != expected_total
+            or preflight.get("content_hash") != content_hash(preflight_body)
+            or preflight.get("state") != "FROZEN"
+            or preflight.get("execution_kind") != "NORMAL_PRODUCTION"
+            or preflight.get("visual_authority_kind")
+            != "UNIFIED_AI_VISUAL_PLANNER_PRE_TTS"
+            or preflight.get("production_visual_policy_ref")
+            != production_visual_policy_ref
+            or preflight.get("production_visual_policy_hash")
+            != production_visual_policy_hash
+            or production_visual_policy_hash != _active_visual_policy_hash()
+            or preflight.get("pricing_authorities") != current_prices
+            or int(preflight.get("unique_ai_image_asset_slot_count", -1))
+            < image_owner_count
+            or int(preflight.get("unique_ai_video_asset_slot_count", -1))
+            < video_owner_count
+            or image_cost > Decimal(authority.ai_image_projected_cost_usd)
+            or video_cost > Decimal(authority.ai_video_projected_cost_usd)
+            or Decimal(
+                reservation_allocations.get(V2_AI_VISUAL_PROVIDER_KEY, "0")
+            )
+            < image_cost
+            or Decimal(
+                reservation_allocations.get(V2_AI_VISUAL_VIDEO_PROVIDER_KEY, "0")
+            )
+            < video_cost
+            or reservation.status
+            not in {"RESERVED", "SUBMITTED", "SETTLED_CONSERVATIVE"}
+        ):
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_GOVERNED_RERENDER_PARTITION_REQUIRED"
+            )
+        body = {
+            "schema_version": "vcos.governed-rerender-visual-partition.v1",
+            "execution_kind": "GOVERNED_RERENDER",
+            "occupancy": "ZERO_ADDITIONAL_MR1_OCCUPANCY",
+            "combined_replacement_budget_authority": binding,
+            "aggregate_reservation_id": str(reservation.id),
+            "aggregate_reservation_ref": reservation.reservation_ref,
+            "aggregate_provider_allocations_usd": aggregate_allocations,
+            "visual_provider_allocations_usd": visual_allocations,
+            "maximum_image_submissions": image_owner_count,
+            "maximum_video_submissions": video_owner_count,
+            "maximum_total_cost_usd": _money_text(image_cost + video_cost),
+        }
+        return {**body, "content_hash": content_hash(body)}
+
+    @staticmethod
     def _validate_normal_preflight(
         *,
         preflight: Mapping[str, Any],

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import DatabaseError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -37,6 +37,8 @@ from app.services.combined_replacement_budget import (
     CombinedReplacementBudgetAuthorityService,
     _active_visual_policy_hash,
 )
+from app.services.ai_visual_rerender_authority import AI_VISUAL_POLICY_REF
+from app.services.ai_visual_rerender_recovery import AIVisualRerenderRecoveryService
 from app.services.config_registry import content_hash
 from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
 from app.services.v2_elevenlabs_narration import V2ElevenLabsNarrationAdapter
@@ -661,6 +663,142 @@ def test_governed_rerender_uses_durable_visual_authority_not_section_count() -> 
     assert Decimal(governed["ai_image_projected_cost_usd"]) <= Decimal(
         governed["maximum_total_cost_usd"]
     )
+
+
+def test_postgresql_governed_rerender_partition_reuses_aggregate_mr1_capacity(
+    db_session,
+) -> None:
+    """The governed visual child consumes an existing, exact MR1 envelope."""
+
+    lineage = _db_voice_lineage(db_session)
+    service = CombinedReplacementBudgetAuthorityService(
+        db_session,
+        settings=SimpleNamespace(
+            elevenlabs_tts_cost_per_character_usd=Decimal("0.010000"),
+            elevenlabs_forced_alignment_cost_usd=Decimal("0.250000"),
+        ),
+    )
+    policy_hash = _active_visual_policy_hash()
+    preflight = service.compile_normal_visual_preflight(
+        project_id=lineage.project.id,
+        projection=lineage.projection,
+        canonical_narration=lineage.narration,
+        estimated_duration_ms=60_000,
+        production_visual_policy_ref=AI_VISUAL_POLICY_REF,
+        production_visual_policy_hash=policy_hash,
+        maximum_image_submissions=128,
+        maximum_video_submissions=128,
+    )
+    allocations = {
+        key: Decimal(value)
+        for key, value in preflight["provider_allocations_usd"].items()
+    }
+    evidence = MR1MonthlyBudgetAuthority(db_session).reserve_run(
+        run_id=uuid.uuid4(),
+        project_id=lineage.project.id,
+        reservation_amount_usd=Decimal(
+            preflight["combined_replacement_projected_cost_usd"]
+        ),
+        environment_cap_usd=Decimal("100.000000"),
+        company_cap_usd=Decimal("100.000000"),
+        channel_cap_usd=Decimal("100.000000"),
+        provider_allocations_usd=allocations,
+        provider_caps_usd={key: Decimal("100.000000") for key in allocations},
+        provider_aliases={key: [key] for key in allocations},
+    )
+    db_session.commit()
+    combined = service.freeze(
+        project_id=lineage.project.id,
+        reservation_ref=evidence["reservation_ref"],
+        support_envelope_hash=_hash("governed-partition-support"),
+        route_budget_authority_hash=_hash("governed-partition-route"),
+        projection=lineage.projection,
+        canonical_narration=lineage.narration,
+        visual_policy_hash=policy_hash,
+        visual_preflight=preflight,
+        routes=[
+            SimpleNamespace(
+                stage="MEDIA", paid_provider_call=True, route_hash=_hash("media")
+            ),
+            SimpleNamespace(
+                stage="VISUAL", paid_provider_call=True, route_hash=_hash("visual")
+            ),
+            SimpleNamespace(
+                stage="RENDER", paid_provider_call=False, route_hash=_hash("render")
+            ),
+            SimpleNamespace(
+                stage="QC", paid_provider_call=False, route_hash=_hash("qc")
+            ),
+            SimpleNamespace(
+                stage="ARCHIVE", paid_provider_call=False, route_hash=_hash("archive")
+            ),
+        ],
+        approved_ceiling_usd=Decimal("10.000000"),
+    )
+    db_session.commit()
+    reservation = db_session.get(
+        MR1MonthlyBudgetReservation, combined.budget_reservation_id
+    )
+    assert reservation is not None
+    before_count = db_session.scalar(select(func.count(MR1MonthlyBudgetReservation.id)))
+    before_capacity = dict(
+        reservation.capacity_evidence_json["after_reservation"]
+    )
+    image_count = int(preflight["unique_ai_image_asset_slot_count"])
+    video_count = int(preflight["unique_ai_video_asset_slot_count"])
+
+    recovery = AIVisualRerenderRecoveryService(
+        db_session,
+        settings=SimpleNamespace(),
+    )
+    scope = SimpleNamespace(
+        combined_budget_authority=combined,
+        source_media_budget=reservation,
+    )
+    partition = recovery._require_governed_combined_visual_partition(
+        scope,
+        image_count=image_count,
+        video_count=video_count,
+    )
+
+    assert db_session.scalar(select(func.count(MR1MonthlyBudgetReservation.id))) == before_count
+    db_session.refresh(reservation)
+    assert reservation.capacity_evidence_json["after_reservation"] == before_capacity
+    assert partition["occupancy"] == "ZERO_ADDITIONAL_MR1_OCCUPANCY"
+    assert partition["aggregate_reservation_id"] == str(reservation.id)
+    assert partition["aggregate_reservation_ref"] == reservation.reservation_ref
+    assert partition["aggregate_provider_allocations_usd"] == (
+        reservation.provider_allocations_json
+    )
+    assert partition["visual_provider_allocations_usd"].get(
+        "google_gemini_image"
+    ) == preflight["ai_image_projected_cost_usd"]
+    if video_count:
+        assert partition["visual_provider_allocations_usd"]["google_veo"] == (
+            preflight["ai_video_projected_cost_usd"]
+        )
+
+    incomplete_reservation = SimpleNamespace(
+        id=reservation.id,
+        video_project_id=reservation.video_project_id,
+        reservation_ref=reservation.reservation_ref,
+        reserved_amount=reservation.reserved_amount,
+        provider_allocations_json={"elevenlabs": str(reservation.reserved_amount)},
+        status=reservation.status,
+    )
+    with pytest.raises(
+        ValidationFailureError,
+        match="AI_VISUAL_RERENDER_COMBINED_VISUAL_PARTITION_REQUIRED",
+    ):
+        recovery._require_governed_combined_visual_partition(
+            SimpleNamespace(
+                combined_budget_authority=combined,
+                source_media_budget=incomplete_reservation,
+            ),
+            image_count=image_count,
+            video_count=video_count,
+        )
+    assert db_session.scalar(select(func.count(MR1MonthlyBudgetReservation.id))) == before_count
 
 
 def test_real_postgresql_segment_ledger_reconciles_and_never_resends(db_session) -> None:

@@ -21,6 +21,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import (
@@ -42,8 +43,12 @@ from app.db.models.v2_effect import (
     V2NarrationTimingRecoveryAuthority,
     V2NarrationTimingRecoveryReceipt,
 )
+from app.db.models.voice_authority import CombinedReplacementBudgetAuthority
 from app.db.models.workflow import Artifact, ArtifactVersion
 from app.services.config_registry import ConfigRegistryService
+from app.services.combined_replacement_budget import (
+    CombinedReplacementBudgetAuthorityService,
+)
 from app.services.google_veo_catalog import GoogleVeoModelPriceCatalog
 from app.services.production_package import ProductionPackageService, semantic_hash
 from app.services.v2_ai_visual_provider import (
@@ -110,6 +115,8 @@ class GovernedAIVisualRerenderExecutionAuthority:
     source_workflow: ProductionWorkflowRun
     replacement_workflow: ProductionWorkflowRun
     budget: MR1MonthlyBudgetReservation
+    combined_budget_authority: CombinedReplacementBudgetAuthority
+    visual_partition: dict[str, Any]
     provider_plan: dict[str, Any]
     budget_plan: dict[str, Any]
 
@@ -214,8 +221,38 @@ def resolve_governed_ai_visual_rerender_execution_authority(
     budget = session.get(MR1MonthlyBudgetReservation, authority.budget_reservation_id)
     if source is None or budget is None:
         raise ValidationFailureError("AI_VISUAL_RERENDER_SOURCE_AUTHORITY_MISSING")
+    combined = session.scalar(
+        select(CombinedReplacementBudgetAuthority).where(
+            CombinedReplacementBudgetAuthority.video_project_id
+            == authority.video_project_id,
+            CombinedReplacementBudgetAuthority.budget_reservation_id == budget.id,
+            CombinedReplacementBudgetAuthority.budget_reservation_ref
+            == budget.reservation_ref,
+            CombinedReplacementBudgetAuthority.content_hash
+            == authority.budget_authority_hash,
+        )
+    )
+    if combined is None:
+        raise ValidationFailureError(
+            "AI_VISUAL_RERENDER_COMBINED_BUDGET_AUTHORITY_REQUIRED"
+        )
 
     policy = active_ai_visual_policy_authority()
+    try:
+        visual_partition = (
+            CombinedReplacementBudgetAuthorityService.governed_rerender_visual_partition(
+                authority=combined,
+                reservation=budget,
+                production_visual_policy_ref=str(policy["ref"]),
+                production_visual_policy_hash=str(policy["hash"]),
+                image_owner_count=authority.maximum_image_submissions,
+                video_owner_count=authority.maximum_video_submissions,
+            )
+        )
+    except ValidationFailureError as exc:
+        raise ValidationFailureError(
+            "AI_VISUAL_RERENDER_COMBINED_VISUAL_PARTITION_REQUIRED"
+        ) from exc
     _validate_exact_authority(
         session=session,
         authority=authority,
@@ -223,6 +260,8 @@ def resolve_governed_ai_visual_rerender_execution_authority(
         source=source,
         replacement=replacement,
         budget=budget,
+        combined=combined,
+        visual_partition=visual_partition,
         policy=policy,
     )
     final_review = _source_final_review_projection(session, source=source)
@@ -231,6 +270,8 @@ def resolve_governed_ai_visual_rerender_execution_authority(
         visual_run=visual_run,
         replacement=replacement,
         budget=budget,
+        combined=combined,
+        visual_partition=visual_partition,
         policy=policy,
         final_review=final_review,
     )
@@ -240,6 +281,8 @@ def resolve_governed_ai_visual_rerender_execution_authority(
         source_workflow=source,
         replacement_workflow=replacement,
         budget=budget,
+        combined_budget_authority=combined,
+        visual_partition=visual_partition,
         provider_plan=provider_plan,
         budget_plan=budget_plan,
     )
@@ -253,6 +296,8 @@ def _validate_exact_authority(
     source: ProductionWorkflowRun,
     replacement: ProductionWorkflowRun,
     budget: MR1MonthlyBudgetReservation,
+    combined: CombinedReplacementBudgetAuthority,
+    visual_partition: Mapping[str, Any],
     policy: Mapping[str, Any],
 ) -> None:
     timing = session.get(
@@ -266,13 +311,26 @@ def _validate_exact_authority(
     old_candidate = session.get(
         FinalReviewCandidate, authority.rejected_final_review_candidate_id
     )
-    capacity = dict(budget.capacity_evidence_json or {})
     allocations = {
         str(key): Decimal(str(value))
         for key, value in dict(budget.provider_allocations_json or {}).items()
     }
     durable_allocations = _durable_visual_allocations(authority)
     durable_total = sum(durable_allocations.values(), Decimal("0"))
+    aggregate_allocations = {
+        "elevenlabs": Decimal(combined.new_tts_projected_cost_usd)
+        + Decimal(combined.forced_alignment_projected_cost_usd),
+        **(
+            {"google_gemini_image": Decimal(combined.ai_image_projected_cost_usd)}
+            if Decimal(combined.ai_image_projected_cost_usd) > 0
+            else {}
+        ),
+        **(
+            {"google_veo": Decimal(combined.ai_video_projected_cost_usd)}
+            if Decimal(combined.ai_video_projected_cost_usd) > 0
+            else {}
+        ),
+    }
     if (
         authority.authority_hash != seal_ai_visual_rerender_authority_hash(authority)
         or authority.authorized_visual_production_run_id != visual_run.id
@@ -321,16 +379,26 @@ def _validate_exact_authority(
         or authority.automatic_publish is not False
         or budget.id != visual_run.budget_reservation_id
         or budget.id != authority.budget_reservation_id
-        or budget.run_id != visual_run.id
+        or budget.run_id != source.id
         or budget.video_project_id != authority.video_project_id
         or budget.company_id != replacement.company_id
         or budget.channel_workspace_id != replacement.channel_workspace_id
         or budget.reservation_ref != authority.budget_reservation_ref
         or visual_run.budget_reservation_ref != authority.budget_reservation_ref
-        or capacity.get("content_hash") != authority.budget_authority_hash
+        or authority.budget_authority_hash != combined.content_hash
         or visual_run.budget_authority_hash != authority.budget_authority_hash
-        or Decimal(budget.reserved_amount) != durable_total
-        or allocations != durable_allocations
+        or Decimal(budget.reserved_amount)
+        != Decimal(combined.combined_replacement_projected_cost_usd)
+        or allocations != aggregate_allocations
+        or durable_allocations
+        != {
+            key: Decimal(value)
+            for key, value in dict(
+                visual_partition.get("visual_provider_allocations_usd") or {}
+            ).items()
+        }
+        or Decimal(visual_partition.get("maximum_total_cost_usd", "-1"))
+        != durable_total
         or budget.status not in _ALLOWED_BUDGET_STATES
         or timing is None
         or timing_receipt is None
@@ -419,6 +487,8 @@ def _derived_operation_plans(
     visual_run: AIVisualProductionRun,
     replacement: ProductionWorkflowRun,
     budget: MR1MonthlyBudgetReservation,
+    combined: CombinedReplacementBudgetAuthority,
+    visual_partition: Mapping[str, Any],
     policy: Mapping[str, Any],
     final_review: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -473,6 +543,18 @@ def _derived_operation_plans(
                 "idempotency_key": f"{operation_id}:ai-visual-asset-set",
                 "estimated_cost_usd": max_cost,
                 "budget_reservation_ref": budget.reservation_ref,
+                "combined_replacement_budget_authority": (
+                    visual_partition["combined_replacement_budget_authority"]
+                ),
+                "aggregate_budget_reservation_ref": budget.reservation_ref,
+                "aggregate_budget_authority_hash": combined.content_hash,
+                "visual_provider_allocations_usd": (
+                    visual_partition["visual_provider_allocations_usd"]
+                ),
+                "aggregate_provider_allocations_usd": (
+                    visual_partition["aggregate_provider_allocations_usd"]
+                ),
+                "mr1_occupancy": visual_partition["occupancy"],
                 "rerender_authority_hash": authority.authority_hash,
             }
         elif stage == "ARCHIVE":
@@ -580,6 +662,13 @@ def _derived_operation_plans(
         "budget_reservation_ref": budget.reservation_ref,
         "budget_authority_hash": authority.budget_authority_hash,
         "budget_status": budget.status,
+        "mr1_occupancy": visual_partition["occupancy"],
+        "visual_provider_allocations_usd": copy.deepcopy(
+            dict(visual_partition["visual_provider_allocations_usd"])
+        ),
+        "aggregate_provider_allocations_usd": copy.deepcopy(
+            dict(visual_partition["aggregate_provider_allocations_usd"])
+        ),
         "provider_allocations_usd": copy.deepcopy(
             dict(budget.provider_allocations_json or {})
         ),
