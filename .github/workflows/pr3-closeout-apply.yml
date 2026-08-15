@@ -1,4 +1,5 @@
 name: Apply PR3 Closeout Hardening
+# retry-generation: 3
 
 on:
   push:
