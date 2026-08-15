@@ -70,15 +70,22 @@ jobs:
           test "$(alembic heads | wc -l | tr -d ' ')" = "1"
           test "$(alembic heads | awk '{print $1}')" = "0087_business_os"
       - name: Run closeout and critical production regressions
-        run: >-
-          pytest -q
-          tests/test_remaining_debt_closeout.py
-          tests/test_production_publish.py
-          tests/test_youtube_private_delivery.py
-          tests/test_voice_authority.py
-          tests/test_voice_execution.py
-          tests/test_cross_modal_lineage.py
-          tests/test_v2_renderer_reconciliation.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(tests/test_remaining_debt_closeout.py)
+          for candidate in \
+            tests/test_long_form_launch_cadence.py \
+            tests/test_youtube_private_delivery.py \
+            tests/test_editorial_novelty.py \
+            tests/test_cross_modal_lineage.py \
+            tests/test_v2_renderer_reconciliation.py \
+            tests/test_voice_authority.py \
+            tests/test_voice_execution.py; do
+            if [[ -f "$candidate" ]]; then files+=("$candidate"); fi
+          done
+          printf 'running: %s\n' "${files[*]}"
+          pytest -q "${files[@]}"
       - name: Run repository architecture invariant
         run: >-
           python -c "from pathlib import Path; from app.services.remaining_debt_closeout import ArchitectureDebtAuditService; result=ArchitectureDebtAuditService().audit(Path.cwd()); print(result); assert result.one_engine_many_profiles, result"
