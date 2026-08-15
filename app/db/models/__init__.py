@@ -288,6 +288,7 @@ from app.db.models.v2_effect import (
 from app.db.models.voice_authority import (
     ApprovedVoicePool,
     NarrationPerformancePlan,
+    NarrationSegmentExecution,
     NarrationVoiceSnapshot,
     SeriesNarratorBinding,
     TTSPerformanceProjection,
@@ -313,6 +314,7 @@ __all__ = [
     "SeriesNarratorBinding",
     "NarrationVoiceSnapshot",
     "NarrationPerformancePlan",
+    "NarrationSegmentExecution",
     "TTSPerformanceProjection",
     "ClaimEvidenceLedger",
     "EpisodeOriginalityManifest",

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
+import uuid
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from sqlalchemy import select
 
@@ -17,16 +19,18 @@ from app.contracts.production_workflow import (
     WorkflowFailureClassification,
     WorkflowStageResult,
 )
-from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.contracts.temporal_authority import NarrationTimingSeed
+from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.config import Settings, get_settings
 from app.core.errors import ValidationFailureError
+from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.config_registry import content_hash
-from app.services.cqr1_real_provider import ElevenLabsConvertWithTimestampsClient
+from app.services.cqr1_real_provider import (
+    ElevenLabsConvertWithTimestampsClient,
+    ElevenLabsForcedAlignmentClient,
+)
 from app.services.mr1_provider_gateways import _temporal_normalized
 from app.services.production_workflow import WorkflowStageContext, WorkflowStageError
-from app.services.workflow import ArtifactService
-from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.v2_native_effects import (
     V2_ELEVENLABS_NARRATION_STRATEGY,
     V2_TIMELINE_SCHEMA,
@@ -43,7 +47,18 @@ from app.services.v2_provider_production import (
     V2AuthorizedAdapterOperation,
     V2ProductionAdapterDescriptor,
 )
-
+from app.services.voice_execution import (
+    AudioStitchCompiler,
+    CombinedReplacementBudget,
+    NarrationSegmentExecutionService,
+    combined_replacement_budget_authority,
+    elevenlabs_capability,
+    frozen_voice_authority_gate,
+    narration_text_fidelity_gate,
+    provider_text_projection,
+    seam_qc,
+)
+from app.services.workflow import ArtifactService
 
 V2_ELEVENLABS_NARRATION_ADAPTER_KEY = "v2-elevenlabs-narration"
 V2_TRANSCRIPT_ARTIFACT_TYPE = "v2_transcript"
@@ -54,6 +69,104 @@ V2_SIDECAR_SCHEMA = "vcos.v2-sidecar-srt.v1"
 V2_ELEVENLABS_PROVIDER_RESPONSE_JOURNAL_SCHEMA = (
     "vcos.v2-elevenlabs-provider-response.v1"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _NarrationSegmentAudio:
+    """Provider output or reconciliation evidence for one exact segment."""
+
+    audio_path: Path
+    audio_asset_ref: str
+    audio_sha256: str
+    audio_duration_ms: int
+    request_hash: str
+    provider_request_id: str
+    provider_effect_key: str
+    timing_seed: dict[str, Any]
+    usage_metadata: dict[str, Any]
+    estimated_cost_usd: Decimal
+    actual_cost_usd: Decimal | None = None
+
+
+def _timing_seed_from_forced_alignment(
+    *,
+    normalized: Any,
+    evidence: Any,
+    audio_asset_ref: str,
+    audio_duration_ms: int,
+    voice_id: str,
+    model_id: str,
+) -> NarrationTimingSeed:
+    """Make final forced alignment the only timing authority for stitched audio."""
+
+    matches = list(re.finditer(r"\S+", normalized.spoken_text))
+    if (
+        evidence.verification_status != "PASS"
+        or evidence.audio_asset_ref != audio_asset_ref
+        or evidence.audio_duration_ms != audio_duration_ms
+        or len(matches) != len(evidence.words)
+    ):
+        raise ValidationFailureError("FINAL_FORCED_ALIGNMENT_INVALID")
+    caption_words = []
+    previous_end = -1
+    for index, (match, word, token) in enumerate(
+        zip(matches, evidence.words, normalized.spoken_tokens, strict=True), start=1
+    ):
+        if (
+            word.source_spoken_token_ids != [token.token_id]
+            or word.start_ms < previous_end
+            or word.end_ms <= word.start_ms
+        ):
+            raise ValidationFailureError("FINAL_FORCED_ALIGNMENT_INVALID")
+        caption_words.append(
+            {
+                "index": index,
+                "text": match.group(),
+                "start_ms": word.start_ms,
+                "end_ms": word.end_ms,
+                "provider_word_id": word.word_id,
+                "source_spoken_token_ids": list(word.source_spoken_token_ids),
+            }
+        )
+        previous_end = word.end_ms
+    payload = {
+        "provider_key": "elevenlabs_forced_alignment_recovery",
+        "provider_request_id": evidence.provider_request_id,
+        "audio_asset_ref": audio_asset_ref,
+        "audio_duration_ms": audio_duration_ms,
+        "source_text_hash": normalized.source_text_hash,
+        "spoken_text_hash": normalized.spoken_text_hash,
+        "original_character_alignment": [
+            item.model_dump(mode="json") for item in evidence.characters
+        ],
+        "normalized_character_alignment": [
+            item.model_dump(mode="json") for item in evidence.characters
+        ],
+        "provider_model_id": model_id,
+        "provider_voice_id": voice_id,
+        "seed": None,
+        "voice_settings": {},
+        "pronunciation_dictionary_refs": [],
+        "response_metadata": {
+            "forced_alignment_evidence_hash": evidence.content_hash,
+            "exact_character_coverage": True,
+            "exact_token_coverage": True,
+            "alignment_audit": {
+                "exact_raw_character_sequence": True,
+                "exact_word_token_coverage": True,
+                "zero_duration_character_timing_synthesized": False,
+                "caption_timing_source": "ELEVENLABS_FORCED_ALIGNMENT_WORD_BOUNDARIES",
+                "provider_word_count": len(caption_words),
+                "canonical_spoken_token_count": len(caption_words),
+            },
+            "caption_timed_words": caption_words,
+            "interpolation_used": False,
+            "estimation_used": False,
+        },
+        "timing_available": True,
+        "timing_parse_warnings": list(evidence.warnings),
+    }
+    return NarrationTimingSeed(**payload, content_hash=content_hash(payload))
 
 
 class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
@@ -80,11 +193,17 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
         *,
         settings: Settings | None = None,
         client: ElevenLabsConvertWithTimestampsClient | None = None,
+        client_factory: Any | None = None,
+        forced_alignment_client_factory: Any | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._settings = settings or get_settings()
         self._client = client or ElevenLabsConvertWithTimestampsClient()
+        self._client_factory = client_factory or ElevenLabsConvertWithTimestampsClient
+        self._forced_alignment_client_factory = (
+            forced_alignment_client_factory or ElevenLabsForcedAlignmentClient
+        )
 
     def _validate_operation(
         self,
@@ -99,7 +218,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             or operation.adapter_key != V2_ELEVENLABS_NARRATION_ADAPTER_KEY
             or operation.execution_mode != "REAL_LONG_FORM_PRODUCTION"
             or operation.paid_provider_call is not True
-            or operation.max_cost_usd <= Decimal("0")
+            or operation.max_cost_usd <= Decimal(0)
             or operation.parameters.get("mode") != "ELEVENLABS_FINAL_NARRATION"
             or operation.parameters.get("audio_strategy")
             != V2_ELEVENLABS_NARRATION_STRATEGY
@@ -114,6 +233,111 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             or not isinstance(details.get("voice_settings"), dict)
         ):
             raise ValidationFailureError("V2_ELEVENLABS_NARRATION_OPERATION_INVALID")
+        self._validate_frozen_voice_authority(context=context, details=details)
+
+    @staticmethod
+    def _validate_frozen_voice_authority(
+        *, context: WorkflowStageContext, details: dict[str, Any]
+    ) -> None:
+        """Resolve exact persisted voice truth; environment is never authority."""
+
+        # The script hash was sealed by package readiness.  Binding every
+        # source object here closes the former gap where an operation carried
+        # IDs but the real media adapter still trusted global voice config.
+        try:
+            frozen_voice_authority_gate(
+                authority=details,
+                script_hash=str(details["qualified_script_hash"]),
+                voice_id=str(details["voice_id"]),
+                model_id=str(details["model_id"]),
+            )
+            from app.db.models.voice_authority import (
+                ApprovedVoicePool,
+                CombinedReplacementBudgetAuthority,
+                NarrationPerformancePlan,
+                NarrationVoiceSnapshot,
+                TTSPerformanceProjection,
+                VoiceCastingDecision,
+            )
+
+            pool = context.session.get(
+                ApprovedVoicePool, uuid.UUID(str(details["approved_voice_pool_id"]))
+            )
+            casting = context.session.get(
+                VoiceCastingDecision,
+                uuid.UUID(str(details["voice_casting_decision_id"])),
+            )
+            snapshot = context.session.get(
+                NarrationVoiceSnapshot,
+                uuid.UUID(str(details["narration_voice_snapshot_id"])),
+            )
+            performance = context.session.get(
+                NarrationPerformancePlan,
+                uuid.UUID(str(details["narration_performance_plan_id"])),
+            )
+            projection = context.session.get(
+                TTSPerformanceProjection,
+                uuid.UUID(str(details["tts_performance_projection_id"])),
+            )
+            raw_budget_authority = details.get(
+                "combined_replacement_budget_authority"
+            )
+            if not isinstance(raw_budget_authority, Mapping):
+                raise TypeError("combined replacement budget authority missing")
+            _budget, budget_ref, budget_hash = combined_replacement_budget_authority(
+                raw_budget_authority
+            )
+            budget_authority = context.session.get(
+                CombinedReplacementBudgetAuthority,
+                uuid.UUID(str(raw_budget_authority["authority_id"])),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "REAL_PRODUCTION_VOICE_AUTHORITY_REQUIRED"
+            ) from exc
+        if (
+            pool is None
+            or casting is None
+            or snapshot is None
+            or performance is None
+            or projection is None
+            or pool.content_hash != details["approved_voice_pool_hash"]
+            or casting.content_hash != details["voice_casting_decision_hash"]
+            or snapshot.content_hash != details["narration_voice_snapshot_hash"]
+            or performance.content_hash != details["narration_performance_plan_hash"]
+            or projection.content_hash != details["tts_performance_projection_hash"]
+            or casting.video_project_id != context.run.video_project_id
+            or snapshot.video_project_id != context.run.video_project_id
+            or performance.video_project_id != context.run.video_project_id
+            or projection.video_project_id != context.run.video_project_id
+            or snapshot.voice_casting_decision_id != casting.id
+            or snapshot.approved_voice_pool_id != pool.id
+            or performance.narration_voice_snapshot_id != snapshot.id
+            or projection.narration_performance_plan_id != performance.id
+            or projection.narration_voice_snapshot_id != snapshot.id
+            or snapshot.qualified_script_hash != details["qualified_script_hash"]
+            or snapshot.voice_id != details["voice_id"]
+            or snapshot.model_id != details["model_id"]
+            or projection.model_id != details["model_id"]
+            or projection.execution_strategy != details.get("tts_execution_strategy")
+            or projection.capability_profile_version
+            != details.get("capability_profile_version")
+            or budget_authority is None
+            or budget_authority.state != "FROZEN"
+            or budget_authority.authority_ref != budget_ref
+            or budget_authority.content_hash != budget_hash
+            or budget_authority.video_project_id != context.run.video_project_id
+            or budget_authority.tts_performance_projection_id != projection.id
+            or budget_authority.tts_performance_projection_hash
+            != projection.content_hash
+            or budget_authority.budget_reservation_ref
+            != details.get("budget_reservation_ref")
+            or budget_authority.route_budget_authority_hash
+            != raw_budget_authority.get("route_budget_authority_hash")
+            or budget_authority.support_envelope_hash
+            != details.get("package_support_envelope_hash")
+        ):
+            raise ValidationFailureError("REAL_PRODUCTION_VOICE_AUTHORITY_MISMATCH")
 
     def _produce_media(
         self,
@@ -133,6 +357,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             package=package,
             script=script,
             operation=operation,
+            video_project_id=project.id,
         )
         with self._session_factory() as session:
             persisted_project = session.get(VideoProject, project.id)
@@ -167,7 +392,11 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             "stage": "MEDIA",
             "state": "VERIFIED",
             "effect_invocation_count": 1,
-            "provider_call_count": 1,
+            "provider_call_count": audio["total_provider_call_count"],
+            "tts_provider_call_count": audio["tts_provider_call_count"],
+            "forced_alignment_provider_call_count": audio[
+                "forced_alignment_provider_call_count"
+            ],
             "timeline_relative_path": self._relative(timeline_path),
             "timeline_file_checksum": _sha256_file(timeline_path),
             "timeline_hash": timeline_hash,
@@ -175,13 +404,27 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             "audio_asset_ref": audio["audio_asset_ref"],
             "audio_checksum": audio["audio_checksum"],
             "audio_relative_path": audio["audio_relative_path"],
-            "audio_effect_invocation_count": 1,
+            "audio_effect_invocation_count": audio["tts_paid_effect_count"],
+            "tts_paid_effect_count": audio["tts_paid_effect_count"],
             "narration_present": True,
             "alignment_method": audio["alignment_method"],
             "provider_request_hash": audio["provider_request_hash"],
             "provider_request_id": audio.get("provider_request_id"),
             "estimated_cost_usd": audio["estimated_cost_usd"],
             "actual_cost_usd": audio["actual_cost_usd"],
+            "actual_cost_components_complete": audio[
+                "actual_cost_components_complete"
+            ],
+            "actual_cost_components_usd": audio["actual_cost_components_usd"],
+            "combined_replacement_budget_authority_ref": audio[
+                "combined_replacement_budget_authority_ref"
+            ],
+            "combined_replacement_budget_authority_hash": audio[
+                "combined_replacement_budget_authority_hash"
+            ],
+            "combined_replacement_budget_projection": audio[
+                "combined_replacement_budget_projection"
+            ],
             **sidecar,
         }
         _persist_exact_json(
@@ -203,6 +446,16 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
                     "alignment_method": audio["alignment_method"],
                     "provider_request_id": audio.get("provider_request_id"),
                     "actual_cost_usd": audio["actual_cost_usd"],
+                    "actual_cost_components_complete": audio[
+                        "actual_cost_components_complete"
+                    ],
+                    "tts_provider_call_count": audio["tts_provider_call_count"],
+                    "forced_alignment_provider_call_count": audio[
+                        "forced_alignment_provider_call_count"
+                    ],
+                    "combined_replacement_budget_authority_hash": audio[
+                        "combined_replacement_budget_authority_hash"
+                    ],
                     "caption_ref": sidecar["caption_ref"],
                     "caption_checksum": sidecar["caption_checksum"],
                     "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
@@ -421,59 +674,272 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
         package: Any,
         script: Any,
         operation: V2AuthorizedAdapterOperation,
+        video_project_id: Any,
     ) -> dict[str, Any]:
         details = dict(operation.parameters["provider_execution"])
         script_text = str((script.content or {}).get("narration_text") or "").strip()
         if not script_text:
             raise ValidationFailureError("V2_ELEVENLABS_APPROVED_SCRIPT_REQUIRED")
-        output = effect_dir / "elevenlabs-final-narration.mp3"
-        request_path = effect_dir / "elevenlabs-request-journal.json"
-        provider_response_path = (
-            effect_dir / "elevenlabs-provider-response-journal.json"
+        return self._prepare_projection_audio(
+            effect_dir=effect_dir,
+            command_id=command_id,
+            package=package,
+            script=script,
+            details=details,
+            operation=operation,
+            video_project_id=video_project_id,
         )
-        receipt_path = effect_dir / "elevenlabs-narration-receipt.json"
-        identity = {
-            "schema_version": "vcos.v2-elevenlabs-request.v1",
-            "command_id": command_id,
-            "idempotency_key": details["idempotency_key"],
-            "script_content_hash": script.content_hash,
-            "approved_script_hash": hashlib.sha256(script_text.encode()).hexdigest(),
-            "voice_id": details["voice_id"],
-            "model_id": details["model_id"],
-            "voice_settings": details["voice_settings"],
-            "estimated_cost_usd": str(operation.max_cost_usd),
-            "output_relative_path": self._relative(output),
-            "attempt_limit": 1,
-        }
-        if receipt_path.exists():
-            receipt = _load_json(receipt_path)
-            if (
-                any(receipt.get(key) != value for key, value in identity.items())
-                or not output.is_file()
-                or output.is_symlink()
-                or receipt.get("audio_checksum") != _sha256_file(output)
-            ):
-                raise ValidationFailureError("V2_ELEVENLABS_NARRATION_RECEIPT_MISMATCH")
-            return dict(receipt)
-        if request_path.exists():
-            prior = _load_json(request_path)
-            if any(prior.get(key) != value for key, value in identity.items()):
-                raise ValidationFailureError("V2_ELEVENLABS_REQUEST_JOURNAL_MISMATCH")
-            if output.is_file() and not output.is_symlink():
-                return self._reconcile_sealed_output(
-                    identity=identity,
-                    output=output,
-                    provider_response_path=provider_response_path,
-                    receipt_path=receipt_path,
-                    package=package,
-                )
-            raise WorkflowStageError(
-                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
-                error_code="V2_ELEVENLABS_OUTCOME_UNCERTAIN",
-                summary="An ElevenLabs request was submitted without a sealed output; no duplicate request was attempted.",
-                incident_type="PROVIDER_OUTCOME_UNCERTAIN",
-                retry_eligible=False,
+
+    def _prepare_projection_audio(
+        self,
+        *,
+        effect_dir: Path,
+        command_id: str,
+        package: Any,
+        script: Any,
+        details: dict[str, Any],
+        operation: V2AuthorizedAdapterOperation,
+        video_project_id: Any,
+    ) -> dict[str, Any]:
+        """Execute the exact frozen projection, one paid effect per segment."""
+
+        script_text = str((script.content or {}).get("narration_text") or "").strip()
+        with self._session_factory() as session:
+            from app.db.models.voice_authority import TTSPerformanceProjection
+
+            projection = session.get(
+                TTSPerformanceProjection, details["tts_performance_projection_id"]
             )
+            if (
+                projection is None
+                or projection.content_hash != details["tts_performance_projection_hash"]
+                or projection.video_project_id != video_project_id
+            ):
+                raise ValidationFailureError("REAL_PRODUCTION_VOICE_AUTHORITY_MISMATCH")
+            raw_segments = list(projection.segments)
+        raw_segments.sort(key=lambda item: int(item["ordinal"]))
+        materialized: list[dict[str, Any]] = []
+        for index, segment in enumerate(raw_segments):
+            start, end = (
+                int(segment["source_text_start"]),
+                int(segment["source_text_end"]),
+            )
+            text = script_text[start:end]
+            materialized.append(
+                {
+                    **segment,
+                    "segment_index": index,
+                    "source_text_start": start,
+                    "source_text_end": end,
+                    "text_hash": content_hash({"text": text}),
+                    "canonical_text": text,
+                }
+            )
+        narration_text_fidelity_gate(canonical_text=script_text, segments=materialized)
+        raw_budget_authority = details.get("combined_replacement_budget_authority")
+        if not isinstance(raw_budget_authority, Mapping):
+            raise ValidationFailureError("COMBINED_REPLACEMENT_BUDGET_AUTHORITY_REQUIRED")
+        budget, budget_authority_ref, budget_authority_hash = (
+            combined_replacement_budget_authority(raw_budget_authority)
+        )
+        if budget.new_tts_projected_cost_usd <= 0:
+            raise ValidationFailureError("COMBINED_REPLACEMENT_TTS_COST_REQUIRED")
+        budget.require_authorized()
+        api_key = self._api_key_or_block()
+        capability = elevenlabs_capability(str(details["model_id"]))
+        if capability.supports_audio_tags:
+            # No markup projection has been approved yet.  Sending plain text
+            # would silently discard the frozen performance semantics.
+            raise ValidationFailureError(
+                "ELEVEN_V3_GOVERNED_EXPRESSIVE_EXECUTION_UNSUPPORTED"
+            )
+        effects = NarrationSegmentExecutionService(self._session_factory)
+        executions: list[_NarrationSegmentAudio] = []
+        estimated_tts = budget.new_tts_projected_cost_usd
+        for index, segment in enumerate(materialized):
+            context: dict[str, Any] = {}
+            if index:
+                context["previous_text"] = materialized[index - 1]["canonical_text"]
+            if index + 1 < len(materialized):
+                context["next_text"] = materialized[index + 1]["canonical_text"]
+            if (
+                projection.execution_strategy == "CONTEXT_STITCHED_MULTI_REQUEST"
+                and executions
+            ):
+                request_id = executions[-1].provider_request_id
+                if request_id:
+                    context["previous_request_ids"] = [request_id]
+            provider_projection = provider_text_projection(
+                canonical_text=segment["canonical_text"],
+                context=context,
+                capability=capability,
+            )
+            settings = (
+                dict(segment["voice_settings"])
+                if capability.supports_voice_settings
+                else {}
+            )
+            output = effect_dir / f"narration-segment-{index:03d}.mp3"
+            effect = effects.intend_and_submit(
+                video_project_id=video_project_id,
+                authority=details,
+                segment=segment,
+                canonical_text=segment["canonical_text"],
+                provider_projection=provider_projection,
+                voice_id=str(details["voice_id"]),
+                model_id=str(details["model_id"]),
+                settings=settings,
+                context=context,
+                estimated_cost_usd=estimated_tts / len(materialized),
+            )
+            if effect.state == "VERIFIED":
+                executions.append(
+                    self._reconcile_verified_segment(
+                        effect=effect,
+                        effect_dir=effect_dir,
+                        estimated_cost_usd=estimated_tts / len(materialized),
+                    )
+                )
+                continue
+            client = self._client if index == 0 else self._client_factory()
+            normalized = _temporal_normalized(
+                {"normalized_text": segment["canonical_text"]}
+            )
+            try:
+                execution = client.execute_once(
+                    api_key=api_key,
+                    normalized=normalized,
+                    voice_id=str(details["voice_id"]),
+                    model_id=str(details["model_id"]),
+                    voice_settings=settings,
+                    provider_context={
+                        key: value
+                        for key, value in provider_projection.items()
+                        if key not in {"text", "apply_text_normalization"}
+                    },
+                    destination=output,
+                    audio_asset_ref=f"v2-elevenlabs://{effect.provider_effect_key}",
+                )
+            except Exception as exc:
+                effects.mark_unknown(effect_id=effect.id)
+                raise WorkflowStageError(
+                    classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                    error_code="V2_ELEVENLABS_PROVIDER_FAILURE",
+                    summary="A submitted narration segment has an uncertain provider outcome and was not retried.",
+                    incident_type="PROVIDER_OUTCOME_UNCERTAIN",
+                    retry_eligible=False,
+                ) from exc
+            effects.verify(
+                effect_id=effect.id,
+                provider_request_hash=execution.request_hash,
+                provider_request_id=execution.timing_seed.provider_request_id,
+                audio_ref=self._relative(output),
+                audio_checksum=execution.audio_sha256,
+                duration_ms=execution.audio_duration_ms,
+                timing_seed=execution.timing_seed.model_dump(mode="json"),
+                actual_cost_usd=self._actual_cost_from_usage(execution.usage_metadata),
+            )
+            executions.append(
+                _NarrationSegmentAudio(
+                    audio_path=execution.audio_path,
+                    audio_asset_ref=execution.audio_asset_ref,
+                    audio_sha256=execution.audio_sha256,
+                    audio_duration_ms=execution.audio_duration_ms,
+                    request_hash=execution.request_hash,
+                    provider_request_id=execution.timing_seed.provider_request_id,
+                    provider_effect_key=effect.provider_effect_key,
+                    timing_seed=execution.timing_seed.model_dump(mode="json"),
+                    usage_metadata=dict(execution.usage_metadata or {}),
+                    actual_cost_usd=self._actual_cost_from_usage(
+                        execution.usage_metadata
+                    ),
+                    estimated_cost_usd=estimated_tts / len(materialized),
+                )
+            )
+        return self._compile_canonical_projection_audio(
+            effect_dir=effect_dir,
+            package=package,
+            script_text=script_text,
+            details=details,
+            executions=executions,
+            materialized=materialized,
+            api_key=api_key,
+            budget=budget,
+            budget_authority_ref=budget_authority_ref,
+            budget_authority_hash=budget_authority_hash,
+        )
+
+    def _reconcile_verified_segment(
+        self,
+        *,
+        effect: Any,
+        effect_dir: Path,
+        estimated_cost_usd: Decimal,
+    ) -> _NarrationSegmentAudio:
+        """Resolve exactly the bytes sealed by a prior VERIFIED segment."""
+
+        if (
+            not effect.audio_ref
+            or not effect.audio_checksum
+            or not effect.duration_ms
+            or not effect.provider_request_hash
+            or not effect.provider_request_id
+            or not isinstance(effect.timing_seed, Mapping)
+        ):
+            raise ValidationFailureError("NARRATION_SEGMENT_RECONCILIATION_EVIDENCE_INVALID")
+        try:
+            audio_path = self._from_relative(str(effect.audio_ref))
+        except ValueError as exc:
+            raise ValidationFailureError(
+                "NARRATION_SEGMENT_RECONCILIATION_AUDIO_INVALID"
+            ) from exc
+        if (
+            not audio_path.is_file()
+            or audio_path.is_symlink()
+            or _sha256_file(audio_path) != effect.audio_checksum
+        ):
+            raise ValidationFailureError("NARRATION_SEGMENT_RECONCILIATION_AUDIO_INVALID")
+        from app.services.v2_native_effects import _probe_duration_ms
+
+        observed_duration_ms = _probe_duration_ms(self._builder.ffprobe, audio_path)
+        if observed_duration_ms != int(effect.duration_ms):
+            raise ValidationFailureError("NARRATION_SEGMENT_RECONCILIATION_AUDIO_INVALID")
+        return _NarrationSegmentAudio(
+            audio_path=audio_path,
+            audio_asset_ref=f"v2-elevenlabs://{effect.provider_effect_key}",
+            audio_sha256=str(effect.audio_checksum),
+            audio_duration_ms=int(effect.duration_ms),
+            request_hash=str(effect.provider_request_hash),
+            provider_request_id=str(effect.provider_request_id),
+            provider_effect_key=str(effect.provider_effect_key),
+            timing_seed=dict(effect.timing_seed),
+            usage_metadata={},
+            estimated_cost_usd=Decimal(
+                str(effect.estimated_cost_usd or estimated_cost_usd)
+            ),
+            actual_cost_usd=(
+                Decimal(str(effect.actual_cost_usd))
+                if effect.actual_cost_usd is not None
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _actual_cost_from_usage(usage_metadata: Any) -> Decimal | None:
+        if not isinstance(usage_metadata, Mapping):
+            return None
+        value = usage_metadata.get("actual_cost_usd")
+        if value is None:
+            return None
+        try:
+            cost = Decimal(str(value))
+        except Exception as exc:
+            raise ValidationFailureError("NARRATION_SEGMENT_ACTUAL_COST_INVALID") from exc
+        if not cost.is_finite() or cost < 0:
+            raise ValidationFailureError("NARRATION_SEGMENT_ACTUAL_COST_INVALID")
+        return cost
+
+    def _api_key_or_block(self) -> str:
         api_key = (
             self._settings.elevenlabs_api_key.get_secret_value()
             if self._settings.elevenlabs_api_key is not None
@@ -483,63 +949,235 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             raise WorkflowStageError(
                 classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
                 error_code="V2_REAL_ELEVENLABS_BLOCKED_CREDENTIAL",
-                summary="ElevenLabs credential is unavailable; no local narration fallback was attempted.",
+                summary="ElevenLabs credential is unavailable; no narration request was attempted.",
                 incident_type="CREDENTIAL_MISSING",
                 retry_eligible=False,
             )
-        _write_json_atomic(request_path, {**identity, "state": "SUBMITTED"})
-        normalized = _temporal_normalized({"normalized_text": script_text})
-        try:
-            execution = self._client.execute_once(
-                api_key=api_key,
-                normalized=normalized,
-                voice_id=details["voice_id"],
-                model_id=details["model_id"],
-                voice_settings=details["voice_settings"],
-                destination=output,
-                audio_asset_ref=f"v2-elevenlabs://{details['idempotency_key']}",
+        return api_key
+
+    def _compile_canonical_projection_audio(
+        self,
+        *,
+        effect_dir: Path,
+        package: Any,
+        script_text: str,
+        details: dict[str, Any],
+        executions: Sequence[Any],
+        materialized: Sequence[dict[str, Any]],
+        api_key: str,
+        budget: CombinedReplacementBudget,
+        budget_authority_ref: str,
+        budget_authority_hash: str,
+    ) -> dict[str, Any]:
+        segment_evidence = [
+            {
+                "provider_effect_key": execution.provider_effect_key,
+                "audio_checksum": execution.audio_sha256,
+                "duration_ms": execution.audio_duration_ms,
+                "provider_request_hash": execution.request_hash,
+                "provider_request_id": execution.provider_request_id,
+            }
+            for execution in executions
+        ]
+        segment_evidence_hash = content_hash(segment_evidence)
+        receipt_path = effect_dir / "canonical-narration-receipt.json"
+        reconciled = self._reconcile_canonical_receipt(
+            receipt_path=receipt_path,
+            segment_evidence_hash=segment_evidence_hash,
+            budget_authority_hash=budget_authority_hash,
+        )
+        if reconciled is not None:
+            return reconciled
+        if len(executions) == 1:
+            execution = executions[0]
+            receipt = self._receipt_from_execution(execution, package=package, identity={})
+            receipt["audio_relative_path"] = self._relative(execution.audio_path)
+            receipt.update(
+                self._provider_cost_receipt(
+                    executions=executions,
+                    budget=budget,
+                    forced_alignment_provider_call_count=0,
+                    budget_authority_ref=budget_authority_ref,
+                    budget_authority_hash=budget_authority_hash,
+                    segment_evidence_hash=segment_evidence_hash,
+                )
             )
-        except Exception as exc:
-            raise WorkflowStageError(
-                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
-                error_code="V2_ELEVENLABS_PROVIDER_FAILURE",
-                summary="ElevenLabs narration did not yield a sealed response; no retry or local fallback was attempted.",
-                incident_type="PROVIDER_OUTCOME_UNCERTAIN",
-                retry_eligible=False,
-            ) from exc
+            self._persist_canonical_receipt(receipt_path=receipt_path, receipt=receipt)
+            return receipt
+        output = effect_dir / "canonical-narration.mp3"
+        stitch = AudioStitchCompiler().stitch(
+            audio_paths=[execution.audio_path for execution in executions],
+            destination=output,
+        )
+        from app.services.v2_native_effects import _probe_duration_ms
+
+        duration_ms = _probe_duration_ms(self._builder.ffprobe, output)
         if not (
             package.duration_contract.minimum_duration_ms
-            <= execution.audio_duration_ms
+            <= duration_ms
             <= package.duration_contract.maximum_duration_ms
         ):
             raise ValidationFailureError("V2_ELEVENLABS_DURATION_OUTSIDE_CONTRACT")
-        provider_response = {
-            "schema_version": V2_ELEVENLABS_PROVIDER_RESPONSE_JOURNAL_SCHEMA,
-            "request_identity_hash": content_hash(identity),
-            "audio_asset_ref": execution.audio_asset_ref,
-            "audio_checksum": execution.audio_sha256,
+        offsets: list[dict[str, Any]] = []
+        offset = 0
+        for index, execution in enumerate(executions):
+            offsets.append(
+                {
+                    "segment_index": index,
+                    "canonical_start_ms": offset,
+                    "duration_ms": execution.audio_duration_ms,
+                    "audio_checksum": execution.audio_sha256,
+                }
+            )
+            offset += execution.audio_duration_ms
+        qc = seam_qc(segments=offsets, stitched_duration_ms=duration_ms)
+        if qc.state != "PASS":
+            raise ValidationFailureError(
+                "NARRATION_SEAM_QC_FAILED:" + ",".join(qc.reason_codes)
+            )
+        normalized = _temporal_normalized({"normalized_text": script_text})
+        alignment_client = self._forced_alignment_client_factory()
+        alignment = alignment_client.execute_once(
+            api_key=api_key,
+            normalized=normalized,
+            audio_path=output,
+            audio_asset_ref=f"v2-elevenlabs://canonical/{stitch['audio_checksum']}",
+            audio_duration_ms=duration_ms,
+        )
+        timing_seed = _timing_seed_from_forced_alignment(
+            normalized=normalized,
+            evidence=alignment.evidence,
+            audio_asset_ref=f"v2-elevenlabs://canonical/{stitch['audio_checksum']}",
+            audio_duration_ms=duration_ms,
+            voice_id=str(details["voice_id"]),
+            model_id=str(details["model_id"]),
+        )
+        receipt = {
+            "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+            "audio_asset_ref": timing_seed.audio_asset_ref,
+            "audio_checksum": stitch["audio_checksum"],
             "audio_relative_path": self._relative(output),
-            "duration_ms": execution.audio_duration_ms,
-            "provider_request_hash": execution.request_hash,
-            "provider_request_id": execution.timing_seed.provider_request_id,
-            "timing_seed": execution.timing_seed.model_dump(mode="json"),
-            "timing_seed_hash": execution.timing_seed.content_hash,
-            "usage_metadata": execution.usage_metadata,
-            "actual_cost_usd": None,
+            "duration_ms": duration_ms,
+            "narration_present": True,
+            "alignment_method": "ELEVENLABS_FORCED_ALIGNMENT_FINAL_CANONICAL_AUDIO",
+            "provider_request_hash": content_hash(
+                [item.request_hash for item in executions]
+            ),
+            "provider_request_id": alignment.evidence.provider_request_id,
+            "timing_seed": timing_seed.model_dump(mode="json"),
+            "timing_seed_hash": timing_seed.content_hash,
+            "usage_metadata": {
+                "segment_count": len(executions),
+                "seam_qc_hash": qc.content_hash,
+                "segment_offsets": offsets,
+            },
             "secret_values_exposed": False,
         }
-        # The provider has accepted the one allowed effect at this point.  This
-        # proof is deliberately sealed before the derived receipt, so a later
-        # local crash can reconcile the exact output without spending again.
-        _write_json_atomic(provider_response_path, provider_response)
-        receipt = self._receipt_from_provider_response(
-            identity=identity,
-            output=output,
-            provider_response=provider_response,
-            package=package,
+        receipt.update(
+            self._provider_cost_receipt(
+                executions=executions,
+                budget=budget,
+                forced_alignment_provider_call_count=1,
+                budget_authority_ref=budget_authority_ref,
+                budget_authority_hash=budget_authority_hash,
+                segment_evidence_hash=segment_evidence_hash,
+            )
         )
-        _write_json_atomic(receipt_path, receipt)
+        self._persist_canonical_receipt(receipt_path=receipt_path, receipt=receipt)
         return receipt
+
+    def _reconcile_canonical_receipt(
+        self,
+        *,
+        receipt_path: Path,
+        segment_evidence_hash: str,
+        budget_authority_hash: str,
+    ) -> dict[str, Any] | None:
+        """Reuse the final alignment only when all sealed input evidence agrees."""
+
+        if not receipt_path.is_file():
+            return None
+        try:
+            receipt = _load_json(receipt_path)
+            relative_path = str(receipt["audio_relative_path"])
+            output = self._from_relative(relative_path)
+            timing_seed = NarrationTimingSeed.model_validate(receipt["timing_seed"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationFailureError("CANONICAL_NARRATION_RECONCILIATION_INVALID") from exc
+        if (
+            receipt.get("canonical_segment_evidence_hash") != segment_evidence_hash
+            or receipt.get("combined_replacement_budget_authority_hash")
+            != budget_authority_hash
+            or not output.is_file()
+            or output.is_symlink()
+            or _sha256_file(output) != receipt.get("audio_checksum")
+            or timing_seed.content_hash != receipt.get("timing_seed_hash")
+            or timing_seed.audio_asset_ref != receipt.get("audio_asset_ref")
+            or timing_seed.audio_duration_ms != receipt.get("duration_ms")
+        ):
+            raise ValidationFailureError("CANONICAL_NARRATION_RECONCILIATION_INVALID")
+        return receipt
+
+    @staticmethod
+    def _persist_canonical_receipt(*, receipt_path: Path, receipt: Mapping[str, Any]) -> None:
+        _write_json_atomic(receipt_path, dict(receipt))
+
+    @staticmethod
+    def _provider_cost_receipt(
+        *,
+        executions: Sequence[_NarrationSegmentAudio],
+        budget: CombinedReplacementBudget,
+        forced_alignment_provider_call_count: int,
+        forced_alignment_actual_cost_usd: Decimal | None = None,
+        budget_authority_ref: str,
+        budget_authority_hash: str,
+        segment_evidence_hash: str,
+    ) -> dict[str, Any]:
+        tts_provider_call_count = len(executions)
+        tts_actual = (
+            sum(
+                (execution.actual_cost_usd for execution in executions),
+                Decimal(0),
+            )
+            if all(execution.actual_cost_usd is not None for execution in executions)
+            else None
+        )
+        alignment_actual = (
+            forced_alignment_actual_cost_usd
+            if forced_alignment_provider_call_count > 0
+            else Decimal("0")
+        )
+        components_complete = tts_actual is not None and alignment_actual is not None
+        actual_cost = (
+            tts_actual + alignment_actual if components_complete else None
+        )
+        return {
+            "tts_provider_call_count": tts_provider_call_count,
+            "forced_alignment_provider_call_count": forced_alignment_provider_call_count,
+            "total_provider_call_count": (
+                tts_provider_call_count + forced_alignment_provider_call_count
+            ),
+            "tts_paid_effect_count": tts_provider_call_count,
+            "estimated_cost_usd": str(
+                sum(
+                    (execution.estimated_cost_usd for execution in executions),
+                    Decimal(0),
+                )
+                + budget.forced_alignment_projected_cost_usd
+            ),
+            "actual_cost_usd": str(actual_cost) if actual_cost is not None else None,
+            "actual_cost_components_complete": components_complete,
+            "actual_cost_components_usd": {
+                "tts": str(tts_actual) if tts_actual is not None else None,
+                "forced_alignment": (
+                    str(alignment_actual) if alignment_actual is not None else None
+                ),
+            },
+            "combined_replacement_budget_authority_ref": budget_authority_ref,
+            "combined_replacement_budget_authority_hash": budget_authority_hash,
+            "combined_replacement_budget_projection": budget.report(),
+            "canonical_segment_evidence_hash": segment_evidence_hash,
+        }
 
     def _reconcile_sealed_output(
         self,
@@ -577,6 +1215,35 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
         )
         _write_json_atomic(receipt_path, receipt)
         return receipt
+
+    @staticmethod
+    def _receipt_from_execution(
+        execution: _NarrationSegmentAudio, *, package: Any, identity: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not (
+            package.duration_contract.minimum_duration_ms
+            <= execution.audio_duration_ms
+            <= package.duration_contract.maximum_duration_ms
+        ):
+            raise ValidationFailureError("V2_ELEVENLABS_DURATION_OUTSIDE_CONTRACT")
+        return {
+            **identity,
+            "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+            "audio_asset_ref": execution.audio_asset_ref,
+            "audio_checksum": execution.audio_sha256,
+            "audio_relative_path": str(execution.audio_path),
+            "duration_ms": execution.audio_duration_ms,
+            "narration_present": True,
+            "alignment_method": "ELEVENLABS_TIMESTAMPS",
+            "provider_request_hash": execution.request_hash,
+            "provider_request_id": execution.provider_request_id,
+            "timing_seed": execution.timing_seed,
+            "timing_seed_hash": execution.timing_seed["content_hash"],
+            "usage_metadata": execution.usage_metadata,
+            "actual_cost_usd": None,
+            "estimated_cost_usd": "0",
+            "secret_values_exposed": False,
+        }
 
     @staticmethod
     def _receipt_from_provider_response(

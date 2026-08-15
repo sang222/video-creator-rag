@@ -25,6 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Protocol
 
 from sqlalchemy import select
@@ -77,6 +78,7 @@ from app.db.models.ai_visual import (
 from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.v2_effect import V2ProductionEffectLedger
+from app.db.models.voice_authority import CombinedReplacementBudgetAuthority
 from app.db.models.workflow import ArtifactVersion
 from app.services.ai_visual_planner import (
     AIImagePromptCompiler,
@@ -968,6 +970,108 @@ def compile_ai_visual_stage_planning(
     )
 
 
+def compile_pre_tts_ai_visual_cost_preflight(
+    *,
+    video_project_id: uuid.UUID,
+    preflight_id: uuid.UUID,
+    canonical_narration: str,
+    estimated_duration_ms: int,
+    maximum_image_submissions: int,
+    maximum_video_submissions: int,
+) -> tuple[AIVisualStagePlanningArtifacts, dict[str, Any]]:
+    """Compile the normal-production cost ceiling with the production planner.
+
+    MEDIA has not produced forced-alignment timing yet, so this deliberately
+    uses deterministic *pre-TTS* sentence timing.  It is not a second visual
+    planner: it feeds those provisional bindings through
+    :func:`compile_ai_visual_stage_planning` and freezes the resulting
+    ``AIVisualPlanCompilation``.  The post-MEDIA plan must subsequently fit
+    inside this owner-slot and cost authority before VISUAL can execute.
+
+    One preflight unit is emitted for every canonical sentence.  The eventual
+    narration-unit compiler may coalesce sentences, but cannot introduce text
+    outside this canonical input; this keeps the preflight conservative when
+    sections and visual owner slots differ.
+    """
+
+    text = canonical_narration.strip()
+    if not text or estimated_duration_ms <= 0:
+        raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PLAN_INVALID")
+    sentences = [
+        match.group(0).strip()
+        for match in re.finditer(r"[^.!?]+(?:[.!?]+|$)", text, flags=re.S)
+        if match.group(0).strip()
+    ]
+    if not sentences:
+        raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PLAN_INVALID")
+    word_counts = [max(1, len(re.findall(r"\\b[\\w'-]+\\b", item))) for item in sentences]
+    total_words = sum(word_counts)
+    cursor = 0
+    raw_units: list[dict[str, Any]] = []
+    bindings: list[dict[str, Any]] = []
+    for ordinal, (sentence, word_count) in enumerate(
+        zip(sentences, word_counts), start=1
+    ):
+        duration = max(1, round(estimated_duration_ms * word_count / total_words))
+        end = (
+            estimated_duration_ms
+            if ordinal == len(sentences)
+            else min(estimated_duration_ms, cursor + duration)
+        )
+        if end <= cursor:
+            end = cursor + 1
+        unit_id = f"preflight-nu-{ordinal:03d}"
+        visual_function = (
+            "PROCESS"
+            if any(pattern.search(sentence) for _cue_id, pattern in _REQUIRED_MOTION_CUES)
+            else "CONCEPT_MODEL"
+        )
+        raw_units.append(
+            {
+                "narration_unit_id": unit_id,
+                "information_unit_ids": [f"preflight-information-{ordinal:03d}"],
+                "visual_function": visual_function,
+                "semantic_intent": sentence,
+                "text": sentence,
+                "factual_risk": "MEDIUM",
+                "importance": "CORE" if ordinal == 1 else "SUPPORTING",
+            }
+        )
+        bindings.append(
+            {
+                "narration_unit_id": unit_id,
+                "actual_start_ms": cursor,
+                "actual_end_ms": end,
+            }
+        )
+        cursor = end
+    timeline = {
+        "schema_version": "vcos.pre-tts-ai-visual-timeline.v1",
+        "duration_ms": max(cursor, estimated_duration_ms),
+        "narration_unit_compilation": {"narration_units": raw_units},
+        "timed_narration_unit_bindings": {"bindings": bindings},
+    }
+    timeline_hash = content_hash(timeline)
+    artifacts = compile_ai_visual_stage_planning(
+        visual_run=SimpleNamespace(
+            id=preflight_id,
+            video_project_id=video_project_id,
+            # A preflight has no package artifact yet.  The planner consumes
+            # this only as a stable style-bible namespace.
+            production_package_artifact_version_id=preflight_id,
+            source_timeline_hash=timeline_hash,
+        ),
+        timeline=timeline,
+        provider_readiness_ref=(
+            f"ai-visual-preflight/{preflight_id}/google-gemini-image+google-veo"
+        ),
+        budget_authority_ref=f"ai-visual-preflight/{preflight_id}/budget",
+        maximum_image_submissions=maximum_image_submissions,
+        maximum_video_submissions=maximum_video_submissions,
+    )
+    return artifacts, {**timeline, "content_hash": timeline_hash}
+
+
 class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
     """Durable V2 VISUAL adapter; Gemini generates, FFmpeg only presents."""
 
@@ -1318,6 +1422,7 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                 hard_cap=Decimal("1000000"),
                 approval_amount=Decimal("1000000"),
             ).estimated_amount
+            combined_authority: CombinedReplacementBudgetAuthority | None = None
             if visual_run.execution_kind == "GOVERNED_RERENDER":
                 if (
                     rerender is None
@@ -1335,14 +1440,8 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                     != visual_run.budget_reservation_ref
                     or rerender.budget_authority_hash
                     != visual_run.budget_authority_hash
-                    or rerender.maximum_image_submissions
-                    != V2_AI_VISUAL_FIRST_VIDEO_MAX_IMAGES
-                    or rerender.maximum_video_submissions
-                    != V2_AI_VISUAL_FIRST_VIDEO_MAX_VIDEOS
                     or rerender.maximum_tts_submissions != 0
                     or rerender.maximum_forced_alignment_submissions != 0
-                    or Decimal(rerender.maximum_total_cost_usd)
-                    != V2_AI_VISUAL_FIRST_VIDEO_MAX_COST_USD
                     or rerender.automatic_publish
                 ):
                     raise ValidationFailureError(
@@ -1355,11 +1454,35 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                 maximum_videos = rerender.maximum_video_submissions
                 maximum_scenes = rerender.maximum_scene_count
                 maximum_cost = Decimal(rerender.maximum_total_cost_usd)
+                expected_budget_allocations = {
+                    key: amount
+                    for key, amount in {
+                        V2_AI_VISUAL_PROVIDER_KEY: (
+                            V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD
+                            * maximum_images
+                        ),
+                        V2_AI_VISUAL_VIDEO_PROVIDER_KEY: (
+                            video_unit_cost * maximum_videos
+                        ),
+                    }.items()
+                    if amount > 0
+                }
+                expected_budget_run_id = visual_run.id
+                expected_budget_hash = visual_run.budget_authority_hash
+                expected_budget_ceiling = maximum_cost
                 if operation.max_cost_usd < maximum_cost:
                     raise ValidationFailureError(
                         "V2_AI_VISUAL_RERENDER_OPERATION_COST_DRIFT"
                     )
             elif visual_run.execution_kind == "NORMAL_PRODUCTION" and rerender is None:
+                combined_authority = session.scalar(
+                    select(CombinedReplacementBudgetAuthority).where(
+                        CombinedReplacementBudgetAuthority.video_project_id
+                        == visual_run.video_project_id,
+                        CombinedReplacementBudgetAuthority.budget_reservation_id
+                        == visual_run.budget_reservation_id,
+                    )
+                )
                 source_workflow_run_id = workflow.id
                 approval_ref = f"production-workflows/{workflow.id}/visual"
                 approval_hash = ai_visual_stable_hash(
@@ -1370,7 +1493,6 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                         "input_hash": context.input_hash,
                     }
                 )
-                maximum_cost = budget_ceiling
                 image_allocation = allocations.get(
                     V2_AI_VISUAL_PROVIDER_KEY, Decimal("0")
                 )
@@ -1381,8 +1503,18 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                     image_allocation / V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD
                 )
                 maximum_videos = int(video_allocation / video_unit_cost)
+                maximum_cost = image_allocation + video_allocation
                 if (
-                    maximum_images * V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD
+                    combined_authority is None
+                    or combined_authority.state != "FROZEN"
+                    or combined_authority.content_hash != visual_run.budget_authority_hash
+                    or combined_authority.budget_reservation_ref
+                    != visual_run.budget_reservation_ref
+                    or Decimal(combined_authority.ai_image_projected_cost_usd)
+                    != image_allocation
+                    or Decimal(combined_authority.ai_video_projected_cost_usd)
+                    != video_allocation
+                    or maximum_images * V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD
                     != image_allocation
                     or maximum_videos * video_unit_cost != video_allocation
                     or maximum_images + maximum_videos <= 0
@@ -1392,10 +1524,23 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                         "V2_AI_VISUAL_NORMAL_ROUTE_COST_AUTHORITY_DRIFT"
                     )
                 maximum_scenes = 48
+                expected_budget_allocations = {
+                    str(key): Decimal(str(value))
+                    for key, value in (
+                        ((combined_authority.source_refs or {})
+                         .get("ai_visual_preflight") or {})
+                        .get("provider_allocations_usd") or {}
+                    ).items()
+                }
+                expected_budget_run_id = workflow.id
+                expected_budget_hash = combined_authority.content_hash
+                expected_budget_ceiling = Decimal(
+                    combined_authority.combined_replacement_projected_cost_usd
+                )
             else:
                 raise ValidationFailureError("V2_AI_VISUAL_EXECUTION_KIND_INVALID")
 
-            expected_allocations = {
+            expected_visual_allocations = {
                 key: amount
                 for key, amount in {
                     V2_AI_VISUAL_PROVIDER_KEY: (
@@ -1407,15 +1552,17 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
             }
             if (
                 budget is None
-                or budget.run_id != visual_run.id
+                or budget.run_id != expected_budget_run_id
                 or budget.video_project_id != visual_run.video_project_id
                 or budget.reservation_ref != visual_run.budget_reservation_ref
-                or (budget.capacity_evidence_json or {}).get("content_hash")
-                != visual_run.budget_authority_hash
+                or visual_run.budget_authority_hash != expected_budget_hash
                 or budget_ceiling <= 0
-                or budget_ceiling != maximum_cost
-                or sum(expected_allocations.values(), Decimal("0")) != maximum_cost
-                or allocations != expected_allocations
+                or budget_ceiling != expected_budget_ceiling
+                or {
+                    key: value for key, value in allocations.items() if key
+                    in {V2_AI_VISUAL_PROVIDER_KEY, V2_AI_VISUAL_VIDEO_PROVIDER_KEY}
+                } != expected_visual_allocations
+                or allocations != expected_budget_allocations
                 or budget.status
                 not in {"RESERVED", "SUBMITTED", "SETTLED_CONSERVATIVE"}
             ):
@@ -1423,7 +1570,7 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
             if budget.status == "SETTLED_CONSERVATIVE" and (
                 budget.settlement_kind != "CONSERVATIVE_CATALOG_ESTIMATE_SUCCESS"
                 or Decimal(budget.actual_amount or 0) <= 0
-                or Decimal(budget.actual_amount or 0) > maximum_cost
+                or Decimal(budget.actual_amount or 0) > expected_budget_ceiling
             ):
                 raise ValidationFailureError("V2_AI_VISUAL_BUDGET_SETTLEMENT_INVALID")
 
@@ -2167,10 +2314,10 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
             ),
             Decimal("0"),
         )
-        conservative = image_conservative + video_conservative
-        if conservative <= 0 or conservative > maximum_cost_usd:
+        visual_conservative = image_conservative + video_conservative
+        if visual_conservative <= 0 or visual_conservative > maximum_cost_usd:
             raise ValidationFailureError("V2_AI_VISUAL_CONSERVATIVE_COST_MISMATCH")
-        providers = {
+        visual_providers = {
             key: value
             for key, value in {
                 V2_AI_VISUAL_PROVIDER_KEY: image_conservative,
@@ -2182,6 +2329,34 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
             visual_run = session.get(AIVisualProductionRun, visual_run_id)
             if visual_run is None:
                 raise ValidationFailureError("V2_AI_VISUAL_RUN_NOT_FOUND")
+            budget = session.get(
+                MR1MonthlyBudgetReservation, visual_run.budget_reservation_id
+            )
+            allocations = {
+                str(key): Decimal(str(value))
+                for key, value in (budget.provider_allocations_json or {}).items()
+            } if budget is not None else {}
+            # A normal run shares the pre-TTS aggregate reservation.  The
+            # already-authorized ElevenLabs partition remains conservatively
+            # occupied while this method reconciles only the Gemini/Veo
+            # partitions; no second visual reservation is created.
+            providers = (
+                {
+                    **allocations,
+                    **visual_providers,
+                }
+                if "elevenlabs" in allocations
+                else visual_providers
+            )
+            conservative = sum(providers.values(), Decimal("0"))
+            if (
+                not allocations
+                or set(providers) != set(allocations)
+                or any(providers[key] > allocations[key] for key in providers)
+            ):
+                raise ValidationFailureError(
+                    "V2_AI_VISUAL_COMBINED_SETTLEMENT_AUTHORITY_DRIFT"
+                )
             MR1MonthlyBudgetAuthority(session).settle_conservative_success(
                 visual_run.budget_reservation_ref,
                 conservative_amount_usd=conservative,

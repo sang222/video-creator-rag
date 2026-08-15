@@ -41,10 +41,15 @@ from app.db.models.voice_authority import (
 )
 from app.db.models.workflow import VideoProject
 from app.services.config_registry import content_hash
+from app.services.voice_execution import (
+    ELEVENLABS_CAPABILITY_PROFILE_VERSION,
+    elevenlabs_capability,
+    select_execution_strategy,
+)
 
 VOICE_CASTING_POLICY_VERSION = "vcos.voice-casting-policy.v1"
 VOICE_PERFORMANCE_POLICY_VERSION = "vcos.narration-performance-policy.v1"
-VOICE_CAPABILITY_PROFILE_VERSION = "vcos.elevenlabs-model-capability.2026-08-14.v1"
+VOICE_CAPABILITY_PROFILE_VERSION = ELEVENLABS_CAPABILITY_PROFILE_VERSION
 
 _NARRATION_FUNCTIONS = {
     "HOOK",
@@ -86,10 +91,18 @@ _FUNCTION_INTENT_COMPATIBILITY = {
     "CONCLUSION": {"CONFIDENT", "WARM", "DECISIVE"},
 }
 _DELIVERY_PROFILE = {
-    "CURIOUS_ENGAGED": {"energy": "MEDIUM_HIGH", "pace": "MEDIUM_FAST", "emphasis": "MEDIUM"},
+    "CURIOUS_ENGAGED": {
+        "energy": "MEDIUM_HIGH",
+        "pace": "MEDIUM_FAST",
+        "emphasis": "MEDIUM",
+    },
     "CLEAR_PRECISE": {"energy": "CONTROLLED", "pace": "MEDIUM", "emphasis": "MEDIUM"},
     "CONVERSATIONAL": {"energy": "MEDIUM", "pace": "MEDIUM", "emphasis": "LOW"},
-    "SERIOUS_MEASURED": {"energy": "CONTROLLED", "pace": "MEASURED", "emphasis": "MEDIUM"},
+    "SERIOUS_MEASURED": {
+        "energy": "CONTROLLED",
+        "pace": "MEASURED",
+        "emphasis": "MEDIUM",
+    },
     "CAUTIONARY": {"energy": "CONTROLLED", "pace": "MEASURED", "emphasis": "HIGH"},
     "EMPHATIC": {"energy": "MEDIUM_HIGH", "pace": "MEDIUM", "emphasis": "HIGH"},
     "CONFIDENT": {"energy": "MEDIUM", "pace": "MEDIUM", "emphasis": "MEDIUM"},
@@ -128,7 +141,7 @@ _MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     },
     "eleven_v3": {
         "max_characters": 5_000,
-        "supports_context_stitching": True,
+        "supports_context_stitching": False,
         "supports_voice_settings": False,
         "supports_audio_tags": True,
     },
@@ -167,16 +180,15 @@ class VoiceAuthorityService:
                 == data.channel_workspace_id,
                 VoiceMarketResearchArtifact.channel_profile_version_id
                 == data.channel_profile_version_id,
-                VoiceMarketResearchArtifact.policy_snapshot_id == data.policy_snapshot_id,
+                VoiceMarketResearchArtifact.policy_snapshot_id
+                == data.policy_snapshot_id,
                 VoiceMarketResearchArtifact.content_hash == digest,
             )
         )
         if existing is not None:
             return existing
         record = VoiceMarketResearchArtifact(
-            **data.model_dump(
-                exclude={"market_identity", "requirements", "evidence"}
-            ),
+            **data.model_dump(exclude={"market_identity", "requirements", "evidence"}),
             market_identity=data.market_identity.model_dump(mode="json"),
             requirements=data.requirements.model_dump(mode="json"),
             evidence=[item.model_dump(mode="json") for item in data.evidence],
@@ -308,7 +320,9 @@ class VoiceAuthorityService:
         )
         if existing is not None:
             return existing
-        pool_voices = [ProviderVoiceCandidate.model_validate(item) for item in pool.voices]
+        pool_voices = [
+            ProviderVoiceCandidate.model_validate(item) for item in pool.voices
+        ]
         series_binding = None
         if project.content_mode == "SERIES_EPISODE":
             if project.series_plan_id is None:
@@ -360,14 +374,17 @@ class VoiceAuthorityService:
         ).all()
         for prior in prior_decisions:
             prior.state = "SUPERSEDED"
-        version = int(
-            self.session.scalar(
-                select(func.max(VoiceCastingDecision.decision_version)).where(
-                    VoiceCastingDecision.video_project_id == project.id
+        version = (
+            int(
+                self.session.scalar(
+                    select(func.max(VoiceCastingDecision.decision_version)).where(
+                        VoiceCastingDecision.video_project_id == project.id
+                    )
                 )
+                or 0
             )
-            or 0
-        ) + 1
+            + 1
+        )
         research = self.session.get(
             VoiceMarketResearchArtifact, pool.voice_market_research_id
         )
@@ -636,21 +653,21 @@ class VoiceAuthorityService:
         )
         if voice is None:
             raise ValidationFailureError("TTS_PROJECTION_VOICE_NOT_IN_POOL")
-        capabilities = _MODEL_CAPABILITIES.get(snapshot.model_id)
-        if capabilities is None:
-            raise ValidationFailureError("ELEVENLABS_MODEL_CAPABILITY_UNKNOWN")
+        capability = elevenlabs_capability(snapshot.model_id)
+        capabilities = {
+            "max_characters": capability.max_characters,
+            "supports_context_stitching": capability.supports_request_id_stitching,
+            "supports_voice_settings": capability.supports_voice_settings,
+            "supports_audio_tags": capability.supports_audio_tags,
+        }
         beats = [NarrationPerformanceBeat.model_validate(item) for item in plan.beats]
         segments = self._compile_segments(
             beats=beats,
             voice=voice,
             capabilities=capabilities,
         )
-        strategy = (
-            "SINGLE_REQUEST_EXPRESSIVE"
-            if len(segments) == 1
-            else "CONTEXT_STITCHED_MULTI_REQUEST"
-            if capabilities["supports_context_stitching"]
-            else "SEGMENTED_WITH_SEAM_QC"
+        strategy = select_execution_strategy(
+            model_id=snapshot.model_id, segment_count=len(segments)
         )
         body = {
             "schema_version": "vcos.tts-performance-projection.v1",
@@ -716,9 +733,7 @@ class VoiceAuthorityService:
                     "pace": research.requirements.get("pacing_profile", "MEDIUM"),
                     "energy": research.requirements.get("energy_profile", "MEDIUM"),
                     "expressiveness": "CONTROLLED",
-                    "authority": research.requirements.get(
-                        "authority_profile", "HIGH"
-                    ),
+                    "authority": research.requirements.get("authority_profile", "HIGH"),
                     "conversationality": research.requirements.get(
                         "conversationality_profile", "MEDIUM"
                     ),
@@ -745,9 +760,7 @@ class VoiceAuthorityService:
                 created_by_user_id=created_by_user_id,
             )
         )
-        projection = self.compile_tts_projection(
-            performance_plan_id=performance.id
-        )
+        projection = self.compile_tts_projection(performance_plan_id=performance.id)
         return VoiceAuthorityBundle(
             pool=pool,
             casting=casting,
@@ -826,14 +839,17 @@ class VoiceAuthorityService:
     ) -> SeriesNarratorBinding:
         if project.series_plan_id is None:
             raise ValidationFailureError("SERIES_NARRATOR_PLAN_REQUIRED")
-        version = int(
-            self.session.scalar(
-                select(func.max(SeriesNarratorBinding.binding_version)).where(
-                    SeriesNarratorBinding.series_plan_id == project.series_plan_id
+        version = (
+            int(
+                self.session.scalar(
+                    select(func.max(SeriesNarratorBinding.binding_version)).where(
+                        SeriesNarratorBinding.series_plan_id == project.series_plan_id
+                    )
                 )
+                or 0
             )
-            or 0
-        ) + 1
+            + 1
+        )
         body = {
             "schema_version": "vcos.series-narrator-binding.v1",
             "series_plan_id": str(project.series_plan_id),
@@ -872,10 +888,7 @@ class VoiceAuthorityService:
         grouped: list[list[NarrationPerformanceBeat]] = []
         current: list[NarrationPerformanceBeat] = []
         for beat in beats:
-            if (
-                current
-                and current[-1].delivery_intent != beat.delivery_intent
-            ):
+            if current and current[-1].delivery_intent != beat.delivery_intent:
                 grouped.append(current)
                 current = []
             current.append(beat)
@@ -1027,7 +1040,9 @@ def compile_performance_beats(
                 pace=profile["pace"],
                 emphasis=profile["emphasis"],
                 pause_before_ms=0 if index == 1 else 120,
-                pause_after_ms=180 if function in {"HOOK", "KEY_INSIGHT", "WARNING"} else 80,
+                pause_after_ms=180
+                if function in {"HOOK", "KEY_INSIGHT", "WARNING"}
+                else 80,
                 continuity_intent="PRESERVE_PRIMARY_NARRATOR_AND_SEMANTIC_FLOW",
                 provider_control_intent={"delivery_intent": intent},
             )
@@ -1058,7 +1073,9 @@ def infer_narration_mode(*, title: str, canonical_narration: str) -> str:
 
 def voice_authority_required(policy_snapshot: CompiledChannelPolicySnapshot) -> bool:
     policy = policy_snapshot.compiled_payload.get("voice_authority_policy")
-    return isinstance(policy, dict) and policy.get("required_for_real_production") is True
+    return (
+        isinstance(policy, dict) and policy.get("required_for_real_production") is True
+    )
 
 
 def _section_text(section: dict[str, Any]) -> str:
@@ -1088,7 +1105,9 @@ def _performance_semantics(
     value = heading.casefold()
     if ordinal == 1 or any(term in value for term in ("hook", "open")):
         return "HOOK", "CURIOUS_ENGAGED"
-    if ordinal == total or any(term in value for term in ("conclusion", "close", "ending")):
+    if ordinal == total or any(
+        term in value for term in ("conclusion", "close", "ending")
+    ):
         return "CONCLUSION", "DECISIVE"
     if any(term in value for term in ("warning", "risk", "limit", "failure")):
         return "LIMITATION", "CAUTIONARY"
@@ -1117,7 +1136,10 @@ def _compile_voice_settings(
     for key, delta in _SETTING_DELTAS[delivery_intent].items():
         bounds = voice.safe_setting_bounds[key]
         settings[key] = round(
-            max(float(bounds["min"]), min(float(bounds["max"]), float(settings[key]) + delta)),
+            max(
+                float(bounds["min"]),
+                min(float(bounds["max"]), float(settings[key]) + delta),
+            ),
             4,
         )
     return settings

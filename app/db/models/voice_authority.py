@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -12,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -50,9 +52,7 @@ class VoiceMarketResearchArtifact(Base):
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     confidence_label: Mapped[str] = mapped_column(String(16), nullable=False)
     limitations: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
-    state: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="APPROVED"
-    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="APPROVED")
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
@@ -167,15 +167,15 @@ class ApprovedVoicePool(Base):
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     voices: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="APPROVED"
-    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="APPROVED")
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )
     approved_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False
+        DateTime(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
     )
     created_at: Mapped[datetime] = utc_created_at()
 
@@ -281,7 +281,9 @@ class SeriesNarratorBinding(Base):
         UUID(as_uuid=True), ForeignKey("approved_voice_pools.id"), nullable=False
     )
     source_voice_casting_decision_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("voice_casting_decisions.id", use_alter=True), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("voice_casting_decisions.id", use_alter=True),
+        nullable=False,
     )
     schema_version: Mapped[str] = mapped_column(
         String(80), nullable=False, default="vcos.series-narrator-binding.v1"
@@ -347,7 +349,9 @@ class NarrationVoiceSnapshot(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "video_project_id", "content_hash", name="uq_narration_voice_snapshot_identity"
+            "video_project_id",
+            "content_hash",
+            name="uq_narration_voice_snapshot_identity",
         ),
         CheckConstraint("provider = 'elevenlabs'", name="ck_narration_voice_provider"),
         CheckConstraint(
@@ -384,7 +388,9 @@ class NarrationPerformancePlan(Base):
     beats: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     performance_policy_version: Mapped[str] = mapped_column(String(120), nullable=False)
     coverage_gate_state: Mapped[str] = mapped_column(String(16), nullable=False)
-    semantic_alignment_gate_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    semantic_alignment_gate_state: Mapped[str] = mapped_column(
+        String(16), nullable=False
+    )
     continuity_gate_state: Mapped[str] = mapped_column(String(16), nullable=False)
     monotony_risk_gate_state: Mapped[str] = mapped_column(String(16), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="FROZEN")
@@ -464,4 +470,193 @@ class TTSPerformanceProjection(Base):
             "content_hash ~ '^[0-9a-f]{64}$'", name="ck_tts_projection_hash"
         ),
         Index("ix_tts_performance_project", "video_project_id", "created_at"),
+    )
+
+
+class CombinedReplacementBudgetAuthority(Base):
+    """One immutable pre-effect cost authority for a V2 replacement run.
+
+    The row is deliberately separate from MR1's mutable settlement lifecycle.
+    It records the exact preflight inputs that justified the reservation and is
+    never repurposed for a later package or provider plan.
+    """
+
+    __tablename__ = "combined_replacement_budget_authorities"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    authority_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    video_project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False
+    )
+    budget_reservation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mr1_monthly_budget_reservations.id"),
+        nullable=False,
+    )
+    budget_reservation_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    support_envelope_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    route_budget_authority_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    tts_performance_projection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tts_performance_projections.id"), nullable=False
+    )
+    tts_performance_projection_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_refs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    new_tts_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    forced_alignment_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    ai_image_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    ai_video_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    other_metered_effects_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    combined_replacement_projected_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False
+    )
+    approved_ceiling_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    shortfall_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="FROZEN")
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = utc_created_at()
+
+    __table_args__ = (
+        UniqueConstraint("authority_ref", name="uq_combined_replacement_budget_ref"),
+        UniqueConstraint(
+            "video_project_id",
+            "support_envelope_hash",
+            "tts_performance_projection_hash",
+            "content_hash",
+            name="uq_combined_replacement_budget_identity",
+        ),
+        CheckConstraint("state = 'FROZEN'", name="ck_combined_replacement_budget_state"),
+        CheckConstraint(
+            "new_tts_projected_cost_usd >= 0 and "
+            "forced_alignment_projected_cost_usd >= 0 and "
+            "ai_image_projected_cost_usd >= 0 and "
+            "ai_video_projected_cost_usd >= 0 and "
+            "other_metered_effects_projected_cost_usd >= 0 and "
+            "combined_replacement_projected_cost_usd >= 0 and "
+            "approved_ceiling_usd >= 0 and shortfall_usd >= 0",
+            name="ck_combined_replacement_budget_nonnegative",
+        ),
+        CheckConstraint(
+            "support_envelope_hash ~ '^[0-9a-f]{64}$' and "
+            "route_budget_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "tts_performance_projection_hash ~ '^[0-9a-f]{64}$' and "
+            "content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_combined_replacement_budget_hashes",
+        ),
+        Index(
+            "ix_combined_replacement_budget_project_created",
+            "video_project_id",
+            "created_at",
+        ),
+    )
+
+
+class NarrationSegmentExecution(Base):
+    """Append-only paid-effect intent for one projected narration segment.
+
+    The record is deliberately created before the provider call.  It is not a
+    cache of a "latest" voice configuration: every hash is an immutable input
+    to the exact paid effect and an uncertain effect can never be re-submitted.
+    """
+
+    __tablename__ = "narration_segment_executions"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    video_project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False
+    )
+    narration_voice_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("narration_voice_snapshots.id"), nullable=False
+    )
+    narration_voice_snapshot_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    narration_performance_plan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("narration_performance_plans.id"), nullable=False
+    )
+    narration_performance_plan_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    tts_performance_projection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tts_performance_projections.id"), nullable=False
+    )
+    tts_performance_projection_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    segment_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    segment_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    canonical_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_projection_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_effect_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    voice_id: Mapped[str] = mapped_column(Text, nullable=False)
+    model_id: Mapped[str] = mapped_column(Text, nullable=False)
+    compiled_voice_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )
+    provider_context: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="INTENDED")
+    provider_request_hash: Mapped[str | None] = mapped_column(String(64))
+    provider_request_id: Mapped[str | None] = mapped_column(String(160))
+    audio_ref: Mapped[str | None] = mapped_column(Text)
+    audio_checksum: Mapped[str | None] = mapped_column(String(64))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    timing_seed: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    estimated_cost_usd: Mapped[str | None] = mapped_column(String(40))
+    actual_cost_usd: Mapped[str | None] = mapped_column(String(40))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    outcome_certainty: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="NOT_SENT"
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = utc_created_at()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "video_project_id",
+            "provider_effect_key",
+            name="uq_narration_segment_effect_key",
+        ),
+        UniqueConstraint(
+            "tts_performance_projection_id",
+            "segment_index",
+            name="uq_narration_segment_projection_index",
+        ),
+        CheckConstraint("segment_index >= 0", name="ck_narration_segment_index"),
+        CheckConstraint(
+            "attempt_count between 0 and 1", name="ck_narration_segment_attempt_count"
+        ),
+        CheckConstraint(
+            "state in ('INTENDED','SUBMITTED','VERIFIED','PROVIDER_OUTCOME_UNKNOWN','FAILED')",
+            name="ck_narration_segment_state",
+        ),
+        CheckConstraint(
+            "outcome_certainty in ('NOT_SENT','SUBMITTED','VERIFIED','UNKNOWN','FAILED')",
+            name="ck_narration_segment_outcome_certainty",
+        ),
+        CheckConstraint(
+            "(state <> 'VERIFIED') or (provider_request_hash is not null and "
+            "provider_request_id is not null and audio_ref is not null and "
+            "audio_checksum is not null and duration_ms > 0 and "
+            "timing_seed is not null)",
+            name="ck_narration_segment_verified_evidence",
+        ),
+        CheckConstraint(
+            "narration_voice_snapshot_hash ~ '^[0-9a-f]{64}$' and narration_performance_plan_hash ~ '^[0-9a-f]{64}$' and tts_performance_projection_hash ~ '^[0-9a-f]{64}$' and canonical_text_hash ~ '^[0-9a-f]{64}$' and provider_projection_hash ~ '^[0-9a-f]{64}$' and content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_narration_segment_hashes",
+        ),
+        Index("ix_narration_segment_project_state", "video_project_id", "state"),
     )

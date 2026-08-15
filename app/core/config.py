@@ -1,9 +1,8 @@
-from functools import lru_cache
 from decimal import Decimal
+from functools import lru_cache
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 OPENAI_RESPONSES_BASE_URL = "https://api.openai.com/v1"
 VEO_DEFAULT_MODEL_ID = "veo-3.1-fast-generate-preview"
@@ -251,6 +250,24 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices(
             "VCOS_ELEVENLABS_BUDGET_BASIS", "ELEVENLABS_BUDGET_BASIS"
+        ),
+    )
+    # These are intentionally optional.  A real paid narration route cannot
+    # infer a per-character or forced-alignment charge from a monthly cap; the
+    # current reviewed values must be explicitly configured and then frozen in
+    # CombinedReplacementBudgetAuthority before the first provider request.
+    elevenlabs_tts_cost_per_character_usd: Decimal | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VCOS_ELEVENLABS_TTS_COST_PER_CHARACTER_USD",
+            "ELEVENLABS_TTS_COST_PER_CHARACTER_USD",
+        ),
+    )
+    elevenlabs_forced_alignment_cost_usd: Decimal | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VCOS_ELEVENLABS_FORCED_ALIGNMENT_COST_USD",
+            "ELEVENLABS_FORCED_ALIGNMENT_COST_USD",
         ),
     )
     elevenlabs_real_account_smoke: bool = Field(

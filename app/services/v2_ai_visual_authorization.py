@@ -26,18 +26,17 @@ from sqlalchemy.orm import Session
 
 from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.production_workflow import WorkflowStageResult
-from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.ai_visual import AI_VISUAL_POLICY_VERSION, AIVisualProductionRun
 from app.db.models.channel import CompiledChannelPolicySnapshot
 from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
+from app.db.models.voice_authority import CombinedReplacementBudgetAuthority
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.v2_effect import V2ProductionEffectLedger
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.ai_visual_rerender_authority import AI_VISUAL_POLICY_REF
 from app.services.config_registry import ConfigRegistryService, content_hash
-from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
 from app.services.production_package import ProductionPackageService
 from app.services.v2_ai_visual_provider import (
     V2_GEMINI_IMAGE_CONSERVATIVE_UNIT_COST_USD,
@@ -303,22 +302,44 @@ def _veo_monthly_provider_cap(*, unit_cost_usd: Decimal) -> Decimal:
     return unit_cost_usd * renders
 
 
-def _require_normal_per_video_aggregate_budget(
+def _require_normal_combined_budget(
     *,
     workflow: ProductionWorkflowRun,
     project: VideoProject,
     media_budget: MR1MonthlyBudgetReservation | None,
     envelope: V2FrozenSupportEnvelope,
     channel_policy: ChannelScopedPolicy,
-    visual_requested_cost_usd: Decimal,
-) -> None:
-    """Prove MEDIA ceiling + visual request stays inside frozen video cap."""
+    authority: CombinedReplacementBudgetAuthority | None,
+    requirement: _NormalVisualRequirement,
+) -> CombinedReplacementBudgetAuthority:
+    """Consume the pre-TTS aggregate reservation; never reserve VISUAL twice."""
 
     frozen = envelope.zero_cost_budget
     evidence = frozen.reservation_evidence or {}
     capacity_evidence = evidence.get("capacity_evidence") or {}
     policy_cap = Decimal(str(channel_policy.budget_policy.max_estimated_cost_per_video))
-    frozen_media_ceiling = Decimal(frozen.authorized_cost_usd)
+    frozen_aggregate = Decimal(frozen.authorized_cost_usd)
+    allocations = {
+        str(key): Decimal(str(value))
+        for key, value in ((media_budget.provider_allocations_json or {}) if media_budget else {}).items()
+    }
+    visual_source = (
+        dict((authority.source_refs or {}).get("ai_visual_preflight") or {})
+        if authority is not None
+        else {}
+    )
+    expected_visual_allocations = {
+        key: value
+        for key, value in {
+            NORMAL_AI_VISUAL_PROVIDER_KEY: Decimal(authority.ai_image_projected_cost_usd)
+            if authority is not None
+            else Decimal("0"),
+            NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY: Decimal(authority.ai_video_projected_cost_usd)
+            if authority is not None
+            else Decimal("0"),
+        }.items()
+        if value > 0
+    }
     if (
         envelope.execution_mode != "REAL_LONG_FORM_PRODUCTION"
         or media_budget is None
@@ -331,9 +352,31 @@ def _require_normal_per_video_aggregate_budget(
         or evidence.get("request_hash") != media_budget.request_hash
         or capacity_evidence.get("content_hash")
         != (media_budget.capacity_evidence_json or {}).get("content_hash")
-        or frozen_media_ceiling <= 0
-        or frozen_media_ceiling > policy_cap
-        or Decimal(media_budget.reserved_amount) != frozen_media_ceiling
+        or frozen_aggregate <= 0
+        or frozen_aggregate > policy_cap
+        or Decimal(media_budget.reserved_amount) != frozen_aggregate
+        or authority is None
+        or authority.state != "FROZEN"
+        or authority.video_project_id != project.id
+        or authority.budget_reservation_id != media_budget.id
+        or authority.budget_reservation_ref != media_budget.reservation_ref
+        or authority.route_budget_authority_hash != frozen.content_hash
+        or authority.support_envelope_hash != envelope.content_hash
+        or Decimal(authority.combined_replacement_projected_cost_usd)
+        != frozen_aggregate
+        or allocations.get(NORMAL_AI_VISUAL_PROVIDER_KEY, Decimal("0"))
+        != expected_visual_allocations.get(NORMAL_AI_VISUAL_PROVIDER_KEY, Decimal("0"))
+        or allocations.get(NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY, Decimal("0"))
+        != expected_visual_allocations.get(NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY, Decimal("0"))
+        or sum(allocations.values(), Decimal("0")) != frozen_aggregate
+        or visual_source.get("production_visual_policy_hash")
+        != envelope.production_visual_policy_hash
+        or requirement.image_owner_count
+        > int(visual_source.get("unique_ai_image_asset_slot_count", -1))
+        or requirement.video_owner_count
+        > int(visual_source.get("unique_ai_video_asset_slot_count", -1))
+        or requirement.image_cost_usd > Decimal(authority.ai_image_projected_cost_usd)
+        or requirement.video_cost_usd > Decimal(authority.ai_video_projected_cost_usd)
         or media_budget.status
         not in {
             "RESERVED",
@@ -343,12 +386,9 @@ def _require_normal_per_video_aggregate_budget(
         }
     ):
         raise ValidationFailureError(
-            "V2_NORMAL_AI_VISUAL_PER_VIDEO_BUDGET_AUTHORITY_DRIFT"
+            "V2_NORMAL_AI_VISUAL_COMBINED_BUDGET_AUTHORITY_DRIFT"
         )
-    if frozen_media_ceiling + visual_requested_cost_usd > policy_cap:
-        raise ValidationFailureError(
-            "V2_NORMAL_AI_VISUAL_PER_VIDEO_AGGREGATE_BUDGET_EXCEEDED"
-        )
+    return authority
 
 
 def _validate_existing(
@@ -362,6 +402,7 @@ def _validate_existing(
     visual_run_id: uuid.UUID,
     audio_duration_ms: int,
     requirement: _NormalVisualRequirement,
+    authority: CombinedReplacementBudgetAuthority,
 ) -> NormalAIVisualAuthorization:
     expected = (
         visual_run.id == visual_run_id
@@ -392,21 +433,15 @@ def _validate_existing(
         and visual_run.subtitle_qc_hash == journal.get("subtitle_qc_hash")
         and budget is not None
         and budget.id == visual_run.budget_reservation_id
-        and budget.run_id == visual_run.id
+        and budget.run_id == workflow.id
         and budget.video_project_id == visual_run.video_project_id
         and budget.reservation_ref == visual_run.budget_reservation_ref
-        and (budget.capacity_evidence_json or {}).get("content_hash")
+        and authority.content_hash
         == visual_run.budget_authority_hash
-        and Decimal(budget.reserved_amount) == requirement.total_cost_usd
-        and (budget.provider_allocations_json or {})
-        == {
-            key: _money_text(value)
-            for key, value in {
-                NORMAL_AI_VISUAL_PROVIDER_KEY: requirement.image_cost_usd,
-                NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY: requirement.video_cost_usd,
-            }.items()
-            if value > 0
-        }
+        and Decimal(budget.reserved_amount)
+        == Decimal(authority.combined_replacement_projected_cost_usd)
+        and requirement.image_cost_usd <= Decimal(authority.ai_image_projected_cost_usd)
+        and requirement.video_cost_usd <= Decimal(authority.ai_video_projected_cost_usd)
         and budget.status in {"RESERVED", "SUBMITTED", "SETTLED_CONSERVATIVE"}
     )
     if not expected:
@@ -675,13 +710,23 @@ def authorize_normal_ai_visual_after_verified_media(
             MR1MonthlyBudgetReservation.run_id == workflow.id
         )
     )
-    _require_normal_per_video_aggregate_budget(
+    combined_authority = session.scalar(
+        select(CombinedReplacementBudgetAuthority).where(
+            CombinedReplacementBudgetAuthority.video_project_id == project.id,
+            CombinedReplacementBudgetAuthority.support_envelope_hash
+            == support_version.content_hash,
+            CombinedReplacementBudgetAuthority.budget_reservation_ref
+            == envelope.zero_cost_budget.reservation_ref,
+        )
+    )
+    combined_authority = _require_normal_combined_budget(
         workflow=workflow,
         project=project,
         media_budget=media_budget,
         envelope=envelope,
         channel_policy=channel_policy,
-        visual_requested_cost_usd=requirement.total_cost_usd,
+        authority=combined_authority,
+        requirement=requirement,
     )
     existing = session.scalar(
         select(AIVisualProductionRun).where(
@@ -703,84 +748,16 @@ def authorize_normal_ai_visual_after_verified_media(
             visual_run_id=visual_run_id,
             audio_duration_ms=duration_ms,
             requirement=requirement,
+            authority=combined_authority,
         )
     if workflow.ai_visual_production_run_id is not None:
         raise ValidationFailureError("V2_NORMAL_AI_VISUAL_WORKFLOW_ALREADY_BOUND")
 
-    resolved_settings = settings or get_settings()
-    environment_cap = _positive_money(
-        resolved_settings,
-        "monthly_ai_budget_usd",
-        "V2_NORMAL_AI_VISUAL_ENVIRONMENT_BUDGET_CAP_REQUIRED",
-    )
-    image_provider_cap = _positive_money(
-        resolved_settings,
-        "extra_ai_image_monthly_budget_usd",
-        "V2_NORMAL_AI_VISUAL_IMAGE_BUDGET_CAP_REQUIRED",
-    )
-    video_provider_cap = (
-        _veo_monthly_provider_cap(unit_cost_usd=requirement.video_unit_cost_usd)
-        if requirement.video_cost_usd > 0
-        else Decimal("0")
-    )
-    channel_cap = Decimal(str(channel_policy.budget_policy.monthly_channel_budget))
-    if (
-        min(environment_cap, channel_cap) < requirement.total_cost_usd
-        or image_provider_cap < requirement.image_cost_usd
-        or video_provider_cap < requirement.video_cost_usd
-    ):
-        raise ValidationFailureError("V2_NORMAL_AI_VISUAL_BUDGET_CAP_INSUFFICIENT")
-    allocations = {
-        key: value
-        for key, value in {
-            NORMAL_AI_VISUAL_PROVIDER_KEY: requirement.image_cost_usd,
-            NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY: requirement.video_cost_usd,
-        }.items()
-        if value > 0
-    }
-    provider_caps = {
-        key: value
-        for key, value in {
-            NORMAL_AI_VISUAL_PROVIDER_KEY: image_provider_cap,
-            NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY: video_provider_cap,
-        }.items()
-        if key in allocations
-    }
-    evidence = MR1MonthlyBudgetAuthority(session, clock=clock).reserve_run(
-        run_id=visual_run_id,
-        project_id=project.id,
-        reservation_amount_usd=requirement.total_cost_usd,
-        environment_cap_usd=environment_cap,
-        company_cap_usd=environment_cap,
-        channel_cap_usd=channel_cap,
-        provider_allocations_usd=allocations,
-        provider_caps_usd=provider_caps,
-        provider_aliases={
-            NORMAL_AI_VISUAL_PROVIDER_KEY: [
-                NORMAL_AI_VISUAL_PROVIDER_KEY,
-                "gemini_image",
-            ],
-            NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY: [
-                NORMAL_AI_VISUAL_VIDEO_PROVIDER_KEY,
-                "veo",
-            ],
-        },
-    )
-    budget = session.scalar(
-        select(MR1MonthlyBudgetReservation).where(
-            MR1MonthlyBudgetReservation.run_id == visual_run_id
-        )
-    )
-    budget_hash = str(
-        (evidence.get("capacity_evidence") or {}).get("content_hash") or ""
-    )
-    if (
-        budget is None
-        or evidence.get("status") != "RESERVED"
-        or budget.id != uuid.UUID(str(evidence.get("reservation_id")))
-        or budget.reservation_ref != evidence.get("reservation_ref")
-        or budget_hash != (budget.capacity_evidence_json or {}).get("content_hash")
-    ):
+    # The aggregate reservation was created before MEDIA.  Binding the normal
+    # visual run to it is consumption of its Gemini/Veo partitions, not a
+    # second reservation or a second monthly-capacity charge.
+    budget = media_budget
+    if budget is None:
         raise ValidationFailureError("V2_NORMAL_AI_VISUAL_BUDGET_RESERVATION_INVALID")
     now = clock()
     visual_run = AIVisualProductionRun(
@@ -808,7 +785,7 @@ def authorize_normal_ai_visual_after_verified_media(
         subtitle_qc_hash=subtitle_qc.content_hash,
         budget_reservation_id=budget.id,
         budget_reservation_ref=budget.reservation_ref,
-        budget_authority_hash=budget_hash,
+        budget_authority_hash=combined_authority.content_hash,
         state="AUTHORIZED",
         current_phase="AUTHORIZE",
         projection_version=1,

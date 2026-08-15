@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, runtime_checkable
 
@@ -69,10 +69,11 @@ from app.services.v2_support_authority import (
     _preflight_source,
     _project_authority_hash,
     _search_intent_source,
+)
+from app.services.v2_support_authority import (
     _destination_authority as _support_destination_authority,
 )
 from app.services.workflow import ArtifactService
-
 
 V2_SUPPORT_COMPILER_VERSION = "vcos.v2-support-compiler.v2"
 _SUPPORT_TYPES = (
@@ -323,8 +324,8 @@ class V2PackageReadinessGateway:
 
     support_producer: V2TrustedSupportProducer | None = None
     package_builder: V2ProductionPackageInputBuilder | None = None
-    descriptor: PreReadinessProductionGatewayDescriptor = (
-        PreReadinessProductionGatewayDescriptor(
+    descriptor: PreReadinessProductionGatewayDescriptor = field(
+        default_factory=lambda: PreReadinessProductionGatewayDescriptor(
             gateway_id="v2-package",
             version="1.0.0",
             supported_lanes=frozenset({ProductionLane.LONG_FORM}),
@@ -1061,6 +1062,22 @@ def _decimal_text(value: Any) -> str:
     return format(parsed, "f")
 
 
+def _combined_replacement_budget_binding(*, authority: Any) -> dict[str, Any]:
+    """Serialize a server-created combined authority for the MEDIA operation.
+
+    Package readiness is the only writer.  In particular this never reads or
+    augments MR1 reservation JSON, which remains immutable capacity evidence.
+    """
+
+    from app.services.combined_replacement_budget import (
+        CombinedReplacementBudgetAuthorityService,
+    )
+
+    return CombinedReplacementBudgetAuthorityService.provider_execution_binding(
+        authority
+    )
+
+
 def _real_provider_policy(authority: _SupportAuthority) -> ChannelScopedPolicy:
     try:
         scoped = ChannelScopedPolicy.model_validate(
@@ -1324,6 +1341,33 @@ def _support_payloads(
         and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
         else ["NATIVE_FFMPEG"]
     )
+    combined_replacement_budget = None
+    if real_production:
+        if voice_bundle is None or envelope is None:
+            raise ValidationFailureError(
+                "COMBINED_REPLACEMENT_VOICE_PROJECTION_REQUIRED"
+            )
+        from app.services.combined_replacement_budget import (
+            CombinedReplacementBudgetAuthorityService,
+        )
+
+        combined_authority = CombinedReplacementBudgetAuthorityService(
+            context.session
+        ).freeze(
+            project_id=authority.project.id,
+            reservation_ref=str(envelope.zero_cost_budget.reservation_ref or ""),
+            support_envelope_hash=support_envelope_hash,
+            route_budget_authority_hash=envelope.zero_cost_budget.content_hash,
+            projection=voice_bundle.projection,
+            canonical_narration=script["narration_text"],
+            visual_policy_hash=envelope.production_visual_policy_hash,
+            visual_preflight=envelope.zero_cost_budget.combined_replacement_preflight,
+            routes=envelope.native_routes,
+            approved_ceiling_usd=envelope.zero_cost_budget.authorized_cost_usd,
+        )
+        combined_replacement_budget = _combined_replacement_budget_binding(
+            authority=combined_authority
+        )
     for stage in (*stage_modes, "ARCHIVE"):
         route = route_by_stage.get(stage)
         adapter_key = (
@@ -1382,6 +1426,9 @@ def _support_payloads(
                     "narration_performance_plan_hash": voice_bundle.performance.content_hash,
                     "tts_performance_projection_id": str(voice_bundle.projection.id),
                     "tts_performance_projection_hash": voice_bundle.projection.content_hash,
+                    "qualified_script_hash": script_hash,
+                    "voice_id": voice_bundle.snapshot.voice_id,
+                    "model_id": voice_bundle.snapshot.model_id,
                     "tts_execution_strategy": voice_bundle.projection.execution_strategy,
                     "tts_segment_count": len(voice_bundle.projection.segments),
                     "capability_profile_version": voice_bundle.projection.capability_profile_version,
@@ -1406,6 +1453,9 @@ def _support_payloads(
                 "attempt_limit_per_segment": 1,
                 "idempotency_key": f"{operation_id}:elevenlabs-final-narration",
                 "estimated_cost_usd": max_cost_usd,
+                "combined_replacement_budget_authority": (
+                    combined_replacement_budget
+                ),
                 "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
                 "package_support_envelope_hash": support_envelope_hash,
             }
@@ -1432,6 +1482,9 @@ def _support_payloads(
                 "idempotency_key": f"{operation_id}:ai-visual-asset-set",
                 "estimated_cost_usd": max_cost_usd,
                 "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
+                "combined_replacement_budget_authority": (
+                    combined_replacement_budget
+                ),
                 "package_support_envelope_hash": support_envelope_hash,
             }
         if real_production and stage == "ARCHIVE":

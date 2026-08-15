@@ -30,7 +30,13 @@ from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.production_workflow import ProductionWorkflowStage
 from app.contracts.vcos_v2 import ProductionLane
 from app.core.actor import ActorContext, ActorType
-from app.core.config import Settings
+from app.core.config import (
+    Settings,
+    VEO_DEFAULT_DURATION_SECONDS,
+    VEO_DEFAULT_MODEL_ID,
+    VEO_DEFAULT_OUTPUT_COUNT,
+    VEO_DEFAULT_RESOLUTION,
+)
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.ai_visual import (
@@ -51,21 +57,19 @@ from app.db.models.v2_effect import (
     V2NarrationTimingRecoveryReceipt,
     V2ProductionEffectLedger,
 )
+from app.db.models.voice_authority import CombinedReplacementBudgetAuthority
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.ai_visual_rerender_authority import (
     AI_VISUAL_POLICY_REF,
-    AI_VISUAL_RERENDER_MAXIMUM_COST_USD,
-    AI_VISUAL_RERENDER_IMAGE_COST_USD,
-    AI_VISUAL_RERENDER_MAXIMUM_IMAGES,
-    AI_VISUAL_RERENDER_MAXIMUM_SCENES,
-    AI_VISUAL_RERENDER_MAXIMUM_VIDEOS,
-    AI_VISUAL_RERENDER_VIDEO_COST_USD,
     active_ai_visual_policy_authority,
     resolve_governed_ai_visual_rerender_execution_authority,
     seal_ai_visual_rerender_authority_hash,
 )
 from app.services.config_registry import content_hash
-from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
+from app.services.google_veo_catalog import GoogleVeoModelPriceCatalog
+from app.services.combined_replacement_budget import (
+    CombinedReplacementBudgetAuthorityService,
+)
 from app.services.production_workflow import (
     WORKFLOW_AGGREGATE_TYPE,
     WORKFLOW_CORRELATION_PREFIX,
@@ -91,6 +95,17 @@ _ALLOWED_REPLACEMENT_EVENT_STAGES = frozenset(
 _SOURCE_MEDIA_RESULT_TYPE = "V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE"
 _SOURCE_MEDIA_ADAPTER = "v2-elevenlabs-narration"
 _SHA256 = frozenset("0123456789abcdef")
+
+
+def _current_veo_unit_cost_usd() -> Decimal:
+    return GoogleVeoModelPriceCatalog().estimate(
+        model_id=VEO_DEFAULT_MODEL_ID,
+        resolution=VEO_DEFAULT_RESOLUTION,
+        duration_seconds=VEO_DEFAULT_DURATION_SECONDS,
+        output_count=VEO_DEFAULT_OUTPUT_COUNT,
+        hard_cap=Decimal("1000000"),
+        approval_amount=Decimal("1000000"),
+    ).estimated_amount
 
 
 class _ExactEventWorker(Protocol):
@@ -145,7 +160,7 @@ class _SourceScope:
     policy_snapshot: CompiledChannelPolicySnapshot
     channel_policy: ChannelScopedPolicy
     source_media_budget: MR1MonthlyBudgetReservation
-    frozen_media_ceiling_usd: Decimal
+    combined_budget_authority: CombinedReplacementBudgetAuthority
     timeline: dict[str, Any]
     timeline_relative_path: str
     audio_relative_path: str
@@ -209,9 +224,10 @@ class AIVisualRerenderRecoveryService:
         scope = self._resolve_source_scope(source_final_review_candidate_id)
         policy = active_ai_visual_policy_authority()
         visual_requirement = self._require_governed_visual_route_authority(scope)
-        self._require_governed_per_video_aggregate_budget(
+        combined_partition = self._require_governed_combined_visual_partition(
             scope,
-            visual_requested_cost_usd=visual_requirement[2],
+            image_count=visual_requirement[0],
+            video_count=visual_requirement[1],
         )
         created_at = self.now()
         authority_id = self._stable_id(
@@ -236,28 +252,22 @@ class AIVisualRerenderRecoveryService:
         self.session.add(replacement)
         self.session.flush()
 
-        budget_evidence = self._reserve_visual_budget(
-            scope=scope,
-            visual_run_id=visual_run_id,
-        )
-        budget = self.session.get(
-            MR1MonthlyBudgetReservation,
-            uuid.UUID(str(budget_evidence["reservation_id"])),
-        )
-        budget_hash = str(
-            (budget.capacity_evidence_json if budget is not None else {}).get(
-                "content_hash"
-            )
-            or ""
-        )
+        # The pre-TTS aggregate reservation already occupies the Gemini/Veo
+        # capacity.  A governed rerender is a zero-additional-occupancy child
+        # of that reservation; creating a visual-run MR1 reservation here
+        # would double-count the same replacement projection.
+        budget = scope.source_media_budget
+        budget_hash = scope.combined_budget_authority.content_hash
         if (
-            budget is None
-            or budget.run_id != visual_run_id
-            or budget.reservation_ref != budget_evidence.get("reservation_ref")
-            or budget_hash
-            != (budget_evidence.get("capacity_evidence") or {}).get("content_hash")
+            budget.id != scope.combined_budget_authority.budget_reservation_id
+            or budget.reservation_ref
+            != scope.combined_budget_authority.budget_reservation_ref
+            or budget.run_id != scope.source_workflow.id
+            or combined_partition.get("aggregate_reservation_id") != str(budget.id)
+            or combined_partition.get("aggregate_reservation_ref")
+            != budget.reservation_ref
         ):
-            raise ValidationFailureError("AI_VISUAL_RERENDER_BUDGET_RESERVATION_DRIFT")
+            raise ValidationFailureError("AI_VISUAL_RERENDER_COMBINED_BUDGET_DRIFT")
 
         authority_values: dict[str, Any] = {
             "id": authority_id,
@@ -297,10 +307,10 @@ class AIVisualRerenderRecoveryService:
             "budget_reservation_id": budget.id,
             "budget_reservation_ref": budget.reservation_ref,
             "budget_authority_hash": budget_hash,
-            "maximum_total_cost_usd": AI_VISUAL_RERENDER_MAXIMUM_COST_USD,
-            "maximum_scene_count": AI_VISUAL_RERENDER_MAXIMUM_SCENES,
-            "maximum_image_submissions": AI_VISUAL_RERENDER_MAXIMUM_IMAGES,
-            "maximum_video_submissions": AI_VISUAL_RERENDER_MAXIMUM_VIDEOS,
+            "maximum_total_cost_usd": visual_requirement[2],
+            "maximum_scene_count": visual_requirement[3],
+            "maximum_image_submissions": visual_requirement[0],
+            "maximum_video_submissions": visual_requirement[1],
             "maximum_tts_submissions": 0,
             "maximum_forced_alignment_submissions": 0,
             "narration_timing_recovery_authority_id": scope.timing_authority.id,
@@ -763,6 +773,40 @@ class AIVisualRerenderRecoveryService:
             raise ValidationFailureError(
                 "AI_VISUAL_RERENDER_SOURCE_BUDGET_AUTHORITY_DRIFT"
             )
+        combined_authorities = list(
+            self.session.scalars(
+                select(CombinedReplacementBudgetAuthority).where(
+                    CombinedReplacementBudgetAuthority.video_project_id == project.id,
+                    CombinedReplacementBudgetAuthority.budget_reservation_id
+                    == source_media_budget.id,
+                    CombinedReplacementBudgetAuthority.budget_reservation_ref
+                    == source_media_budget.reservation_ref,
+                    CombinedReplacementBudgetAuthority.support_envelope_hash
+                    == support_version.content_hash,
+                    CombinedReplacementBudgetAuthority.route_budget_authority_hash
+                    == frozen.content_hash,
+                )
+            ).all()
+        )
+        if len(combined_authorities) != 1:
+            raise ValidationFailureError(
+                "AI_VISUAL_RERENDER_COMBINED_BUDGET_AUTHORITY_REQUIRED"
+            )
+        combined_budget_authority = combined_authorities[0]
+        if (
+            combined_budget_authority.state != "FROZEN"
+            or Decimal(
+                combined_budget_authority.combined_replacement_projected_cost_usd
+            )
+            != frozen_media_ceiling
+            or combined_budget_authority.content_hash
+            != CombinedReplacementBudgetAuthorityService.provider_execution_binding(
+                combined_budget_authority
+            ).get("authority_hash")
+        ):
+            raise ValidationFailureError(
+                "AI_VISUAL_RERENDER_COMBINED_BUDGET_AUTHORITY_DRIFT"
+            )
         return _SourceScope(
             candidate=candidate,
             final_media=final_media,
@@ -780,7 +824,7 @@ class AIVisualRerenderRecoveryService:
             policy_snapshot=policy_snapshot,
             channel_policy=channel_policy,
             source_media_budget=source_media_budget,
-            frozen_media_ceiling_usd=frozen_media_ceiling,
+            combined_budget_authority=combined_budget_authority,
             timeline=timeline,
             timeline_relative_path=timeline_relative,
             audio_relative_path=audio_relative,
@@ -793,22 +837,50 @@ class AIVisualRerenderRecoveryService:
     def _require_governed_visual_route_authority(
         self,
         scope: _SourceScope,
-    ) -> tuple[int, int, Decimal]:
+    ) -> tuple[int, int, Decimal, int]:
         """Compile exact owner requirements without creating paid authority."""
 
         from app.services.v2_ai_visual_stage import (
             V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD,
-            V2_AI_VISUAL_FIRST_VIDEO_VIDEO_UNIT_COST_USD,
             compile_ai_visual_stage_planning,
         )
 
         provisional_run_id = self._stable_id(
             "visual-run", scope.candidate.id, scope.candidate.candidate_hash
         )
-        # Compile against the exact approved route caps. Required motion is
-        # proven only from each timed child narration window, so optional video
-        # supply cannot inflate the paid projection before the aggregate-budget
-        # firewall runs.
+        # Reuse the exact pre-TTS owner envelope.  A governed rerender cannot
+        # infer a 14-image/zero-video budget from the script or a deployment
+        # constant: the active source combined authority is the only cost
+        # ceiling it may consume.
+        preflight = dict(
+            (scope.combined_budget_authority.source_refs or {}).get(
+                "ai_visual_preflight"
+            )
+            or {}
+        )
+        try:
+            maximum_image_submissions = int(
+                preflight["unique_ai_image_asset_slot_count"]
+            )
+            maximum_video_submissions = int(
+                preflight["unique_ai_video_asset_slot_count"]
+            )
+            maximum_scene_count = len(
+                list(preflight["visual_plan_compilation"]["scenes"])
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "AI_VISUAL_RERENDER_COMBINED_VISUAL_PARTITION_REQUIRED"
+            ) from exc
+        if (
+            maximum_image_submissions < 0
+            or maximum_video_submissions < 0
+            or maximum_image_submissions + maximum_video_submissions <= 0
+            or maximum_scene_count <= 0
+        ):
+            raise ValidationFailureError(
+                "AI_VISUAL_RERENDER_COMBINED_VISUAL_PARTITION_REQUIRED"
+            )
         try:
             planning = compile_ai_visual_stage_planning(
                 visual_run=SimpleNamespace(
@@ -822,8 +894,8 @@ class AIVisualRerenderRecoveryService:
                 timeline=scope.timeline,
                 provider_readiness_ref="preflight://google-gemini-image+google-veo",
                 budget_authority_ref="preflight://no-paid-authority",
-                maximum_image_submissions=512,
-                maximum_video_submissions=AI_VISUAL_RERENDER_MAXIMUM_VIDEOS,
+                maximum_image_submissions=maximum_image_submissions,
+                maximum_video_submissions=maximum_video_submissions,
             )
         except ValidationFailureError as exc:
             if str(exc) == "V2_AI_VISUAL_VIDEO_DURATION_AUTHORITY_INSUFFICIENT":
@@ -835,50 +907,53 @@ class AIVisualRerenderRecoveryService:
         video_count = planning.scene_plan.unique_ai_video_asset_slot_count
         visual_cost = (
             V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD * image_count
-            + V2_AI_VISUAL_FIRST_VIDEO_VIDEO_UNIT_COST_USD * video_count
+            + _current_veo_unit_cost_usd() * video_count
         )
         video_seconds = video_count * 8
         budget = scope.channel_policy.budget_policy
         if (
             video_count > int(budget.max_veo_clips_per_video)
             or video_seconds > Decimal(str(budget.max_veo_seconds_per_video))
-            or V2_AI_VISUAL_FIRST_VIDEO_VIDEO_UNIT_COST_USD * video_count
+            or _current_veo_unit_cost_usd() * video_count
             > Decimal(str(budget.max_veo_cost_per_video))
-            or video_count > AI_VISUAL_RERENDER_MAXIMUM_VIDEOS
         ):
             raise ValidationFailureError(
                 "AI_VISUAL_RERENDER_VIDEO_DURATION_AUTHORITY_INSUFFICIENT"
             )
         if (
-            image_count > AI_VISUAL_RERENDER_MAXIMUM_IMAGES
-            or len(planning.scene_plan.scenes) > AI_VISUAL_RERENDER_MAXIMUM_SCENES
+            len(planning.scene_plan.scenes) > maximum_scene_count
         ):
             raise ValidationFailureError(
                 "AI_VISUAL_RERENDER_VISUAL_ROUTE_AUTHORITY_INSUFFICIENT"
             )
-        return image_count, video_count, visual_cost
+        return image_count, video_count, visual_cost, len(planning.scene_plan.scenes)
 
-    def _require_governed_per_video_aggregate_budget(
+    def _require_governed_combined_visual_partition(
         self,
         scope: _SourceScope,
         *,
-        visual_requested_cost_usd: Decimal,
-    ) -> None:
-        """A replacement remains the same project/video budget authority.
+        image_count: int,
+        video_count: int,
+    ) -> dict[str, Any]:
+        """Return the existing aggregate's zero-occupancy visual partition."""
 
-        This runs before the replacement workflow, visual run, or fresh MR1
-        reservation is inserted.  A governed rerender is not a second video
-        and therefore cannot obtain an independent per-video ceiling.
-        """
-
-        policy_cap = Decimal(
-            str(scope.channel_policy.budget_policy.max_estimated_cost_per_video)
-        )
-        aggregate = scope.frozen_media_ceiling_usd + visual_requested_cost_usd
-        if aggregate > policy_cap:
-            raise ValidationFailureError(
-                "AI_VISUAL_RERENDER_APPROVED_BUDGET_INSUFFICIENT"
+        try:
+            return (
+                CombinedReplacementBudgetAuthorityService.governed_rerender_visual_partition(
+                    authority=scope.combined_budget_authority,
+                    reservation=scope.source_media_budget,
+                    production_visual_policy_ref=AI_VISUAL_POLICY_REF,
+                    production_visual_policy_hash=active_ai_visual_policy_authority()[
+                        "hash"
+                    ],
+                    image_owner_count=image_count,
+                    video_owner_count=video_count,
+                )
             )
+        except ValidationFailureError as exc:
+            raise ValidationFailureError(
+                "AI_VISUAL_RERENDER_COMBINED_VISUAL_PARTITION_REQUIRED"
+            ) from exc
 
     def _new_replacement_workflow(
         self,
@@ -955,77 +1030,6 @@ class AIVisualRerenderRecoveryService:
             },
             created_at=created_at,
             updated_at=created_at,
-        )
-
-    def _reserve_visual_budget(
-        self,
-        *,
-        scope: _SourceScope,
-        visual_run_id: uuid.UUID,
-    ) -> dict[str, Any]:
-        environment_cap = self._positive_cap(
-            self.settings.monthly_ai_budget_usd,
-            "AI_VISUAL_RERENDER_ENVIRONMENT_BUDGET_CAP_REQUIRED",
-        )
-        provider_cap = self._positive_cap(
-            self.settings.extra_ai_image_monthly_budget_usd,
-            "AI_VISUAL_RERENDER_IMAGE_BUDGET_CAP_REQUIRED",
-        )
-        channel_cap = Decimal(
-            str(scope.channel_policy.budget_policy.monthly_channel_budget)
-        )
-        # The frozen channel authorizes at most one $1 Veo clip per video and
-        # twenty monthly Veo renders.  Convert that render quota to the exact
-        # active Fast-720p catalog ceiling instead of borrowing Gemini's cap.
-        veo_provider_cap = Decimal(
-            str(scope.channel_policy.budget_policy.max_veo_cost_per_video)
-        ) * Decimal("20")
-        if (
-            environment_cap < AI_VISUAL_RERENDER_MAXIMUM_COST_USD
-            or channel_cap < AI_VISUAL_RERENDER_MAXIMUM_COST_USD
-            or provider_cap < AI_VISUAL_RERENDER_IMAGE_COST_USD
-            or veo_provider_cap < AI_VISUAL_RERENDER_VIDEO_COST_USD
-        ):
-            raise ValidationFailureError("AI_VISUAL_RERENDER_BUDGET_CAP_INSUFFICIENT")
-        return MR1MonthlyBudgetAuthority(self.session, clock=self.now).reserve_run(
-            run_id=visual_run_id,
-            project_id=scope.project.id,
-            reservation_amount_usd=AI_VISUAL_RERENDER_MAXIMUM_COST_USD,
-            environment_cap_usd=environment_cap,
-            company_cap_usd=environment_cap,
-            channel_cap_usd=channel_cap,
-            provider_allocations_usd={
-                provider: amount
-                for provider, amount in {
-                    "google_gemini_image": AI_VISUAL_RERENDER_IMAGE_COST_USD,
-                    "google_veo": AI_VISUAL_RERENDER_VIDEO_COST_USD,
-                }.items()
-                if amount > 0
-            },
-            provider_caps_usd={
-                provider: amount
-                for provider, amount in {
-                    "google_gemini_image": provider_cap,
-                    "google_veo": veo_provider_cap,
-                }.items()
-                if (
-                    provider == "google_gemini_image"
-                    and AI_VISUAL_RERENDER_IMAGE_COST_USD > 0
-                )
-                or (provider == "google_veo" and AI_VISUAL_RERENDER_VIDEO_COST_USD > 0)
-            },
-            provider_aliases={
-                provider: aliases
-                for provider, aliases in {
-                    "google_gemini_image": ["google_gemini_image", "gemini_image"],
-                    "google_veo": ["google_veo", "veo"],
-                }.items()
-                if (
-                    provider == "google_gemini_image"
-                    and AI_VISUAL_RERENDER_IMAGE_COST_USD > 0
-                )
-                or (provider == "google_veo" and AI_VISUAL_RERENDER_VIDEO_COST_USD > 0)
-            },
         )
 
     def _replay_result(
@@ -1295,16 +1299,6 @@ class AIVisualRerenderRecoveryService:
         return uuid.uuid5(
             _IDENTITY_NAMESPACE, f"{kind}:{candidate_id}:{candidate_hash}"
         )
-
-    @staticmethod
-    def _positive_cap(value: Any, code: str) -> Decimal:
-        try:
-            cap = Decimal(str(value))
-        except Exception as exc:
-            raise ValidationFailureError(code) from exc
-        if not cap.is_finite() or cap <= 0:
-            raise ValidationFailureError(code)
-        return cap
 
     @staticmethod
     def _required_journal_text(value: Mapping[str, Any], key: str) -> str:
