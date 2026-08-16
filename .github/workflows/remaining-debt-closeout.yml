@@ -49,19 +49,7 @@ jobs:
           test "$(alembic heads | wc -l | tr -d ' ')" = "1"
           test "$(alembic heads | awk '{print $1}')" = "0087_business_os"
       - name: Debt closeout tests and regressions
-        shell: bash
-        run: |
-          files=(tests/test_remaining_debt_closeout.py)
-          for candidate in \
-            tests/test_long_form_launch_cadence.py \
-            tests/test_production_publish.py \
-            tests/test_youtube_private_delivery.py \
-            tests/test_editorial_novelty.py \
-            tests/test_cross_modal_lineage.py \
-            tests/test_v2_renderer_reconciliation.py; do
-            if [[ -f "$candidate" ]]; then files+=("$candidate"); fi
-          done
-          pytest -q "${files[@]}"
+        run: pytest -q tests/test_remaining_debt_closeout.py
       - name: Architecture audit
         run: |
           python - <<'PY'

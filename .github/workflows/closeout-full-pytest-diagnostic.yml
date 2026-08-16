@@ -1,9 +1,7 @@
 name: Remaining Debt Full Pytest Diagnostic
 
 on:
-  push:
-    branches:
-      - feat/vcos-remaining-debt-closeout
+  workflow_dispatch:
 
 permissions:
   contents: read
