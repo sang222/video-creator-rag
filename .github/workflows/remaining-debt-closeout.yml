@@ -58,15 +58,6 @@ jobs:
           result = ArchitectureDebtAuditService().audit(Path.cwd())
           print(result)
           PY
-      - name: Ruff format diagnostic
-        run: |
-          ruff format --diff \
-            app/db/models/remaining_debt.py \
-            app/services/remaining_debt_closeout.py \
-            tests/test_remaining_debt_closeout.py \
-            alembic/versions/0085_series_authority.py \
-            alembic/versions/0086_learning_authority.py \
-            alembic/versions/0087_business_os.py || true
       - name: Ruff
         run: |
           ruff check \

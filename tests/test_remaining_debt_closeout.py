@@ -686,9 +686,10 @@ def test_publication_closeout_requires_the_compiled_policy_hash(db: Session) -> 
     )
     receipt = SimpleNamespace(id=uuid.uuid4())
     coordinator = RemainingDebtCloseoutCoordinator(db)
-    assert "compiled_policy_snapshot_hash" in inspect.signature(
-        coordinator.on_publication_verified
-    ).parameters
+    assert (
+        "compiled_policy_snapshot_hash"
+        in inspect.signature(coordinator.on_publication_verified).parameters
+    )
     assert "compiled_policy_snapshot_hash" in inspect.getsource(
         ProductionPublishService.verify_confirmation
     )

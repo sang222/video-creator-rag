@@ -969,9 +969,7 @@ class LearningAuthorityService:
             "source_version": (
                 f"{ANALYTICS_DATA_AUTHORITY_POLICY['version']}:{snapshot.id}"
             ),
-            "maturity_state": "TOO_EARLY"
-            if window_key in {"H24", "H72"}
-            else "MATURE",
+            "maturity_state": "TOO_EARLY" if window_key in {"H24", "H72"} else "MATURE",
             "confidence_state": confidence_state,
             "sample_size": max(int(views or 0), 0),
             "impressions": impressions,
@@ -2508,9 +2506,7 @@ class ArchitectureDebtAuditService:
             "state": "PROVEN" if passed else "NOT_PROVEN",
             "code_isolation_state": "CODE_ISOLATION_PROVEN",
             "live_portfolio_state": (
-                "LIVE_PORTFOLIO_PROVEN"
-                if passed
-                else "LIVE_PORTFOLIO_PROOF_NOT_PROVEN"
+                "LIVE_PORTFOLIO_PROVEN" if passed else "LIVE_PORTFOLIO_PROOF_NOT_PROVEN"
             ),
             "verified_channel_count": len(proven_channels),
             "distinct_profile_count": len(profile_hashes),
