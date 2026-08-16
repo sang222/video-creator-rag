@@ -119,12 +119,217 @@ def _patch_current_evidence_authority_split() -> None:
     )
 
 
+def _patch_current_voice_authority_fixture() -> None:
+    """Seed current typed voice authority for strict generic qualification only."""
+
+    path = Path("tests/qualification/conftest.py")
+    _replace_once(
+        path,
+        "from app.contracts.m5 import (\n",
+        '''from app.contracts.voice_authority import (
+    ApprovedVoicePoolCreate,
+    NarrationMarketRequirements,
+    ProviderVoiceCandidate,
+    VoiceMarketIdentity,
+    VoiceMarketResearchCreate,
+    VoiceProviderCatalogCreate,
+    VoiceResearchEvidence,
+)
+from app.contracts.m5 import (
+''',
+        label="LF voice authority contract imports",
+    )
+    _replace_once(
+        path,
+        "from app.services.creative_quality_policy import CreativeQualityPolicyCatalog\n",
+        '''from app.services.creative_quality_policy import CreativeQualityPolicyCatalog
+from app.services.voice_authority import VoiceAuthorityService
+''',
+        label="LF voice authority service import",
+    )
+
+    helper = '''
+
+def _seed_generic_voice_authority(
+    session,
+    *,
+    company,
+    channel,
+    profile,
+    snapshot,
+    admin,
+) -> None:
+    """Create test-only typed voice authority without provider execution."""
+
+    scoped = snapshot.compiled_payload.get("channel_scoped_policy")
+    if not isinstance(scoped, dict):
+        raise RuntimeError("generic qualification channel policy is missing")
+    market = scoped.get("target_market_profile")
+    voice_policy = scoped.get("voice_policy")
+    if not isinstance(market, dict) or not isinstance(voice_policy, dict):
+        raise RuntimeError("generic qualification voice/market authority is missing")
+
+    primary_market = str(market.get("primary_market") or "")
+    locale = str(market.get("narration_locale") or market.get("primary_locale") or "")
+    language = str(market.get("content_language") or "")
+    voice_id = str(voice_policy.get("voice_id") or "")
+    voice_name = str(voice_policy.get("voice_name") or "Qualification Narrator")
+    model_id = str(voice_policy.get("model_id") or "")
+    settings = voice_policy.get("settings")
+    if not all((primary_market, locale, language, voice_id, model_id)) or not isinstance(
+        settings, dict
+    ):
+        raise RuntimeError("generic qualification voice authority is incomplete")
+
+    narration_modes = [
+        "TECHNICAL_EXPLAINER",
+        "ANALYTICAL",
+        "TACTICAL",
+        "STORY_CASE_STUDY",
+        "DOCUMENTARY",
+        "CAUTIONARY",
+    ]
+    voice = ProviderVoiceCandidate(
+        voice_id=voice_id,
+        display_name=voice_name,
+        language_tags=[language],
+        locale_tags=[locale],
+        accent_tags=[f"{primary_market}-neutral"],
+        narration_mode_fit=narration_modes,
+        market_fit_tags=[primary_market],
+        clarity_score=95,
+        energy_score=75,
+        warmth_score=70,
+        authority_score=90,
+        conversationality_score=80,
+        approved_model_ids=[model_id],
+        default_model_id=model_id,
+        default_settings=dict(settings),
+        safe_setting_bounds={
+            "speed": {"min": 0.85, "max": 1.10},
+            "stability": {"min": 0.35, "max": 0.75},
+            "similarity_boost": {"min": 0.65, "max": 0.90},
+            "style": {"min": 0.0, "max": 0.20},
+        },
+        commercial_use_state="REQUIRES_APPROVED_PLAN",
+        availability_state="AVAILABLE",
+        priority=10,
+        evidence_refs=[f"policy-snapshot://{snapshot.id}"],
+    )
+
+    authority = VoiceAuthorityService(session)
+    research = authority.create_market_research(
+        VoiceMarketResearchCreate(
+            company_id=company.id,
+            channel_workspace_id=channel.id,
+            channel_profile_version_id=profile.id,
+            policy_snapshot_id=snapshot.id,
+            market_identity=VoiceMarketIdentity(
+                primary_market=primary_market,
+                target_countries=list(
+                    market.get("primary_geo_cluster") or [primary_market]
+                ),
+                content_language=language,
+                locale=locale,
+                audience_profile={"fixture": "generic-long-form-qualification"},
+                channel_positioning="Generic evidence-aware long-form qualification",
+            ),
+            requirements=NarrationMarketRequirements(
+                accent_families=[f"{primary_market}-neutral"],
+                pronunciation_locale=locale,
+                clarity_profile="HIGH",
+                pacing_profile="MEDIUM",
+                energy_profile="MEDIUM",
+                authority_profile="HIGH",
+                warmth_profile="MEDIUM",
+                conversationality_profile="HIGH",
+                required_narration_modes=narration_modes,
+            ),
+            evidence=[
+                VoiceResearchEvidence(
+                    evidence_id=f"policy-snapshot:{snapshot.id}",
+                    source_url=None,
+                    source_title="Compiled generic qualification channel policy",
+                    source_class="CHANNEL_POLICY",
+                    excerpt=(
+                        "The active test policy freezes market, locale, voice provider, "
+                        "model and narration settings for strict long-form qualification."
+                    ),
+                    source_hash=str(snapshot.content_hash),
+                )
+            ],
+            confidence_label="HIGH",
+            limitations=[
+                "Ephemeral test authority only; no provider or public platform call."
+            ],
+            created_by_user_id=admin.id,
+        )
+    )
+    catalog = authority.create_provider_catalog(
+        VoiceProviderCatalogCreate(
+            company_id=company.id,
+            channel_workspace_id=channel.id,
+            provider="elevenlabs",
+            catalog_version=f"qualification-{channel.key}-v1",
+            voices=[voice],
+            source_refs=[f"policy-snapshot://{snapshot.id}"],
+            created_by_user_id=admin.id,
+        )
+    )
+    authority.create_approved_pool(
+        ApprovedVoicePoolCreate(
+            company_id=company.id,
+            channel_workspace_id=channel.id,
+            channel_profile_version_id=profile.id,
+            policy_snapshot_id=snapshot.id,
+            voice_market_research_id=research.id,
+            provider_catalog_snapshot_id=catalog.id,
+            version=1,
+            voices=[voice],
+            approved_by_user_id=admin.id,
+        )
+    )
+
+
+class QualificationFactory:
+'''
+    _replace_once(
+        path,
+        "\n\nclass QualificationFactory:\n",
+        helper,
+        label="LF generic voice authority helper",
+    )
+
+    _replace_once(
+        path,
+        '''        snapshot = profiles.activate_snapshot(snapshot_id=compiled.snapshot_id)
+        profile = profiles.get_profile_version(profile.id)
+        return SimpleNamespace(company=company, channel=channel, profile=profile, snapshot=snapshot, operator=operator, admin=admin, compiled=compiled)
+''',
+        '''        snapshot = profiles.activate_snapshot(snapshot_id=compiled.snapshot_id)
+        profile = profiles.get_profile_version(profile.id)
+        if strict_long_form:
+            _seed_generic_voice_authority(
+                self.session,
+                company=company,
+                channel=channel,
+                profile=profile,
+                snapshot=snapshot,
+                admin=admin,
+            )
+        return SimpleNamespace(company=company, channel=channel, profile=profile, snapshot=snapshot, operator=operator, admin=admin, compiled=compiled)
+''',
+        label="LF seed typed voice authority",
+    )
+
+
 def main() -> None:
     stage = sys.argv[1] if len(sys.argv) > 1 else ""
     _repair_round2_niche_digest_helper_boundary()
     _run_original_round3()
     if stage == "rc2":
         _patch_current_evidence_authority_split()
+        _patch_current_voice_authority_fixture()
 
 
 if __name__ == "__main__":
