@@ -1000,11 +1000,14 @@ class LearningAuthorityService:
     ) -> AnalyticsEvidenceWindow:
         snapshot = self.session.get(AnalyticsSnapshot, analytics_snapshot_id)
         if snapshot is None:
-            raise NotFoundError(f"analytics snapshot not found: {analytics_snapshot_id}")
+            raise NotFoundError(
+                f"analytics snapshot not found: {analytics_snapshot_id}"
+            )
         availability = self.session.scalar(
             select(MetricAvailabilitySnapshot)
             .where(
-                MetricAvailabilitySnapshot.uploaded_video_id == snapshot.uploaded_video_id,
+                MetricAvailabilitySnapshot.uploaded_video_id
+                == snapshot.uploaded_video_id,
                 MetricAvailabilitySnapshot.analytics_sync_run_id
                 == snapshot.analytics_sync_run_id,
                 MetricAvailabilitySnapshot.platform == snapshot.platform,
@@ -1211,7 +1214,8 @@ class LearningAuthorityService:
                 select(func.count(LearningEquivalenceFingerprint.id)).where(
                     LearningEquivalenceFingerprint.channel_workspace_id
                     == fingerprint.channel_workspace_id,
-                    LearningEquivalenceFingerprint.fingerprint == fingerprint.fingerprint,
+                    LearningEquivalenceFingerprint.fingerprint
+                    == fingerprint.fingerprint,
                 )
             )
             or 0
@@ -1891,7 +1895,8 @@ class BusinessMonitoringService:
         )
         high_enforcement = self.session.scalar(
             select(PlatformEnforcementIncident.id).where(
-                PlatformEnforcementIncident.channel_workspace_id == channel_workspace_id,
+                PlatformEnforcementIncident.channel_workspace_id
+                == channel_workspace_id,
                 PlatformEnforcementIncident.state == "OPEN",
                 PlatformEnforcementIncident.severity.in_({"HIGH", "CRITICAL"}),
             )
@@ -2463,7 +2468,7 @@ class ArchitectureDebtAuditService:
 
     @staticmethod
     def code_isolation_proof(result: ArchitectureAuditResult) -> dict[str, Any]:
-        """Report code isolation separately from evidence that only live channels supply."""
+        """Report code isolation separately from evidence only live channels supply."""
 
         return {
             "state": (
@@ -2579,7 +2584,8 @@ class RemainingDebtCloseoutCoordinator:
                 str(market.get("content_language") or market.get("locale") or "UNKNOWN")
             ],
             packaging_refs=[
-                f"production-package://{getattr(candidate, 'production_package_hash', '')}"
+                "production-package://"
+                f"{getattr(candidate, 'production_package_hash', '')}"
             ],
             playlist_refs=[],
         )
