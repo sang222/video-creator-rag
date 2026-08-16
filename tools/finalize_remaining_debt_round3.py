@@ -363,6 +363,138 @@ def qualification_factory(db_session, monkeypatch):
     )
 
 
+def _patch_current_tts_projection_text_hash_semantics() -> None:
+    """Align the projection producer with canonical text-fidelity consumers."""
+
+    path = Path("app/services/voice_authority.py")
+    _replace_once(
+        path,
+        '''    def compile_tts_projection(
+        self, *, performance_plan_id: uuid.UUID
+    ) -> TTSPerformanceProjection:
+        plan = self.session.get(NarrationPerformancePlan, performance_plan_id)
+        if plan is None or plan.state != "FROZEN":
+            raise ValidationFailureError("FROZEN_PERFORMANCE_PLAN_REQUIRED")
+''',
+        '''    def compile_tts_projection(
+        self,
+        *,
+        performance_plan_id: uuid.UUID,
+        canonical_narration: str,
+    ) -> TTSPerformanceProjection:
+        plan = self.session.get(NarrationPerformancePlan, performance_plan_id)
+        if plan is None or plan.state != "FROZEN":
+            raise ValidationFailureError("FROZEN_PERFORMANCE_PLAN_REQUIRED")
+        if _text_hash(canonical_narration) != plan.canonical_narration_hash:
+            raise ValidationFailureError(
+                "TTS_PROJECTION_CANONICAL_NARRATION_MISMATCH"
+            )
+''',
+        label="TTS projection canonical narration contract",
+    )
+    _replace_once(
+        path,
+        '''        segments = self._compile_segments(
+            beats=beats,
+            voice=voice,
+            capabilities=capabilities,
+        )
+''',
+        '''        segments = self._compile_segments(
+            beats=beats,
+            canonical_narration=canonical_narration,
+            voice=voice,
+            capabilities=capabilities,
+        )
+''',
+        label="TTS projection canonical segment input",
+    )
+    _replace_once(
+        path,
+        '''        projection = self.compile_tts_projection(performance_plan_id=performance.id)
+''',
+        '''        projection = self.compile_tts_projection(
+            performance_plan_id=performance.id,
+            canonical_narration=canonical_narration,
+        )
+''',
+        label="TTS bundle canonical projection input",
+    )
+    _replace_once(
+        path,
+        '''    def _compile_segments(
+        *,
+        beats: Sequence[NarrationPerformanceBeat],
+        voice: ProviderVoiceCandidate,
+        capabilities: dict[str, Any],
+    ) -> list[TTSPerformanceSegment]:
+''',
+        '''    def _compile_segments(
+        *,
+        beats: Sequence[NarrationPerformanceBeat],
+        canonical_narration: str,
+        voice: ProviderVoiceCandidate,
+        capabilities: dict[str, Any],
+    ) -> list[TTSPerformanceSegment]:
+''',
+        label="TTS segment compiler canonical input",
+    )
+    _replace_once(
+        path,
+        '''                    text_hash=content_hash(
+                        {
+                            "source_text_start": start,
+                            "source_text_end": end,
+                            "beat_hashes": [beat.source_text_hash for beat in group],
+                        }
+                    ),
+''',
+        '''                    text_hash=_text_hash(canonical_narration[start:end]),
+''',
+        label="TTS segment canonical text hash",
+    )
+
+    test_path = Path("tests/test_voice_authority.py")
+    _replace_once(
+        test_path,
+        "from app.core.errors import ValidationFailureError\n",
+        '''from app.core.errors import ValidationFailureError
+from app.services.config_registry import content_hash
+''',
+        label="TTS text-hash regression import",
+    )
+    _replace_once(
+        test_path,
+        '''    segments = VoiceAuthorityService._compile_segments(
+        beats=beats,
+        voice=_voice(),
+''',
+        '''    segments = VoiceAuthorityService._compile_segments(
+        beats=beats,
+        canonical_narration=narration,
+        voice=_voice(),
+''',
+        label="TTS text-hash regression canonical input",
+    )
+    _replace_once(
+        test_path,
+        '''    for segment in segments:
+        assert 0.85 <= float(segment.voice_settings["speed"]) <= 1.10
+''',
+        '''    for segment in segments:
+        assert segment.text_hash == content_hash(
+            {
+                "text": narration[
+                    segment.source_text_start : segment.source_text_end
+                ]
+            }
+        )
+        assert 0.85 <= float(segment.voice_settings["speed"]) <= 1.10
+''',
+        label="TTS text-hash regression assertion",
+    )
+
+
 def main() -> None:
     stage = sys.argv[1] if len(sys.argv) > 1 else ""
     _repair_round2_niche_digest_helper_boundary()
@@ -371,6 +503,7 @@ def main() -> None:
         _patch_current_evidence_authority_split()
         _patch_current_voice_authority_fixture()
         _patch_current_long_form_cost_authority_fixture()
+        _patch_current_tts_projection_text_hash_semantics()
 
 
 if __name__ == "__main__":
