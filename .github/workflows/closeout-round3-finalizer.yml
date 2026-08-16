@@ -130,8 +130,8 @@ jobs:
           assert 'authority_purpose="MARKET_DEMAND"' in block, block
           assert 'evidence_source_type="MANUAL_RESEARCH"' not in block, block
           assert "search_volume_30d" in block, block
-          assert "monthly_searches" in block, block
-          assert "growth_90d" in block, block
+          assert "relative_interest_index" in block, block
+          assert "competition_index" in block, block
           print("RC2_FACTORY_AUTHORITY=PASS")
           PY
       - name: Apply RC-1 NICH1 visual-authority fix only
