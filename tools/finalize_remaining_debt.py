@@ -751,9 +751,10 @@ def patch_workflows() -> None:
             '          test "$(alembic heads | wc -l | tr -d \' \')" = "1"\n'
             '          test "$(alembic heads | awk \'{print $1}\')" = "0087_business_os"\n'
         )
-        if old not in value:
-            raise SystemExit(f"stale Alembic assertion not found in {workflow}")
-        workflow.write_text(value.replace(old, new, 1))
+        if old in value:
+            workflow.write_text(value.replace(old, new, 1))
+        elif new not in value:
+            raise SystemExit(f"unexpected Alembic assertion in {workflow}")
 
     workflow = Path(".github/workflows/remaining-debt-closeout.yml")
     value = workflow.read_text()

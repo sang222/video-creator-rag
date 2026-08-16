@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -520,6 +520,10 @@ class SeriesAuthorityService:
             if result is None:
                 raise ConflictError("SERIES_EXTENSION_COMMAND_REUSE_CONFLICT")
             return result
+        # The partial unique index permits only one ACTIVE or COMPLETION_PENDING
+        # arc per plan.  Retire the predecessor before inserting its successor.
+        arc.state = "SUPERSEDED"
+        self.session.flush()
         payload = {
             "schema_version": "vcos.series-arc-version.v1",
             "company_id": arc.company_id,
@@ -590,7 +594,6 @@ class SeriesAuthorityService:
                 editorial_contract={"extension_placeholder": True},
                 coverage_tags=[],
             )
-        arc.state = "SUPERSEDED"
         self._decision(
             arc=arc,
             decision_type="EXTEND",
