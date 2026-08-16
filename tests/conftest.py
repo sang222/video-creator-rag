@@ -15,9 +15,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-ADMIN_URL = os.getenv(
-    "VCOS_TEST_ADMIN_DATABASE_URL",
-    "postgresql+psycopg://vcos:vcos@localhost:55432/postgres",
+_DEFAULT_ADMIN_URL = "postgresql+psycopg://vcos:vcos@localhost:55432/postgres"
+_runtime_database_url = os.getenv("VCOS_DATABASE_URL")
+ADMIN_URL = os.getenv("VCOS_TEST_ADMIN_DATABASE_URL") or (
+    make_url(_runtime_database_url)
+    .set(database="postgres")
+    .render_as_string(hide_password=False)
+    if _runtime_database_url
+    else _DEFAULT_ADMIN_URL
 )
 TEST_DB_NAME = f"vcos_test_{os.getpid()}_{uuid.uuid4().hex[:8]}"
 TEST_DATABASE_URL = (

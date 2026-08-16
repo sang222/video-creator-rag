@@ -49,29 +49,10 @@ jobs:
           python -m pip install -e ".[dev]" ruff==0.15.12
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
-      - name: Reconstruct audited closeout workspace
+      - name: Validate checked-in closeout workspace
         shell: bash
         run: |
           set -euo pipefail
-          python tools/finalize_remaining_debt.py
-          python tools/finalize_remaining_debt_harness.py
-          python tools/finalize_remaining_debt_round2.py
-          rm -f app/services/runtime_bootstrap.py
-          sed -i '/app\/services\/runtime_bootstrap.py/d' .github/workflows/youtube-private-delivery.yml
-          touch tests/__init__.py
-          mkdir -p tests/qualification
-          touch tests/qualification/__init__.py
-          python tools/finalize_remaining_debt_round3.py rc2
-          python tools/finalize_remaining_debt_round3.py rc1
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("tests/test_nich1_visual_authority.py")
-          text = path.read_text(encoding="utf-8")
-          old = '''def test_missing_current_and_historical_visual_authority_fails_closed() -> None:\n    with pytest.raises(\n        NicheContractCompilationError,\n        match="NICHE_CONTRACT_REQUIRED_FIELD_MISSING:visual_source_profile",\n    ):\n        _resolve({})\n'''
-          new = '''def test_missing_current_and_historical_visual_authority_fails_closed() -> None:\n    historical = {\n        "visual_source_policy_binding": {\n            "niche_visual_source_profile": "GENERATED_EDITORIAL_FIRST"\n        }\n    }\n    assert _resolve(historical) == "GENERATED_EDITORIAL_FIRST"\n    with pytest.raises(\n        NicheContractCompilationError,\n        match="NICHE_CONTRACT_REQUIRED_FIELD_MISSING:visual_source_profile",\n    ):\n        _resolve({})\n'''
-          assert text.count(old) == 1
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
-          PY
           python -m compileall -q app tests
           alembic upgrade head
           test "$(alembic heads | wc -l | tr -d ' ')" = "1"
