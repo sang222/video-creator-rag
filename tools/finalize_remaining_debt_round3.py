@@ -43,6 +43,26 @@ def _replace_once(path: Path, old: str, new: str, *, label: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+def _repair_round2_niche_digest_helper_boundary() -> None:
+    """Undo only the next-function character consumed by the audited Round-2 regex."""
+
+    path = Path("app/services/m5.py")
+    text = path.read_text(encoding="utf-8")
+    broken = "def _iche_digest_from_context(\n"
+    current = "def _niche_digest_from_context(\n"
+    broken_count = text.count(broken)
+    current_count = text.count(current)
+    if broken_count == 1 and current_count == 0:
+        path.write_text(text.replace(broken, current, 1), encoding="utf-8")
+        return
+    if broken_count == 0 and current_count == 1:
+        return
+    raise SystemExit(
+        "Round-2 niche digest helper boundary is ambiguous: "
+        f"broken={broken_count}, current={current_count}"
+    )
+
+
 def _patch_current_evidence_authority_split() -> None:
     """Keep claim provenance and quantitative demand as separate authorities."""
 
@@ -101,6 +121,7 @@ def _patch_current_evidence_authority_split() -> None:
 
 def main() -> None:
     stage = sys.argv[1] if len(sys.argv) > 1 else ""
+    _repair_round2_niche_digest_helper_boundary()
     _run_original_round3()
     if stage == "rc2":
         _patch_current_evidence_authority_split()
