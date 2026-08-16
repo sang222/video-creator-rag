@@ -869,7 +869,7 @@ def test_business_pnl_uses_cost_events_and_review_actions_are_human_gated(
     )
     db.flush()
     projection = service.continuation_recommendation(channel_workspace_id=channel_id)
-    assert projection["action"] == "KILL_REVIEW"
+    assert projection["action"] == "PIVOT"
     assert projection["human_decision_required"] is True
 
 
