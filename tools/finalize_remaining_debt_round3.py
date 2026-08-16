@@ -119,6 +119,24 @@ def _patch_current_evidence_authority_split() -> None:
     )
 
 
+def _patch_current_generic_budget_authority_fixture() -> None:
+    """Keep the generic strict-LF fixture inside current paid-route cost authority."""
+
+    path = Path("tests/qualification/conftest.py")
+    _replace_once(
+        path,
+        '"max_estimated_cost_per_video": 1.0, "max_actual_cost_per_video": 1.0,',
+        '"max_estimated_cost_per_video": 5.0, "max_actual_cost_per_video": 5.0,',
+        label="LF generic per-video budget authority",
+    )
+    _replace_once(
+        path,
+        '"monthly_channel_budget": 20.0, "cost_overrun_review_required": True,',
+        '"monthly_channel_budget": 100.0, "cost_overrun_review_required": True,',
+        label="LF generic monthly budget authority",
+    )
+
+
 def _patch_current_voice_authority_fixture() -> None:
     """Seed current typed voice authority for strict generic qualification only."""
 
@@ -324,7 +342,7 @@ class QualificationFactory:
 
 
 def _patch_current_long_form_cost_authority_fixture() -> None:
-    """Scope synthetic reviewed provider costs to LF integration tests only."""
+    """Scope synthetic reviewed provider costs/caps to LF integration tests only."""
 
     path = Path("tests/test_long_form_launch_cadence.py")
     _replace_once(
@@ -343,15 +361,21 @@ def qualification_factory(db_session):
 ''',
         '''@pytest.fixture
 def qualification_factory(db_session, monkeypatch):
-    """Provide reviewed synthetic TTS cost authority only for LF integration."""
+    """Provide current synthetic paid-route authority only for LF integration."""
 
     monkeypatch.setenv(
         "VCOS_ELEVENLABS_TTS_COST_PER_CHARACTER_USD",
-        "0.010000",
+        "0.000010",
     )
     monkeypatch.setenv(
         "VCOS_ELEVENLABS_FORCED_ALIGNMENT_COST_USD",
-        "0.250000",
+        "0.010000",
+    )
+    monkeypatch.setenv("VCOS_MONTHLY_AI_BUDGET_USD", "100.000000")
+    monkeypatch.setenv("VCOS_ELEVENLABS_MONTHLY_CAP_USD", "100.000000")
+    monkeypatch.setenv(
+        "VCOS_EXTRA_AI_IMAGE_MONTHLY_BUDGET_USD",
+        "100.000000",
     )
     get_settings.cache_clear()
     try:
@@ -359,7 +383,7 @@ def qualification_factory(db_session, monkeypatch):
     finally:
         get_settings.cache_clear()
 ''',
-        label="LF scoped reviewed TTS cost authority",
+        label="LF scoped reviewed paid-route authority",
     )
 
 
@@ -501,6 +525,7 @@ def main() -> None:
     _run_original_round3()
     if stage == "rc2":
         _patch_current_evidence_authority_split()
+        _patch_current_generic_budget_authority_fixture()
         _patch_current_voice_authority_fixture()
         _patch_current_long_form_cost_authority_fixture()
         _patch_current_tts_projection_text_hash_semantics()
