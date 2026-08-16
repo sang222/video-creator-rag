@@ -16,7 +16,6 @@ from app.core.time import utc_now
 from app.db.models.remaining_debt import (
     AudienceDeliveryPlan,
     BusinessActionItem,
-    LearningReview,
     PlatformEnforcementIncident,
     SeriesArcVersion,
     SeriesEpisodeBlueprint,
