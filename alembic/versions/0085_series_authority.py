@@ -107,7 +107,9 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_series_blueprint_arc", "series_episode_blueprints", ["series_arc_version_id"]
+        "ix_series_blueprint_arc",
+        "series_episode_blueprints",
+        ["series_arc_version_id"],
     )
     op.create_index(
         "ix_series_blueprint_plan", "series_episode_blueprints", ["series_plan_id"]
@@ -149,7 +151,9 @@ def upgrade() -> None:
         "ix_series_lifecycle_plan", "series_lifecycle_decisions", ["series_plan_id"]
     )
     op.create_index(
-        "ix_series_lifecycle_arc", "series_lifecycle_decisions", ["series_arc_version_id"]
+        "ix_series_lifecycle_arc",
+        "series_lifecycle_decisions",
+        ["series_arc_version_id"],
     )
 
     op.create_table(
@@ -168,7 +172,9 @@ def upgrade() -> None:
         sa.Column("identity_hash", sa.String(length=64), nullable=False),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("public_ordinal > 0", name="ck_series_public_ordinal_positive"),
+        sa.CheckConstraint(
+            "public_ordinal > 0", name="ck_series_public_ordinal_positive"
+        ),
         sa.CheckConstraint(
             "playlist_position = public_ordinal - 1",
             name="ck_series_playlist_position_matches_ordinal",

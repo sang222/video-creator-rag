@@ -282,7 +282,8 @@ class SeriesAuthorityService:
                 if item.planned_position is not None
             )
             _require(
-                len(blueprints) == expected and positions == list(range(1, expected + 1)),
+                len(blueprints) == expected
+                and positions == list(range(1, expected + 1)),
                 "SERIES_FIXED_ARC_COVERAGE_INCOMPLETE",
             )
         prior = list(
@@ -327,11 +328,16 @@ class SeriesAuthorityService:
         )
         if row is None:
             raise NotFoundError(f"series blueprint not found: {blueprint_id}")
-        _require(row.state in {"PLANNED", "ASSIGNED"}, "SERIES_BLUEPRINT_NOT_ASSIGNABLE")
+        _require(
+            row.state in {"PLANNED", "ASSIGNED"}, "SERIES_BLUEPRINT_NOT_ASSIGNABLE"
+        )
         attempt = technical_attempt_ref.strip()
         _require(bool(attempt), "SERIES_TECHNICAL_ATTEMPT_REQUIRED")
         if row.state == "ASSIGNED":
-            if row.video_project_id != video_project_id or row.technical_attempt_ref != attempt:
+            if (
+                row.video_project_id != video_project_id
+                or row.technical_attempt_ref != attempt
+            ):
                 raise ConflictError("SERIES_TECHNICAL_ATTEMPT_IMMUTABLE")
             return row
         row.video_project_id = video_project_id
@@ -408,7 +414,10 @@ class SeriesAuthorityService:
                     SeriesPublicOrdinal.episode_blueprint_id == blueprint.id
                 )
             )
-            if ordinal is None or ordinal.publication_receipt_id != publication_receipt_id:
+            if (
+                ordinal is None
+                or ordinal.publication_receipt_id != publication_receipt_id
+            ):
                 raise ConflictError("SERIES_BLUEPRINT_ALREADY_PUBLISHED")
             return ordinal
         maximum = self.session.scalar(
@@ -478,7 +487,9 @@ class SeriesAuthorityService:
         arc = self._arc(arc_id, lock=True)
         _require(arc.state == "ACTIVE", "SERIES_EARLY_COMPLETION_NOT_ALLOWED")
         progress = self.progress(series_plan_id=arc.series_plan_id)
-        _require(progress.published_count > 0, "SERIES_EARLY_COMPLETION_NO_PUBLIC_EPISODE")
+        _require(
+            progress.published_count > 0, "SERIES_EARLY_COMPLETION_NO_PUBLIC_EPISODE"
+        )
         self._decision(
             arc=arc,
             decision_type="EARLY_COMPLETE",
@@ -504,7 +515,9 @@ class SeriesAuthorityService:
         arc = self._arc(arc_id, lock=True)
         _require(arc.arc_mode == "FIXED_COUNT", "SERIES_EXTENSION_REQUIRES_FIXED_COUNT")
         old_count = int(arc.planned_episode_count or 0)
-        _require(new_planned_episode_count > old_count, "SERIES_EXTENSION_COUNT_INVALID")
+        _require(
+            new_planned_episode_count > old_count, "SERIES_EXTENSION_COUNT_INVALID"
+        )
         existing_command = self.session.scalar(
             select(SeriesLifecycleDecision).where(
                 SeriesLifecycleDecision.command_id == command_id
@@ -837,7 +850,10 @@ class LearningAuthorityService:
             confidence_state, CONFIDENCE_STATES, "ANALYTICS_CONFIDENCE_INVALID"
         )
         maturity = maturity_state.strip().upper()
-        _require(maturity in {"TOO_EARLY", "MATURE", "STALE", "INCOMPLETE"}, "ANALYTICS_MATURITY_INVALID")
+        _require(
+            maturity in {"TOO_EARLY", "MATURE", "STALE", "INCOMPLETE"},
+            "ANALYTICS_MATURITY_INVALID",
+        )
         _require(sample_size >= 0, "ANALYTICS_SAMPLE_SIZE_INVALID")
         payload = {
             "schema_version": "vcos.analytics-evidence-window.v1",
@@ -901,7 +917,8 @@ class LearningAuthorityService:
         severity = _enum(severity, SEVERITIES, "LEARNING_INCIDENT_SEVERITY_INVALID")
         incident_type = incident_type.strip().upper()
         _require(
-            incident_type in {"NO_VIEW_CANARY", "POLICY_DRIFT", "ANALYTICS_DRIFT", "LIVE_PROOF"},
+            incident_type
+            in {"NO_VIEW_CANARY", "POLICY_DRIFT", "ANALYTICS_DRIFT", "LIVE_PROOF"},
             "LEARNING_INCIDENT_TYPE_INVALID",
         )
         payload = {
@@ -916,7 +933,8 @@ class LearningAuthorityService:
         }
         existing = self.session.scalar(
             select(LearningOperationalIncident).where(
-                LearningOperationalIncident.channel_workspace_id == channel_workspace_id,
+                LearningOperationalIncident.channel_workspace_id
+                == channel_workspace_id,
                 LearningOperationalIncident.incident_type == incident_type,
                 LearningOperationalIncident.external_ref == external_ref,
             )
@@ -1503,9 +1521,11 @@ class BusinessMonitoringService:
             reasons.append("TWO_REVIEW_CYCLES_REQUIRED")
         else:
             for snapshot in pnl:
-                trusted = Decimal(snapshot.locked_revenue) + Decimal(
-                    snapshot.finalized_revenue
-                ) + Decimal(snapshot.cash_received)
+                trusted = (
+                    Decimal(snapshot.locked_revenue)
+                    + Decimal(snapshot.finalized_revenue)
+                    + Decimal(snapshot.cash_received)
+                )
                 cost = Decimal(snapshot.direct_cost) + Decimal(
                     snapshot.allocated_ops_cost
                 )
@@ -1516,9 +1536,7 @@ class BusinessMonitoringService:
             reasons.append("CRITICAL_ENFORCEMENT_OPEN")
         decision = "SELF_FUNDING" if not reasons else "FUNDED_EXPERIMENT"
         inputs = [
-            str(item.id)
-            for item in [monetization, payment, *pnl]
-            if item is not None
+            str(item.id) for item in [monetization, payment, *pnl] if item is not None
         ]
         payload = {
             "schema_version": policy_version,
@@ -1718,8 +1736,14 @@ class BusinessMonitoringService:
         effective_at: datetime,
         expires_at: datetime | None,
     ) -> AffiliateOfferSnapshot:
-        _require(re.fullmatch(r"[0-9a-f]{64}", terms_hash) is not None, "AFFILIATE_TERMS_HASH_INVALID")
-        _require(expires_at is None or expires_at > effective_at, "AFFILIATE_OFFER_WINDOW_INVALID")
+        _require(
+            re.fullmatch(r"[0-9a-f]{64}", terms_hash) is not None,
+            "AFFILIATE_TERMS_HASH_INVALID",
+        )
+        _require(
+            expires_at is None or expires_at > effective_at,
+            "AFFILIATE_OFFER_WINDOW_INVALID",
+        )
         payload = {
             "schema_version": "vcos.affiliate-offer-snapshot.v1",
             "channel_workspace_id": channel_workspace_id,
@@ -1831,13 +1855,17 @@ class BusinessMonitoringService:
         required = sorted({str(item) for item in required_disclosures})
         observed = sorted({str(item) for item in observed_disclosures})
         missing = sorted(set(required) - set(observed))
-        link_rows = list(
-            self.session.scalars(
-                select(AffiliateLinkRegistry).where(
-                    AffiliateLinkRegistry.id.in_(list(link_registry_refs))
-                )
-            ).all()
-        ) if link_registry_refs else []
+        link_rows = (
+            list(
+                self.session.scalars(
+                    select(AffiliateLinkRegistry).where(
+                        AffiliateLinkRegistry.id.in_(list(link_registry_refs))
+                    )
+                ).all()
+            )
+            if link_registry_refs
+            else []
+        )
         reasons = [f"DISCLOSURE_MISSING:{item}" for item in missing]
         now = utc_now()
         for link in link_rows:
@@ -1846,8 +1874,10 @@ class BusinessMonitoringService:
             )
             if link.state != "ACTIVE" or link.last_health_state == "BROKEN":
                 reasons.append("AFFILIATE_LINK_NOT_HEALTHY")
-            if offer is None or offer.state != "ACTIVE" or (
-                offer.expires_at is not None and offer.expires_at <= now
+            if (
+                offer is None
+                or offer.state != "ACTIVE"
+                or (offer.expires_at is not None and offer.expires_at <= now)
             ):
                 reasons.append("AFFILIATE_OFFER_NOT_ACTIVE")
             if link.disclosure_required and not required:
@@ -2133,14 +2163,10 @@ class RemainingDebtCloseoutCoordinator:
             series_plan_id=getattr(candidate, "series_plan_id", None),
             profile_snapshot_hash=profile_hash,
             target_market=str(
-                market.get("primary_market")
-                or market.get("target_market")
-                or "UNKNOWN"
+                market.get("primary_market") or market.get("target_market") or "UNKNOWN"
             ),
             content_language=str(
-                market.get("content_language")
-                or market.get("locale")
-                or "UNKNOWN"
+                market.get("content_language") or market.get("locale") or "UNKNOWN"
             ),
             format_key=str(getattr(candidate, "content_mode", "STANDALONE")),
             normalized_features={
@@ -2163,11 +2189,7 @@ class RemainingDebtCloseoutCoordinator:
                 )
             ],
             target_languages=[
-                str(
-                    market.get("content_language")
-                    or market.get("locale")
-                    or "UNKNOWN"
-                )
+                str(market.get("content_language") or market.get("locale") or "UNKNOWN")
             ],
             packaging_refs=[
                 f"production-package://{getattr(candidate, 'production_package_hash', '')}"

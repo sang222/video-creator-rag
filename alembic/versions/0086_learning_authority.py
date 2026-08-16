@@ -135,7 +135,9 @@ def upgrade() -> None:
             "decision IN ('BLOCKED','ELIGIBLE','PROMOTED','REJECTED','SUPERSEDED')",
             name="ck_learning_review_decision",
         ),
-        sa.CheckConstraint("comparable_count >= 0", name="ck_learning_comparable_count"),
+        sa.CheckConstraint(
+            "comparable_count >= 0", name="ck_learning_comparable_count"
+        ),
         sa.UniqueConstraint("command_id", name="uq_learning_review_command"),
         sa.UniqueConstraint(
             "fingerprint_id",
@@ -144,8 +146,12 @@ def upgrade() -> None:
             name="uq_learning_review_evidence",
         ),
     )
-    op.create_index("ix_learning_review_channel", "learning_reviews", ["channel_workspace_id"])
-    op.create_index("ix_learning_review_fingerprint", "learning_reviews", ["fingerprint_id"])
+    op.create_index(
+        "ix_learning_review_channel", "learning_reviews", ["channel_workspace_id"]
+    )
+    op.create_index(
+        "ix_learning_review_fingerprint", "learning_reviews", ["fingerprint_id"]
+    )
     op.create_index("ix_learning_review_decision", "learning_reviews", ["decision"])
 
     op.create_table(
@@ -173,7 +179,9 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_audience_delivery_channel", "audience_delivery_plans", ["channel_workspace_id"]
+        "ix_audience_delivery_channel",
+        "audience_delivery_plans",
+        ["channel_workspace_id"],
     )
     op.create_index(
         "ix_audience_delivery_project", "audience_delivery_plans", ["video_project_id"]
@@ -189,7 +197,9 @@ def upgrade() -> None:
         sa.Column("external_ref", sa.String(length=240), nullable=False),
         sa.Column("severity", sa.String(length=16), nullable=False),
         sa.Column("state", sa.String(length=24), nullable=False),
-        sa.Column("blocks_learning", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column(
+            "blocks_learning", sa.Boolean(), nullable=False, server_default=sa.true()
+        ),
         sa.Column("evidence_payload", JSONB, nullable=False),
         sa.Column("content_hash", sa.String(length=64), nullable=False),
         sa.Column("detected_at", sa.DateTime(timezone=True), nullable=False),

@@ -42,8 +42,12 @@ def upgrade() -> None:
             "company_id", "version_number", name="uq_payment_profile_version"
         ),
     )
-    op.create_index("ix_payment_profile_company", "payment_profile_statuses", ["company_id"])
-    op.create_index("ix_payment_profile_hash", "payment_profile_statuses", ["content_hash"])
+    op.create_index(
+        "ix_payment_profile_company", "payment_profile_statuses", ["company_id"]
+    )
+    op.create_index(
+        "ix_payment_profile_hash", "payment_profile_statuses", ["content_hash"]
+    )
 
     op.create_table(
         "monetization_account_statuses",
@@ -147,7 +151,9 @@ def upgrade() -> None:
             name="uq_channel_pnl_window",
         ),
     )
-    op.create_index("ix_channel_pnl_channel", "channel_pnl_snapshots", ["channel_workspace_id"])
+    op.create_index(
+        "ix_channel_pnl_channel", "channel_pnl_snapshots", ["channel_workspace_id"]
+    )
     op.create_index("ix_channel_pnl_hash", "channel_pnl_snapshots", ["content_hash"])
 
     op.create_table(
@@ -189,7 +195,9 @@ def upgrade() -> None:
         sa.Column("severity", sa.String(length=16), nullable=False),
         sa.Column("scope", sa.String(length=24), nullable=False),
         sa.Column("state", sa.String(length=24), nullable=False),
-        sa.Column("freeze_learning", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column(
+            "freeze_learning", sa.Boolean(), nullable=False, server_default=sa.true()
+        ),
         sa.Column("deadline_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("evidence_payload", JSONB, nullable=False),
         sa.Column("source_ref", sa.String(length=260), nullable=False),
@@ -292,7 +300,9 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_affiliate_offer_channel", "affiliate_offer_snapshots", ["channel_workspace_id"]
+        "ix_affiliate_offer_channel",
+        "affiliate_offer_snapshots",
+        ["channel_workspace_id"],
     )
 
     op.create_table(
@@ -327,7 +337,9 @@ def upgrade() -> None:
         "ix_affiliate_link_channel", "affiliate_link_registry", ["channel_workspace_id"]
     )
     op.create_index(
-        "ix_affiliate_link_offer", "affiliate_link_registry", ["affiliate_offer_snapshot_id"]
+        "ix_affiliate_link_offer",
+        "affiliate_link_registry",
+        ["affiliate_offer_snapshot_id"],
     )
 
     op.create_table(

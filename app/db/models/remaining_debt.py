@@ -12,7 +12,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -108,7 +116,9 @@ class SeriesEpisodeBlueprint(Base):
     coverage_tags: Mapped[list[Any]] = _json_list()
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     video_project_id: Mapped[uuid.UUID | None] = _uuid_indexed(nullable=True)
-    technical_attempt_ref: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    technical_attempt_ref: Mapped[str | None] = mapped_column(
+        String(240), nullable=True
+    )
     publication_receipt_id: Mapped[uuid.UUID | None] = _uuid_indexed(nullable=True)
     public_ordinal: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content_hash: Mapped[str] = _hash_column()
@@ -167,7 +177,9 @@ class SeriesPublicOrdinal(Base):
     publication_receipt_id: Mapped[uuid.UUID] = _uuid_indexed()
     public_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     playlist_position: Mapped[int] = mapped_column(Integer, nullable=False)
-    technical_attempt_ref: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    technical_attempt_ref: Mapped[str | None] = mapped_column(
+        String(240), nullable=True
+    )
     identity_hash: Mapped[str] = _hash_column()
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

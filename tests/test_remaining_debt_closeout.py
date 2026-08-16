@@ -135,7 +135,9 @@ def test_fixed_series_requires_full_blueprint_coverage_before_activation(
         editorial_contract={},
         coverage_tags=[],
     )
-    with pytest.raises(ValidationFailureError, match="SERIES_FIXED_ARC_COVERAGE_INCOMPLETE"):
+    with pytest.raises(
+        ValidationFailureError, match="SERIES_FIXED_ARC_COVERAGE_INCOMPLETE"
+    ):
         service.activate_arc(
             arc_id=arc.id,
             actor_id=uuid.uuid4(),
@@ -144,7 +146,9 @@ def test_fixed_series_requires_full_blueprint_coverage_before_activation(
         )
 
 
-def test_series_extension_is_new_version_and_preserves_public_truth(db: Session) -> None:
+def test_series_extension_is_new_version_and_preserves_public_truth(
+    db: Session,
+) -> None:
     company_id, channel_id, series_plan_id = _scope()
     service = SeriesAuthorityService(db)
     arc = service.create_arc(
@@ -204,15 +208,20 @@ def test_series_extension_is_new_version_and_preserves_public_truth(db: Session)
     )
     assert len(copied) == 3
     assert sum(item.state == "PUBLISHED" for item in copied) == 1
-    assert db.scalar(
-        select(SeriesPublicOrdinal).where(
-            SeriesPublicOrdinal.series_plan_id == series_plan_id,
-            SeriesPublicOrdinal.public_ordinal == 1,
+    assert (
+        db.scalar(
+            select(SeriesPublicOrdinal).where(
+                SeriesPublicOrdinal.series_plan_id == series_plan_id,
+                SeriesPublicOrdinal.public_ordinal == 1,
+            )
         )
-    ) is not None
+        is not None
+    )
 
 
-def test_rolling_series_allocates_public_ordinal_independent_of_attempt(db: Session) -> None:
+def test_rolling_series_allocates_public_ordinal_independent_of_attempt(
+    db: Session,
+) -> None:
     company_id, channel_id, series_plan_id = _scope()
     service = SeriesAuthorityService(db)
     arc = service.create_arc(
@@ -381,7 +390,9 @@ def test_learning_is_blocked_by_policy_drift_and_enforcement(db: Session) -> Non
     assert "LEARNING_OPERATIONAL_INCIDENT_OPEN" in review.reason_codes
 
 
-def test_business_self_funding_requires_two_trusted_profitable_cycles(db: Session) -> None:
+def test_business_self_funding_requires_two_trusted_profitable_cycles(
+    db: Session,
+) -> None:
     company_id, channel_id, _ = _scope()
     service = BusinessMonitoringService(db)
     now = utc_now()
@@ -482,11 +493,14 @@ def test_high_enforcement_blocks_self_funding_and_creates_action(db: Session) ->
         timeline=[{"at": now.isoformat(), "event": "detected"}],
     )
     assert pack.state == "READY_FOR_HUMAN"
-    assert db.scalar(
-        select(PlatformEnforcementIncident).where(
-            PlatformEnforcementIncident.id == incident.id
-        )
-    ).state == "OPEN"
+    assert (
+        db.scalar(
+            select(PlatformEnforcementIncident).where(
+                PlatformEnforcementIncident.id == incident.id
+            )
+        ).state
+        == "OPEN"
+    )
 
 
 def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
@@ -536,7 +550,9 @@ def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
     assert passed.decision == "PASS"
 
 
-def test_publication_coordinator_seeds_learning_and_audience_delivery(db: Session) -> None:
+def test_publication_coordinator_seeds_learning_and_audience_delivery(
+    db: Session,
+) -> None:
     company_id, channel_id, _ = _scope()
     candidate = SimpleNamespace(
         company_id=company_id,
@@ -559,11 +575,14 @@ def test_publication_coordinator_seeds_learning_and_audience_delivery(db: Sessio
     )
     assert result["learning_fingerprint_id"]
     assert result["audience_delivery_plan_id"]
-    assert db.scalar(
-        select(AudienceDeliveryPlan).where(
-            AudienceDeliveryPlan.publication_receipt_id == receipt.id
+    assert (
+        db.scalar(
+            select(AudienceDeliveryPlan).where(
+                AudienceDeliveryPlan.publication_receipt_id == receipt.id
+            )
         )
-    ) is not None
+        is not None
+    )
 
 
 def test_architecture_audit_and_portfolio_proof(tmp_path: Path) -> None:
