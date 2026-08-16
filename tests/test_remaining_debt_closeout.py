@@ -309,7 +309,10 @@ def test_learning_fingerprint_is_order_stable_and_m11_exactly_once(db: Session) 
         target_market="US",
         content_language="en-US",
         format_key="STANDALONE",
-        normalized_features={"visual": ["image", "video"], "voice": {"pace": "mid"}},
+        normalized_features={
+            "visual": ["image", "video"],
+            "voice": {"pace": "mid"},
+        },
     )
     same_semantics = service.create_fingerprint(
         company_id=company_id,
@@ -689,7 +692,9 @@ def test_publication_closeout_requires_the_compiled_policy_hash(db: Session) -> 
     assert "compiled_policy_snapshot_hash" in inspect.getsource(
         ProductionPublishService.verify_confirmation
     )
-    with pytest.raises(ValidationFailureError, match="COMPILED_POLICY_SNAPSHOT_HASH_INVALID"):
+    with pytest.raises(
+        ValidationFailureError, match="COMPILED_POLICY_SNAPSHOT_HASH_INVALID"
+    ):
         coordinator.on_publication_verified(
             candidate=candidate,
             public_receipt=receipt,
@@ -757,7 +762,9 @@ def test_analytics_authority_rejects_stale_incomplete_and_scope_mismatch() -> No
         )
     snapshot.freshness_state = "FRESH"
     availability.availability_blob["impressions"] = {"state": "UNKNOWN"}
-    with pytest.raises(ValidationFailureError, match="ANALYTICS_REQUIRED_METRICS_INCOMPLETE"):
+    with pytest.raises(
+        ValidationFailureError, match="ANALYTICS_REQUIRED_METRICS_INCOMPLETE"
+    ):
         LearningAuthorityService.analytics_data_authority_decision(
             snapshot=snapshot,
             availability=availability,
@@ -766,7 +773,9 @@ def test_analytics_authority_rejects_stale_incomplete_and_scope_mismatch() -> No
         )
     availability.availability_blob["impressions"] = {"state": "AVAILABLE"}
     availability.uploaded_video_id = uuid.uuid4()
-    with pytest.raises(ValidationFailureError, match="ANALYTICS_AVAILABILITY_SCOPE_MISMATCH"):
+    with pytest.raises(
+        ValidationFailureError, match="ANALYTICS_AVAILABILITY_SCOPE_MISMATCH"
+    ):
         LearningAuthorityService.analytics_data_authority_decision(
             snapshot=snapshot,
             availability=availability,

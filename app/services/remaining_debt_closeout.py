@@ -875,7 +875,8 @@ class LearningAuthorityService:
             requested_window_key, ANALYTICS_WINDOWS, "ANALYTICS_WINDOW_INVALID"
         )
         _require(
-            str(snapshot.platform).upper() == ANALYTICS_DATA_AUTHORITY_POLICY["platform"],
+            str(snapshot.platform).upper()
+            == ANALYTICS_DATA_AUTHORITY_POLICY["platform"],
             "ANALYTICS_PLATFORM_AUTHORITY_INVALID",
         )
         _require(
@@ -937,7 +938,9 @@ class LearningAuthorityService:
         availability_blob = dict(availability.availability_blob or {})
         missing_metrics = [
             metric
-            for metric in ANALYTICS_DATA_AUTHORITY_POLICY["required_metrics"][window_key]
+            for metric in ANALYTICS_DATA_AUTHORITY_POLICY["required_metrics"][
+                window_key
+            ]
             if str((availability_blob.get(metric) or {}).get("state", "")).upper()
             != "AVAILABLE"
         ]
@@ -1009,7 +1012,9 @@ class LearningAuthorityService:
             .order_by(MetricAvailabilitySnapshot.captured_at.desc())
         )
         source_window = (
-            self.session.get(LongFormAnalyticsWindow, snapshot.long_form_analytics_window_id)
+            self.session.get(
+                LongFormAnalyticsWindow, snapshot.long_form_analytics_window_id
+            )
             if snapshot.long_form_analytics_window_id is not None
             else None
         )
