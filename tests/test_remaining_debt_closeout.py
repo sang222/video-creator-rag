@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import uuid
 from datetime import timedelta
@@ -14,13 +15,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.remaining_debt import (
+    AnalyticsEvidenceWindow,
     AudienceDeliveryPlan,
     BusinessActionItem,
+    ChannelPnlSnapshot,
+    LearningEquivalenceFingerprint,
     PlatformEnforcementIncident,
+    SelfFundingAssessment,
     SeriesArcVersion,
     SeriesEpisodeBlueprint,
     SeriesPublicOrdinal,
 )
+from app.db.models.ops import CostEvent
 from app.services.remaining_debt_closeout import (
     ArchitectureDebtAuditService,
     BusinessMonitoringService,
@@ -28,6 +34,7 @@ from app.services.remaining_debt_closeout import (
     RemainingDebtCloseoutCoordinator,
     SeriesAuthorityService,
 )
+from app.services.production_publish import ProductionPublishService
 
 
 @pytest.fixture()
@@ -52,6 +59,37 @@ def db() -> Session:
 
 def _scope() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     return uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+
+def _learning_window(
+    db: Session,
+    *,
+    company_id: uuid.UUID,
+    channel_workspace_id: uuid.UUID,
+    uploaded_video_id: uuid.UUID,
+    window_key: str,
+    confidence_state: str,
+) -> AnalyticsEvidenceWindow:
+    row = AnalyticsEvidenceWindow(
+        id=uuid.uuid4(),
+        company_id=company_id,
+        channel_workspace_id=channel_workspace_id,
+        uploaded_video_id=uploaded_video_id,
+        window_key=window_key,
+        source_version=f"canonical-test:{uuid.uuid4()}",
+        maturity_state="MATURE",
+        confidence_state=confidence_state,
+        sample_size=1200,
+        impressions=8000,
+        views=1200,
+        source_snapshot_refs=["test://canonical-analytics-authority"],
+        evidence_payload={"test_fixture": True},
+        evidence_hash="1" * 64,
+        matured_at=utc_now(),
+    )
+    db.add(row)
+    db.flush()
+    return row
 
 
 def test_fixed_series_arc_public_ordinal_and_completion_pending(db: Session) -> None:
@@ -286,20 +324,25 @@ def test_learning_fingerprint_is_order_stable_and_m11_exactly_once(db: Session) 
         normalized_features={"voice": {"pace": "mid"}, "visual": ["image", "video"]},
     )
     assert first.fingerprint == same_semantics.fingerprint
-    window = service.record_analytics_window(
+    service.create_fingerprint(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        source_entity_ref="publication://three",
+        content_product_type="EDITORIAL_NARRATED_VIDEO",
+        series_plan_id=None,
+        profile_snapshot_hash="a" * 64,
+        target_market="US",
+        content_language="en-US",
+        format_key="STANDALONE",
+        normalized_features={"visual": ["image", "video"], "voice": {"pace": "mid"}},
+    )
+    window = _learning_window(
+        db,
         company_id=company_id,
         channel_workspace_id=channel_id,
         uploaded_video_id=uploaded_video_id,
         window_key="M11",
-        source_version="youtube-v1",
-        maturity_state="MATURE",
         confidence_state="ACTION_READY",
-        sample_size=1200,
-        impressions=8000,
-        views=1200,
-        source_snapshot_refs=["analytics://m11"],
-        evidence_payload={"retention": 0.52},
-        matured_at=utc_now(),
     )
     command_id = uuid.uuid4()
     review = service.review(
@@ -342,20 +385,13 @@ def test_learning_is_blocked_by_policy_drift_and_enforcement(db: Session) -> Non
         format_key="STANDALONE",
         normalized_features={},
     )
-    window = learning.record_analytics_window(
+    window = _learning_window(
+        db,
         company_id=company_id,
         channel_workspace_id=channel_id,
         uploaded_video_id=uuid.uuid4(),
         window_key="D30",
-        source_version="youtube-v1",
-        maturity_state="MATURE",
         confidence_state="STABLE",
-        sample_size=500,
-        impressions=3000,
-        views=500,
-        source_snapshot_refs=["analytics://d30"],
-        evidence_payload={},
-        matured_at=utc_now(),
     )
     learning.open_operational_incident(
         company_id=company_id,
@@ -439,6 +475,18 @@ def test_business_self_funding_requires_two_trusted_profitable_cycles(
             source_updated_at=now,
             confidence_state="HIGH",
         )
+        db.add(
+            CostEvent(
+                provider_key="test-provider",
+                cost_scope_type="CHANNEL",
+                cost_scope_id=channel_id,
+                amount=Decimal("80"),
+                currency="USD",
+                cost_type="ACTUAL",
+                created_at=start + timedelta(days=1),
+            )
+        )
+        db.flush()
         service.build_channel_pnl(
             company_id=company_id,
             channel_workspace_id=channel_id,
@@ -572,9 +620,16 @@ def test_publication_coordinator_seeds_learning_and_audience_delivery(
         candidate=candidate,
         public_receipt=receipt,
         observed_at=utc_now(),
+        compiled_policy_snapshot_hash="c" * 64,
     )
     assert result["learning_fingerprint_id"]
     assert result["audience_delivery_plan_id"]
+    fingerprint = db.get(
+        LearningEquivalenceFingerprint,
+        uuid.UUID(result["learning_fingerprint_id"]),
+    )
+    assert fingerprint is not None
+    assert fingerprint.profile_snapshot_hash == "c" * 64
     assert (
         db.scalar(
             select(AudienceDeliveryPlan).where(
@@ -615,3 +670,267 @@ def test_architecture_audit_and_portfolio_proof(tmp_path: Path) -> None:
         compiled_profile_hash_by_channel={a: "p1", b: "p2"},
     )
     assert proven["state"] == "PROVEN"
+
+
+def test_publication_closeout_requires_the_compiled_policy_hash(db: Session) -> None:
+    candidate = SimpleNamespace(
+        company_id=uuid.uuid4(),
+        channel_workspace_id=uuid.uuid4(),
+        video_project_id=uuid.uuid4(),
+        target_market_lineage={},
+        content_mode="STANDALONE",
+        series_plan_id=None,
+    )
+    receipt = SimpleNamespace(id=uuid.uuid4())
+    coordinator = RemainingDebtCloseoutCoordinator(db)
+    assert "compiled_policy_snapshot_hash" in inspect.signature(
+        coordinator.on_publication_verified
+    ).parameters
+    assert "compiled_policy_snapshot_hash" in inspect.getsource(
+        ProductionPublishService.verify_confirmation
+    )
+    with pytest.raises(ValidationFailureError, match="COMPILED_POLICY_SNAPSHOT_HASH_INVALID"):
+        coordinator.on_publication_verified(
+            candidate=candidate,
+            public_receipt=receipt,
+            observed_at=utc_now(),
+            compiled_policy_snapshot_hash="not-a-sha256",
+        )
+
+
+def test_analytics_authority_rejects_stale_incomplete_and_scope_mismatch() -> None:
+    snapshot = SimpleNamespace(
+        id=uuid.uuid4(),
+        analytics_sync_run_id=uuid.uuid4(),
+        uploaded_video_id=uuid.uuid4(),
+        platform="YOUTUBE",
+        freshness_state="FRESH",
+        confidence_level="HIGH",
+        normalized_metrics_blob={
+            "views": {"value": 1200},
+            "impressions": {"value": 8000},
+            "average_view_duration_seconds": {"value": 180},
+            "average_view_percentage": {"value": 52},
+        },
+        captured_at=utc_now(),
+    )
+    availability = SimpleNamespace(
+        id=uuid.uuid4(),
+        uploaded_video_id=snapshot.uploaded_video_id,
+        analytics_sync_run_id=snapshot.analytics_sync_run_id,
+        platform="YOUTUBE",
+        freshness_state="FRESH",
+        confidence_level="HIGH",
+        availability_blob={
+            metric: {"state": "AVAILABLE"}
+            for metric in (
+                "views",
+                "impressions",
+                "average_view_duration_seconds",
+                "average_view_percentage",
+            )
+        },
+    )
+    source_window = SimpleNamespace(
+        id=uuid.uuid4(),
+        window_type="D30",
+        uploaded_video_id=snapshot.uploaded_video_id,
+        analytics_snapshot_id=snapshot.id,
+        state="DIAGNOSTICS_COMPLETE",
+        observed_to=utc_now(),
+    )
+    decision = LearningAuthorityService.analytics_data_authority_decision(
+        snapshot=snapshot,
+        availability=availability,
+        source_window=source_window,
+        requested_window_key="M11",
+    )
+    assert decision["maturity_state"] == "MATURE"
+    assert decision["confidence_state"] == "ACTION_READY"
+    snapshot.freshness_state = "STALE"
+    with pytest.raises(ValidationFailureError, match="ANALYTICS_SOURCE_STALE"):
+        LearningAuthorityService.analytics_data_authority_decision(
+            snapshot=snapshot,
+            availability=availability,
+            source_window=source_window,
+            requested_window_key="M11",
+        )
+    snapshot.freshness_state = "FRESH"
+    availability.availability_blob["impressions"] = {"state": "UNKNOWN"}
+    with pytest.raises(ValidationFailureError, match="ANALYTICS_REQUIRED_METRICS_INCOMPLETE"):
+        LearningAuthorityService.analytics_data_authority_decision(
+            snapshot=snapshot,
+            availability=availability,
+            source_window=source_window,
+            requested_window_key="M11",
+        )
+    availability.availability_blob["impressions"] = {"state": "AVAILABLE"}
+    availability.uploaded_video_id = uuid.uuid4()
+    with pytest.raises(ValidationFailureError, match="ANALYTICS_AVAILABILITY_SCOPE_MISMATCH"):
+        LearningAuthorityService.analytics_data_authority_decision(
+            snapshot=snapshot,
+            availability=availability,
+            source_window=source_window,
+            requested_window_key="M11",
+        )
+
+
+def test_business_pnl_uses_cost_events_and_review_actions_are_human_gated(
+    db: Session,
+) -> None:
+    company_id, channel_id, _ = _scope()
+    service = BusinessMonitoringService(db)
+    end = utc_now()
+    start = end - timedelta(days=30)
+    for state, amount, source_ref in (
+        ("PENDING", "100", "pending"),
+        ("FINALIZED", "200", "finalized"),
+        ("REVERSED", "50", "reversed"),
+    ):
+        service.record_revenue(
+            company_id=company_id,
+            channel_workspace_id=channel_id,
+            source="YOUTUBE",
+            amount_state=state,
+            amount=amount,
+            currency="USD",
+            period_start=start,
+            period_end=end,
+            source_ref=f"youtube://{source_ref}",
+            source_updated_at=end,
+            confidence_state="HIGH",
+        )
+    db.add(
+        CostEvent(
+            provider_key="test-provider",
+            cost_scope_type="CHANNEL",
+            cost_scope_id=channel_id,
+            amount=Decimal("25"),
+            currency="USD",
+            cost_type="ACTUAL",
+            created_at=start + timedelta(days=1),
+        )
+    )
+    db.flush()
+    pnl = service.build_channel_pnl(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        period_start=start,
+        period_end=end,
+        currency="USD",
+        direct_cost=Decimal("25"),
+    )
+    assert pnl.locked_revenue == Decimal("0.000000")
+    assert pnl.contribution_margin == Decimal("125.000000")
+    with pytest.raises(ValidationFailureError, match="ACTUAL_COST_AUTHORITY_MISMATCH"):
+        service.build_channel_pnl(
+            company_id=company_id,
+            channel_workspace_id=channel_id,
+            period_start=start,
+            period_end=end,
+            currency="USD",
+            direct_cost=Decimal("26"),
+            calculation_version="test-cost-mismatch",
+        )
+    for offset in (60, 30):
+        db.add(
+            ChannelPnlSnapshot(
+                id=uuid.uuid4(),
+                company_id=company_id,
+                channel_workspace_id=channel_id,
+                period_start=end - timedelta(days=offset),
+                period_end=end - timedelta(days=offset - 30),
+                currency="USD",
+                estimated_revenue=0,
+                locked_revenue=0,
+                finalized_revenue=0,
+                cash_received=0,
+                reversed_revenue=0,
+                direct_cost=Decimal("10"),
+                allocated_ops_cost=0,
+                contribution_margin=Decimal("-10"),
+                calculation_version=f"negative-{offset}",
+                source_snapshot_refs=[],
+                content_hash=uuid.uuid4().hex * 2,
+            )
+        )
+    db.add(
+        SelfFundingAssessment(
+            id=uuid.uuid4(),
+            company_id=company_id,
+            channel_workspace_id=channel_id,
+            assessment_window_end=end,
+            policy_version="test-self-funding",
+            decision="FUNDED_EXPERIMENT",
+            reason_codes=[],
+            input_refs=[],
+            assessment_hash="f" * 64,
+        )
+    )
+    db.flush()
+    projection = service.continuation_recommendation(channel_workspace_id=channel_id)
+    assert projection["action"] == "KILL_REVIEW"
+    assert projection["human_decision_required"] is True
+
+
+def test_closeout_records_are_strictly_channel_isolated(db: Session) -> None:
+    company_id = uuid.uuid4()
+    channel_a, channel_b = uuid.uuid4(), uuid.uuid4()
+    learning = LearningAuthorityService(db)
+    fingerprint_a = learning.create_fingerprint(
+        company_id=company_id,
+        channel_workspace_id=channel_a,
+        source_entity_ref="publication://shared-a",
+        content_product_type="EDITORIAL_NARRATED_VIDEO",
+        series_plan_id=None,
+        profile_snapshot_hash="a" * 64,
+        target_market="US",
+        content_language="en-US",
+        format_key="STANDALONE",
+        normalized_features={"profile": "A"},
+    )
+    fingerprint_b = learning.create_fingerprint(
+        company_id=company_id,
+        channel_workspace_id=channel_b,
+        source_entity_ref="publication://shared-b",
+        content_product_type="EDITORIAL_NARRATED_VIDEO",
+        series_plan_id=None,
+        profile_snapshot_hash="b" * 64,
+        target_market="VN",
+        content_language="vi-VN",
+        format_key="STANDALONE",
+        normalized_features={"profile": "B"},
+    )
+    assert fingerprint_a.profile_snapshot_hash != fingerprint_b.profile_snapshot_hash
+    assert list(
+        db.scalars(
+            select(LearningEquivalenceFingerprint).where(
+                LearningEquivalenceFingerprint.channel_workspace_id == channel_b
+            )
+        )
+    ) == [fingerprint_b]
+    learning.create_audience_delivery_plan(
+        company_id=company_id,
+        channel_workspace_id=channel_a,
+        video_project_id=uuid.uuid4(),
+        publication_receipt_id=uuid.uuid4(),
+        target_markets=["US"],
+        target_languages=["en-US"],
+        packaging_refs=["package://a"],
+        playlist_refs=[],
+    )
+    delivery_b = learning.create_audience_delivery_plan(
+        company_id=company_id,
+        channel_workspace_id=channel_b,
+        video_project_id=uuid.uuid4(),
+        publication_receipt_id=uuid.uuid4(),
+        target_markets=["VN"],
+        target_languages=["vi-VN"],
+        packaging_refs=["package://b"],
+        playlist_refs=[],
+    )
+    assert delivery_b.channel_workspace_id == channel_b
+    audit = ArchitectureDebtAuditService().code_isolation_proof(
+        ArchitectureDebtAuditService().audit(Path(__file__).parents[1])
+    )
+    assert audit["live_portfolio_state"] == "LIVE_PORTFOLIO_PROOF_NOT_PROVEN"

@@ -1476,6 +1476,7 @@ class ProductionPublishService:
         )
         if (
             policy_snapshot is None
+            or policy_snapshot.id != candidate.policy_snapshot_id
             or policy_snapshot.channel_workspace_id != candidate.channel_workspace_id
             or policy_snapshot.channel_profile_version_id
             != candidate.channel_profile_version_id

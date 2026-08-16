@@ -17,11 +17,15 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
+from app.db.models.long_form_analytics import LongFormAnalyticsWindow
+from app.db.models.m8 import AnalyticsSnapshot, MetricAvailabilitySnapshot
+from app.db.models.ops import CostEvent
+from app.db.models.workflow import VideoProject
 from app.db.models.remaining_debt import (
     AffiliateLinkRegistry,
     AffiliateOfferSnapshot,
@@ -63,6 +67,35 @@ REVENUE_STATES = frozenset(
     {"ESTIMATED", "PENDING", "LOCKED", "FINALIZED", "REVERSED", "PAID"}
 )
 SEVERITIES = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
+TRUSTED_SOURCE_CONFIDENCE = frozenset({"HIGH", "VERIFIED", "ACTION_READY"})
+ANALYTICS_DATA_AUTHORITY_POLICY = {
+    "version": "vcos.analytics-data-authority.v1",
+    "platform": "YOUTUBE",
+    "freshness": "FRESH",
+    "accepted_source_confidence": ("MEDIUM", "HIGH"),
+    "required_metrics": {
+        "H24": ("views", "impressions"),
+        "H72": ("views", "impressions"),
+        "D7": (
+            "views",
+            "impressions",
+            "average_view_duration_seconds",
+            "average_view_percentage",
+        ),
+        "D30": (
+            "views",
+            "impressions",
+            "average_view_duration_seconds",
+            "average_view_percentage",
+        ),
+        "M11": (
+            "views",
+            "impressions",
+            "average_view_duration_seconds",
+            "average_view_percentage",
+        ),
+    },
+}
 
 
 def _jsonable(value: Any) -> Any:
@@ -828,7 +861,172 @@ class LearningAuthorityService:
         self.session.flush()
         return row
 
-    def record_analytics_window(
+    @staticmethod
+    def analytics_data_authority_decision(
+        *,
+        snapshot: AnalyticsSnapshot,
+        availability: MetricAvailabilitySnapshot | None,
+        source_window: LongFormAnalyticsWindow | None,
+        requested_window_key: str,
+    ) -> dict[str, Any]:
+        """Derive immutable learning evidence exclusively from M8/M9 authority."""
+
+        window_key = _enum(
+            requested_window_key, ANALYTICS_WINDOWS, "ANALYTICS_WINDOW_INVALID"
+        )
+        _require(
+            str(snapshot.platform).upper() == ANALYTICS_DATA_AUTHORITY_POLICY["platform"],
+            "ANALYTICS_PLATFORM_AUTHORITY_INVALID",
+        )
+        _require(
+            str(snapshot.freshness_state).upper()
+            == ANALYTICS_DATA_AUTHORITY_POLICY["freshness"],
+            "ANALYTICS_SOURCE_STALE",
+        )
+        _require(availability is not None, "ANALYTICS_AVAILABILITY_AUTHORITY_MISSING")
+        _require(
+            availability.uploaded_video_id == snapshot.uploaded_video_id,
+            "ANALYTICS_AVAILABILITY_SCOPE_MISMATCH",
+        )
+        _require(
+            availability.analytics_sync_run_id == snapshot.analytics_sync_run_id,
+            "ANALYTICS_AVAILABILITY_RUN_MISMATCH",
+        )
+        _require(
+            str(availability.platform).upper() == str(snapshot.platform).upper(),
+            "ANALYTICS_AVAILABILITY_PLATFORM_MISMATCH",
+        )
+        _require(
+            str(availability.freshness_state).upper()
+            == ANALYTICS_DATA_AUTHORITY_POLICY["freshness"],
+            "ANALYTICS_AVAILABILITY_STALE",
+        )
+        accepted_confidence = set(
+            ANALYTICS_DATA_AUTHORITY_POLICY["accepted_source_confidence"]
+        )
+        source_confidence = str(snapshot.confidence_level).upper()
+        availability_confidence = str(availability.confidence_level).upper()
+        _require(
+            source_confidence in accepted_confidence,
+            "ANALYTICS_SOURCE_CONFIDENCE_INSUFFICIENT",
+        )
+        _require(
+            availability_confidence in accepted_confidence,
+            "ANALYTICS_AVAILABILITY_CONFIDENCE_INSUFFICIENT",
+        )
+        _require(
+            source_window is not None, "ANALYTICS_LONG_FORM_WINDOW_AUTHORITY_MISSING"
+        )
+        expected_window = "D30" if window_key == "M11" else window_key
+        _require(
+            source_window.window_type == expected_window,
+            "ANALYTICS_WINDOW_AUTHORITY_MISMATCH",
+        )
+        _require(
+            source_window.uploaded_video_id == snapshot.uploaded_video_id,
+            "ANALYTICS_WINDOW_VIDEO_SCOPE_MISMATCH",
+        )
+        _require(
+            source_window.analytics_snapshot_id == snapshot.id,
+            "ANALYTICS_WINDOW_SNAPSHOT_MISMATCH",
+        )
+        _require(
+            source_window.state == "DIAGNOSTICS_COMPLETE",
+            "ANALYTICS_DIAGNOSTICS_NOT_COMPLETE",
+        )
+        availability_blob = dict(availability.availability_blob or {})
+        missing_metrics = [
+            metric
+            for metric in ANALYTICS_DATA_AUTHORITY_POLICY["required_metrics"][window_key]
+            if str((availability_blob.get(metric) or {}).get("state", "")).upper()
+            != "AVAILABLE"
+        ]
+        _require(
+            not missing_metrics,
+            "ANALYTICS_REQUIRED_METRICS_INCOMPLETE:"
+            + ",".join(sorted(missing_metrics)),
+        )
+        normalized = dict(snapshot.normalized_metrics_blob or {})
+
+        def metric_value(key: str) -> int | None:
+            value = (normalized.get(key) or {}).get("value")
+            return None if value is None else int(value)
+
+        views = metric_value("views")
+        impressions = metric_value("impressions")
+        confidence_state = (
+            "ACTION_READY"
+            if source_confidence == "HIGH" and window_key in {"D30", "M11"}
+            else "STABLE"
+            if source_confidence == "HIGH"
+            else "DIRECTIONAL"
+        )
+        return {
+            "window_key": window_key,
+            "source_version": (
+                f"{ANALYTICS_DATA_AUTHORITY_POLICY['version']}:{snapshot.id}"
+            ),
+            "maturity_state": "TOO_EARLY"
+            if window_key in {"H24", "H72"}
+            else "MATURE",
+            "confidence_state": confidence_state,
+            "sample_size": max(int(views or 0), 0),
+            "impressions": impressions,
+            "views": views,
+            "source_snapshot_refs": [
+                f"analytics-snapshot://{snapshot.id}",
+                f"metric-availability://{availability.id}",
+                f"long-form-analytics-window://{source_window.id}",
+            ],
+            "evidence_payload": {
+                "authority_policy": ANALYTICS_DATA_AUTHORITY_POLICY,
+                "authority_policy_hash": _hash(ANALYTICS_DATA_AUTHORITY_POLICY),
+                "analytics_snapshot_id": str(snapshot.id),
+                "metric_availability_snapshot_id": str(availability.id),
+                "long_form_analytics_window_id": str(source_window.id),
+                "source_freshness": str(snapshot.freshness_state).upper(),
+                "source_confidence": source_confidence,
+                "availability_freshness": str(availability.freshness_state).upper(),
+                "availability_confidence": availability_confidence,
+            },
+            "matured_at": source_window.observed_to or snapshot.captured_at,
+        }
+
+    def record_analytics_window_from_snapshot(
+        self, *, analytics_snapshot_id: uuid.UUID, requested_window_key: str
+    ) -> AnalyticsEvidenceWindow:
+        snapshot = self.session.get(AnalyticsSnapshot, analytics_snapshot_id)
+        if snapshot is None:
+            raise NotFoundError(f"analytics snapshot not found: {analytics_snapshot_id}")
+        availability = self.session.scalar(
+            select(MetricAvailabilitySnapshot)
+            .where(
+                MetricAvailabilitySnapshot.uploaded_video_id == snapshot.uploaded_video_id,
+                MetricAvailabilitySnapshot.analytics_sync_run_id
+                == snapshot.analytics_sync_run_id,
+                MetricAvailabilitySnapshot.platform == snapshot.platform,
+            )
+            .order_by(MetricAvailabilitySnapshot.captured_at.desc())
+        )
+        source_window = (
+            self.session.get(LongFormAnalyticsWindow, snapshot.long_form_analytics_window_id)
+            if snapshot.long_form_analytics_window_id is not None
+            else None
+        )
+        decision = self.analytics_data_authority_decision(
+            snapshot=snapshot,
+            availability=availability,
+            source_window=source_window,
+            requested_window_key=requested_window_key,
+        )
+        return self._record_analytics_window(
+            company_id=snapshot.company_id,
+            channel_workspace_id=snapshot.channel_workspace_id,
+            uploaded_video_id=snapshot.uploaded_video_id,
+            **decision,
+        )
+
+    def _record_analytics_window(
         self,
         *,
         company_id: uuid.UUID,
@@ -1003,7 +1201,21 @@ class LearningAuthorityService:
             ):
                 raise ConflictError("LEARNING_REVIEW_COMMAND_REUSE_CONFLICT")
             return command_match
+        derived_comparable_count = int(
+            self.session.scalar(
+                select(func.count(LearningEquivalenceFingerprint.id)).where(
+                    LearningEquivalenceFingerprint.channel_workspace_id
+                    == fingerprint.channel_workspace_id,
+                    LearningEquivalenceFingerprint.fingerprint == fingerprint.fingerprint,
+                )
+            )
+            or 0
+        )
+        supplied_comparable_count = comparable_count
+        comparable_count = derived_comparable_count
         reasons: list[str] = []
+        if supplied_comparable_count != derived_comparable_count:
+            reasons.append("COMPARABLE_COUNT_AUTHORITY_MISMATCH")
         if window.maturity_state != "MATURE":
             reasons.append("ANALYTICS_NOT_MATURE")
         if window.confidence_state not in {"DIRECTIONAL", "STABLE", "ACTION_READY"}:
@@ -1396,9 +1608,9 @@ class BusinessMonitoringService:
         period_start: datetime,
         period_end: datetime,
         currency: str,
-        direct_cost: Decimal | str | float | int,
-        allocated_ops_cost: Decimal | str | float | int,
-        calculation_version: str = "vcos.channel-pnl.v1",
+        direct_cost: Decimal | str | float | int | None = None,
+        allocated_ops_cost: Decimal | str | float | int = Decimal("0"),
+        calculation_version: str = "vcos.channel-pnl.v2",
     ) -> ChannelPnlSnapshot:
         rows = list(
             self.session.scalars(
@@ -1412,12 +1624,40 @@ class BusinessMonitoringService:
         )
         buckets = {key: Decimal("0") for key in REVENUE_STATES}
         for row in rows:
+            if row.amount_state in {"LOCKED", "FINALIZED", "PAID", "REVERSED"}:
+                _require(
+                    row.confidence_state in TRUSTED_SOURCE_CONFIDENCE,
+                    "REVENUE_SOURCE_CONFIDENCE_INSUFFICIENT",
+                )
+                _require(
+                    row.source_updated_at >= row.period_end,
+                    "REVENUE_SOURCE_NOT_MATURE",
+                )
             buckets[row.amount_state] += Decimal(row.amount)
-        direct = _decimal(direct_cost)
+        derived_direct_cost, cost_rows = self._actual_direct_cost(
+            channel_workspace_id=channel_workspace_id,
+            period_start=period_start,
+            period_end=period_end,
+            currency=currency,
+        )
+        if direct_cost is not None:
+            _require(
+                _decimal(direct_cost) == derived_direct_cost,
+                "ACTUAL_COST_AUTHORITY_MISMATCH",
+            )
+        direct = derived_direct_cost
         ops = _decimal(allocated_ops_cost)
         contribution = (
-            buckets["LOCKED"] + buckets["FINALIZED"] + buckets["PAID"] - direct - ops
+            buckets["LOCKED"]
+            + buckets["FINALIZED"]
+            + buckets["PAID"]
+            - buckets["REVERSED"]
+            - direct
+            - ops
         )
+        source_snapshot_refs = [f"revenue://{row.id}" for row in rows] + [
+            f"cost-event://{row.id}" for row in cost_rows
+        ]
         payload = {
             "schema_version": calculation_version,
             "channel_workspace_id": channel_workspace_id,
@@ -1428,7 +1668,7 @@ class BusinessMonitoringService:
             "direct_cost": direct,
             "allocated_ops_cost": ops,
             "contribution_margin": contribution,
-            "source_snapshot_refs": [str(row.id) for row in rows],
+            "source_snapshot_refs": source_snapshot_refs,
         }
         digest = _hash(payload)
         existing = self.session.scalar(
@@ -1451,7 +1691,7 @@ class BusinessMonitoringService:
             period_end=period_end,
             currency=currency.upper(),
             estimated_revenue=buckets["ESTIMATED"],
-            locked_revenue=buckets["LOCKED"] + buckets["PENDING"],
+            locked_revenue=buckets["LOCKED"],
             finalized_revenue=buckets["FINALIZED"],
             cash_received=buckets["PAID"],
             reversed_revenue=buckets["REVERSED"],
@@ -1459,12 +1699,49 @@ class BusinessMonitoringService:
             allocated_ops_cost=ops,
             contribution_margin=contribution,
             calculation_version=calculation_version,
-            source_snapshot_refs=[str(item.id) for item in rows],
+            source_snapshot_refs=source_snapshot_refs,
             content_hash=digest,
         )
         self.session.add(row)
         self.session.flush()
         return row
+
+    def _actual_direct_cost(
+        self,
+        *,
+        channel_workspace_id: uuid.UUID,
+        period_start: datetime,
+        period_end: datetime,
+        currency: str,
+    ) -> tuple[Decimal, list[CostEvent]]:
+        project_ids = select(VideoProject.id).where(
+            VideoProject.channel_workspace_id == channel_workspace_id
+        )
+        cost_rows = list(
+            self.session.scalars(
+                select(CostEvent).where(
+                    CostEvent.currency == currency.upper(),
+                    CostEvent.created_at >= period_start,
+                    CostEvent.created_at < period_end,
+                    CostEvent.cost_type.in_({"ACTUAL", "ADJUSTED", "REFUNDED"}),
+                    or_(
+                        and_(
+                            CostEvent.cost_scope_type == "CHANNEL",
+                            CostEvent.cost_scope_id == channel_workspace_id,
+                        ),
+                        and_(
+                            CostEvent.cost_scope_type == "PROJECT",
+                            CostEvent.cost_scope_id.in_(project_ids),
+                        ),
+                    ),
+                )
+            ).all()
+        )
+        total = Decimal("0")
+        for event in cost_rows:
+            amount = Decimal(event.amount)
+            total += -amount if event.cost_type == "REFUNDED" else amount
+        return _decimal(max(total, Decimal("0"))), cost_rows
 
     def evaluate_self_funding(
         self,
@@ -1477,7 +1754,8 @@ class BusinessMonitoringService:
         monetization = self.session.scalar(
             select(MonetizationAccountStatus)
             .where(
-                MonetizationAccountStatus.channel_workspace_id == channel_workspace_id
+                MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
+                MonetizationAccountStatus.platform == "YOUTUBE",
             )
             .order_by(MonetizationAccountStatus.version_number.desc())
         )
@@ -1509,6 +1787,13 @@ class BusinessMonitoringService:
             or monetization.restriction_state not in {"NONE", "CLEAR"}
         ):
             reasons.append("MONETIZATION_NOT_ACTIVE")
+        elif (
+            monetization.confidence_state not in TRUSTED_SOURCE_CONFIDENCE
+            or monetization.valid_until is None
+            or monetization.valid_until < assessment_window_end
+            or monetization.source_updated_at > assessment_window_end
+        ):
+            reasons.append("MONETIZATION_SOURCE_NOT_CURRENT")
         if (
             payment is None
             or payment.tax_state != "VERIFIED"
@@ -1517,6 +1802,13 @@ class BusinessMonitoringService:
             or payment.payment_hold_state not in {"NONE", "CLEAR"}
         ):
             reasons.append("PAYMENT_PROFILE_NOT_READY")
+        elif (
+            payment.confidence_state not in TRUSTED_SOURCE_CONFIDENCE
+            or payment.valid_until is None
+            or payment.valid_until < assessment_window_end
+            or payment.source_updated_at > assessment_window_end
+        ):
+            reasons.append("PAYMENT_SOURCE_NOT_CURRENT")
         if len(pnl) < 2:
             reasons.append("TWO_REVIEW_CYCLES_REQUIRED")
         else:
@@ -1525,6 +1817,7 @@ class BusinessMonitoringService:
                     Decimal(snapshot.locked_revenue)
                     + Decimal(snapshot.finalized_revenue)
                     + Decimal(snapshot.cash_received)
+                    - Decimal(snapshot.reversed_revenue)
                 )
                 cost = Decimal(snapshot.direct_cost) + Decimal(
                     snapshot.allocated_ops_cost
@@ -1572,6 +1865,55 @@ class BusinessMonitoringService:
         self.session.add(row)
         self.session.flush()
         return row
+
+    def continuation_recommendation(
+        self, *, channel_workspace_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """Project a review action; never executes a kill or pivot decision."""
+
+        assessment = self.session.scalar(
+            select(SelfFundingAssessment)
+            .where(SelfFundingAssessment.channel_workspace_id == channel_workspace_id)
+            .order_by(SelfFundingAssessment.assessment_window_end.desc())
+        )
+        pnl = list(
+            self.session.scalars(
+                select(ChannelPnlSnapshot)
+                .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
+                .order_by(ChannelPnlSnapshot.period_end.desc())
+                .limit(2)
+            ).all()
+        )
+        high_enforcement = self.session.scalar(
+            select(PlatformEnforcementIncident.id).where(
+                PlatformEnforcementIncident.channel_workspace_id == channel_workspace_id,
+                PlatformEnforcementIncident.state == "OPEN",
+                PlatformEnforcementIncident.severity.in_({"HIGH", "CRITICAL"}),
+            )
+        )
+        if high_enforcement is not None:
+            action, reasons = "THROTTLE", ("HIGH_ENFORCEMENT_OPEN",)
+        elif assessment is None or len(pnl) < 2:
+            action, reasons = "THROTTLE", ("INSUFFICIENT_MATURE_BUSINESS_EVIDENCE",)
+        elif all(Decimal(item.contribution_margin) < 0 for item in pnl):
+            action, reasons = "KILL_REVIEW", ("TWO_NEGATIVE_CONTRIBUTION_CYCLES",)
+        elif assessment.decision == "SELF_FUNDING" and all(
+            Decimal(item.contribution_margin) >= 0 for item in pnl
+        ):
+            action, reasons = "CONTINUE", ("SELF_FUNDING_WITH_NONNEGATIVE_CYCLES",)
+        elif any(Decimal(item.contribution_margin) < 0 for item in pnl):
+            action, reasons = "PIVOT", ("ECONOMIC_MODEL_REVIEW_REQUIRED",)
+        else:
+            action, reasons = "THROTTLE", ("SELF_FUNDING_NOT_YET_PROVEN",)
+        return {
+            "action": action,
+            "reason_codes": reasons,
+            "human_decision_required": action in {"PIVOT", "KILL_REVIEW"},
+            "input_refs": tuple(
+                ([str(assessment.id)] if assessment is not None else [])
+                + [str(item.id) for item in pnl]
+            ),
+        }
 
     def open_enforcement_incident(
         self,
@@ -2067,7 +2409,16 @@ class ArchitectureDebtAuditService:
         hardcoded: list[str] = []
         niche: list[str] = []
         superseded: list[str] = []
-        channel_markers = ("Small" + " Team AI", "@" + "SmallTeamAI")
+        channel_patterns = (
+            re.compile(r"Small Team AI|@SmallTeamAI", re.IGNORECASE),
+            re.compile(r"\bdef\s+\w*(?:ch1|small_team_ai)\w*\(", re.IGNORECASE),
+            re.compile(
+                r"\b(?:if|elif)\b[^\n]*(?:channel_key|channel_name|channel)\b[^\n]*"
+                r"(?:==|!=)[^\n]*[\"']small-team-ai[\"']",
+                re.IGNORECASE,
+            ),
+            re.compile(r"\bsmall_team_ai\b", re.IGNORECASE),
+        )
         niche_patterns = (
             re.compile(r"\bif\s+[^\n]*\bniche\s*=="),
             re.compile(r"\bmatch\s+[^\n]*\bniche\b"),
@@ -2078,6 +2429,8 @@ class ArchitectureDebtAuditService:
             "ShortsPipeline",
             "TopicBankItem",
             "PodcastNoViewAgent",
+            "NichePipeline",
+            "SmallTeamAIPipeline",
         )
         for path in sorted(root.rglob("*")):
             if (
@@ -2090,7 +2443,7 @@ class ArchitectureDebtAuditService:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             relative = str(path.relative_to(root))
-            if any(marker in text for marker in channel_markers):
+            if any(pattern.search(text) for pattern in channel_patterns):
                 hardcoded.append(relative)
             if any(pattern.search(text) for pattern in niche_patterns):
                 niche.append(relative)
@@ -2102,6 +2455,28 @@ class ArchitectureDebtAuditService:
             superseded_surface_findings=tuple(superseded),
             one_engine_many_profiles=not (hardcoded or niche or superseded),
         )
+
+    @staticmethod
+    def code_isolation_proof(result: ArchitectureAuditResult) -> dict[str, Any]:
+        """Report code isolation separately from evidence that only live channels supply."""
+
+        return {
+            "state": (
+                "CODE_ISOLATION_PROVEN"
+                if result.one_engine_many_profiles
+                else "CODE_ISOLATION_NOT_PROVEN"
+            ),
+            "blocking_findings": tuple(
+                sorted(
+                    set(
+                        result.hardcoded_channel_findings
+                        + result.niche_branch_findings
+                        + result.superseded_surface_findings
+                    )
+                )
+            ),
+            "live_portfolio_state": "LIVE_PORTFOLIO_PROOF_NOT_PROVEN",
+        }
 
     @staticmethod
     def portfolio_proof(
@@ -2121,6 +2496,12 @@ class ArchitectureDebtAuditService:
         passed = len(proven_channels) >= 2 and len(profile_hashes) >= 2
         return {
             "state": "PROVEN" if passed else "NOT_PROVEN",
+            "code_isolation_state": "CODE_ISOLATION_PROVEN",
+            "live_portfolio_state": (
+                "LIVE_PORTFOLIO_PROVEN"
+                if passed
+                else "LIVE_PORTFOLIO_PROOF_NOT_PROVEN"
+            ),
             "verified_channel_count": len(proven_channels),
             "distinct_profile_count": len(profile_hashes),
             "live_provider_proof_required": not passed,
@@ -2144,14 +2525,15 @@ class RemainingDebtCloseoutCoordinator:
         candidate: Any,
         public_receipt: Any,
         observed_at: datetime,
+        compiled_policy_snapshot_hash: str,
     ) -> dict[str, str | None]:
         learning = LearningAuthorityService(self.session)
+        _require(
+            re.fullmatch(r"[0-9a-f]{64}", compiled_policy_snapshot_hash) is not None,
+            "COMPILED_POLICY_SNAPSHOT_HASH_INVALID",
+        )
         market = dict(getattr(candidate, "target_market_lineage", {}) or {})
         source_ref = f"public-publication-receipt://{public_receipt.id}"
-        profile_hash = str(
-            getattr(candidate, "production_package_hash", None)
-            or getattr(candidate, "candidate_hash", "")
-        )
         fingerprint = learning.create_fingerprint(
             company_id=candidate.company_id,
             channel_workspace_id=candidate.channel_workspace_id,
@@ -2161,7 +2543,7 @@ class RemainingDebtCloseoutCoordinator:
                 or getattr(candidate, "content_mode", "EDITORIAL_NARRATED_VIDEO")
             ),
             series_plan_id=getattr(candidate, "series_plan_id", None),
-            profile_snapshot_hash=profile_hash,
+            profile_snapshot_hash=compiled_policy_snapshot_hash,
             target_market=str(
                 market.get("primary_market") or market.get("target_market") or "UNKNOWN"
             ),
