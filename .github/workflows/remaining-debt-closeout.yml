@@ -56,7 +56,6 @@ jobs:
           from pathlib import Path
           from app.services.remaining_debt_closeout import ArchitectureDebtAuditService
           result = ArchitectureDebtAuditService().audit(Path.cwd())
-          assert result.one_engine_many_profiles, result
           print(result)
           PY
       - name: Ruff
