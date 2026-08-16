@@ -323,6 +323,46 @@ class QualificationFactory:
     )
 
 
+def _patch_current_long_form_cost_authority_fixture() -> None:
+    """Scope synthetic reviewed provider costs to LF integration tests only."""
+
+    path = Path("tests/test_long_form_launch_cadence.py")
+    _replace_once(
+        path,
+        "from app.core.errors import ValidationFailureError\n",
+        '''from app.core.config import get_settings
+from app.core.errors import ValidationFailureError
+''',
+        label="LF reviewed cost authority settings import",
+    )
+    _replace_once(
+        path,
+        '''@pytest.fixture
+def qualification_factory(db_session):
+    return QualificationFactory(db_session)
+''',
+        '''@pytest.fixture
+def qualification_factory(db_session, monkeypatch):
+    """Provide reviewed synthetic TTS cost authority only for LF integration."""
+
+    monkeypatch.setenv(
+        "VCOS_ELEVENLABS_TTS_COST_PER_CHARACTER_USD",
+        "0.010000",
+    )
+    monkeypatch.setenv(
+        "VCOS_ELEVENLABS_FORCED_ALIGNMENT_COST_USD",
+        "0.250000",
+    )
+    get_settings.cache_clear()
+    try:
+        yield QualificationFactory(db_session)
+    finally:
+        get_settings.cache_clear()
+''',
+        label="LF scoped reviewed TTS cost authority",
+    )
+
+
 def main() -> None:
     stage = sys.argv[1] if len(sys.argv) > 1 else ""
     _repair_round2_niche_digest_helper_boundary()
@@ -330,6 +370,7 @@ def main() -> None:
     if stage == "rc2":
         _patch_current_evidence_authority_split()
         _patch_current_voice_authority_fixture()
+        _patch_current_long_form_cost_authority_fixture()
 
 
 if __name__ == "__main__":
