@@ -62,6 +62,7 @@ jobs:
           PY
       - name: Ruff
         run: |
+          ruff format --diff tests/test_remaining_debt_closeout.py || true
           ruff check \
             app/db/models/remaining_debt.py \
             app/services/remaining_debt_closeout.py \
