@@ -1,6 +1,6 @@
 """add company-scoped business actions and continuation-capital review authority
 
-Revision ID: 0088_business_action_continuation
+Revision ID: 0088_business_continuation
 Revises: 0087_business_os
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0088_business_action_continuation"
+revision = "0088_business_continuation"
 down_revision = "0087_business_os"
 branch_labels = None
 depends_on = None
