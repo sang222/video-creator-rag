@@ -559,8 +559,9 @@ def test_high_enforcement_blocks_self_funding_and_creates_action(db: Session) ->
     )
     assert action.state == "RESOLVED"
     assert (
-        service.dashboard(company_id=company_id, channel_workspace_id=channel_id)
-        .disclosure_health
+        service.dashboard(
+            company_id=company_id, channel_workspace_id=channel_id
+        ).disclosure_health
         == "CLEAN"
     )
 
