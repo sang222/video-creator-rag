@@ -31,7 +31,8 @@ from app.services.runtime_migration_guard import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HEAD = "0079_ai_visual"
+HEAD = "0090_learning_reassessment"
+RUNTIME_MINIMUM = "0079_ai_visual"
 HASH_A = "a" * 64
 HASH_B = "b" * 64
 HASH_C = "c" * 64
@@ -311,13 +312,13 @@ def _insert_prepared_effect_fixture(db_session, values: dict) -> None:
         db_session.execute(text("SET LOCAL session_replication_role = origin"))
 
 
-def test_0079_is_single_runtime_head_and_forward_only(engine) -> None:
+def test_runtime_migration_head_is_forward_only(engine) -> None:
     assert _alembic_script().get_heads() == [HEAD]
     with engine.connect() as connection:
         current = connection.scalar(text("select version_num from alembic_version"))
     assert current == HEAD
-    assert REQUIRED_RUNTIME_DB_REVISION == HEAD
-    assert is_revision_at_or_after(current, minimum_revision=HEAD)
+    assert REQUIRED_RUNTIME_DB_REVISION == RUNTIME_MINIMUM
+    assert is_revision_at_or_after(current, minimum_revision=RUNTIME_MINIMUM)
     migration = (
         ROOT
         / "alembic/versions/0079_ai_visual_ai_only_visual_production_authority_and_.py"

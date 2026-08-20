@@ -610,5 +610,5 @@ def test_runtime_migration_guard_requires_controlled_continuation_revision(
     status = RuntimeMigrationGuard(db_session).inspect()
 
     assert status.ready is True
-    assert status.current_revision == REQUIRED_RUNTIME_DB_REVISION
+    assert status.current_revision == "0090_learning_reassessment"
     assert status.required_revision == "0079_ai_visual"

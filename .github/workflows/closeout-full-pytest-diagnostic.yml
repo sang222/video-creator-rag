@@ -1,0 +1,76 @@
+name: Remaining Debt Full Pytest Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remaining-debt-full-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vcos
+          POSTGRES_PASSWORD: vcos
+          POSTGRES_DB: vcos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vcos -d vcos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      VCOS_DATABASE_URL: postgresql+psycopg://vcos:vcos@localhost:5432/vcos
+      VCOS_ENVIRONMENT: test
+      VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
+      VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
+      # Non-secret, reviewed fixture prices let real-production planning paths
+      # freeze their combined-cost authority without enabling provider calls.
+      VCOS_ELEVENLABS_TTS_COST_PER_CHARACTER_USD: "0.000100"
+      VCOS_ELEVENLABS_FORCED_ALIGNMENT_COST_USD: "0.050000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime and native regression dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,veo]" ruff==0.15.12
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+      - name: Validate checked-in closeout workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q app tests
+          alembic upgrade head
+          test "$(alembic heads | wc -l | tr -d ' ')" = "1"
+          test "$(alembic heads | awk '{print $1}')" = "0090_learning_reassessment"
+      - name: Full repository regression with diagnostic summary
+        id: full_pytest
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          pytest -q 2>&1 | tee /tmp/full-pytest.log
+          status=${PIPESTATUS[0]}
+          {
+            echo '## Full pytest diagnostic'
+            echo
+            echo "PYTEST_EXIT=$status"
+            echo
+            echo '```text'
+            tail -n 700 /tmp/full-pytest.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

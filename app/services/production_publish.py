@@ -1471,6 +1471,35 @@ class ProductionPublishService:
         )
         self.session.add(uploaded)
         self.session.flush()
+        policy_snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, candidate.policy_snapshot_id
+        )
+        if (
+            policy_snapshot is None
+            or policy_snapshot.id != candidate.policy_snapshot_id
+            or policy_snapshot.channel_workspace_id != candidate.channel_workspace_id
+            or policy_snapshot.channel_profile_version_id
+            != candidate.channel_profile_version_id
+        ):
+            raise ValidationFailureError("PUBLICATION_POLICY_SNAPSHOT_AUTHORITY_MISMATCH")
+        from app.services.remaining_debt_closeout import RemainingDebtCloseoutCoordinator
+
+        closeout_projection = RemainingDebtCloseoutCoordinator(
+            self.session
+        ).on_publication_verified(
+            candidate=candidate,
+            public_receipt=public_receipt,
+            observed_at=confirmation.actual_published_at,
+            compiled_policy_snapshot_hash=policy_snapshot.content_hash,
+        )
+        uploaded.lineage_refs = {
+            **dict(uploaded.lineage_refs or {}),
+            "remaining_debt_closeout": closeout_projection,
+        }
+        uploaded.operator_summary = {
+            **dict(uploaded.operator_summary or {}),
+            "closeout_projection": "RECORDED",
+        }
         LongFormAnalyticsScheduler(self.session).schedule_uploaded_video(uploaded.id)
         task.actual_uploaded_video_id = uploaded.id
         task.task_state = "VERIFIED"

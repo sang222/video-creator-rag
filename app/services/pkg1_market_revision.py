@@ -216,8 +216,8 @@ class PKG1MarketRevisionService:
             failures.append("PROCEED_TO_MR1_NOT_FALSE")
 
         channel = self.session.get(ChannelWorkspace, channel_id)
-        if channel is None or channel.key != "small-team-ai":
-            failures.append("CHANNEL_NOT_SMALL_TEAM_AI")
+        if channel is None:
+            failures.append("CHANNEL_NOT_FOUND")
             return {"status": "FAIL", "reason_codes": failures}
         snapshot = self.session.get(
             CompiledChannelPolicySnapshot, channel.active_policy_snapshot_id

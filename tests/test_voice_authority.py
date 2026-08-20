@@ -8,6 +8,7 @@ from alembic.script import ScriptDirectory
 
 from app.contracts.voice_authority import ProviderVoiceCandidate
 from app.core.errors import ValidationFailureError
+from app.services.config_registry import content_hash
 from app.services.voice_authority import (
     NarrationPerformanceGate,
     VoiceAuthorityService,
@@ -125,6 +126,7 @@ def test_tts_projection_groups_adjacent_delivery_intents_and_uses_context() -> N
         script_sections=sections,
     )
     segments = VoiceAuthorityService._compile_segments(
+        canonical_narration=narration,
         beats=beats,
         voice=_voice(),
         capabilities={
@@ -140,6 +142,9 @@ def test_tts_projection_groups_adjacent_delivery_intents_and_uses_context() -> N
     assert segments[0].next_text is not None
     assert segments[-1].previous_text is not None
     for segment in segments:
+        assert segment.text_hash == content_hash(
+            {"text": narration[segment.source_text_start : segment.source_text_end]}
+        )
         assert 0.85 <= float(segment.voice_settings["speed"]) <= 1.10
         assert 0.35 <= float(segment.voice_settings["stability"]) <= 0.75
         assert 0.0 <= float(segment.voice_settings["style"]) <= 0.20
@@ -215,4 +220,4 @@ def test_voice_migration_is_single_head() -> None:
     config.set_main_option("script_location", "alembic")
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
-    assert heads == ["0084_youtube_private_delivery"]
+    assert heads == ["0090_learning_reassessment"]

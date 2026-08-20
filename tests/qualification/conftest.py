@@ -1,0 +1,930 @@
+from __future__ import annotations
+
+import uuid
+from copy import deepcopy
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from app.contracts import (
+    ArtifactCreate,
+    ArtifactVersionCreate,
+    ChannelProfileVersionCreate,
+    ChannelWorkspaceCreate,
+)
+from app.contracts.channel_policy import (
+    ChannelScopedPolicy,
+    ChannelVisualSourcePolicyBinding,
+    GeminiImageUsagePolicy,
+    PolicyRef,
+)
+from app.contracts.geo_market import (
+    MARKET_GATE_STRICT_ORDER,
+    DestinationBinding,
+    TargetMarketProfile,
+)
+from app.contracts.m5 import (
+    EditorialCalendarSlotCreate,
+    EditorialIdeaCandidateCreate,
+    EditorialIdeaCandidateTransition,
+    EditorialResearchRunCreate,
+    IdeaMarketPreflightCreate,
+    SearchDemandEvidenceCreate,
+)
+from app.contracts.ofv0 import FormatIdentityContractDraftRequest
+from app.contracts.vcos_v2 import AssignmentMode, LongFormPlanningRequest
+from app.contracts.voice_authority import (
+    ApprovedVoicePoolCreate,
+    NarrationMarketRequirements,
+    ProviderVoiceCandidate,
+    VoiceMarketIdentity,
+    VoiceMarketResearchCreate,
+    VoiceProviderCatalogCreate,
+    VoiceResearchEvidence,
+)
+from app.core.actor import authenticated_actor_context
+from app.contracts.r3d1 import ContentCategoryCreate
+from app.contracts.m6 import ProductionArtifactRunCreate
+from app.contracts.ops import ProviderRegistryEntryCreate
+from app.contracts.workflow import VideoProjectCreate
+from app.contracts.visual_routing import (
+    NicheVisualSourceProfile,
+    VisualSourceRoute,
+)
+from app.db.models import (
+    CaptionTrackSnapshot,
+    CompiledChannelPolicySnapshot,
+    User,
+    VideoProject,
+    VisualPlanSnapshot,
+    VoiceTimelineSnapshot,
+)
+from app.services import (
+    ArtifactService,
+    ChannelProfileCompiler,
+    ChannelProfileService,
+    ChannelWorkspaceService,
+    CompanyService,
+    ConfigRegistryService,
+    EditorialCalendarService,
+    GateDefinitionService,
+    IdeaMarketPreflightService,
+    ProductionArtifactRunService,
+    ProviderRegistryService,
+    R3D1AdminService,
+    RBACService,
+    SearchDemandEvidenceService,
+    VideoProjectService,
+)
+from app.services.editorial_research import EditorialResearchService
+from app.services.config_registry import content_hash
+from app.services.geo_market import TargetMarketDigestCompiler
+from app.services.production_package import ChannelDurationContractResolver
+from app.services.ofv0 import FormatIdentityContractService
+from app.services.vcos_v2 import LongFormPlanningService
+from app.services.voice_authority import VoiceAuthorityService
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class QualificationFactory:
+    def __init__(self, session):
+        self.session = session
+
+    def seed_all(self) -> None:
+        ConfigRegistryService(self.session).seed([ROOT / "config"])
+        registry = ProviderRegistryService(self.session)
+        if registry.get_entry("openai") is None:
+            registry.create_entry(
+                data=ProviderRegistryEntryCreate(
+                    provider_key="openai",
+                    provider_name="OpenAI Responses Router",
+                    provider_type="LLM",
+                    capability_blob={
+                        "llm_router_lane_bound": True,
+                        "guarded_real_execution": True,
+                    },
+                    policy_fit_blob={"production_enabled_when_configured": True},
+                    metadata={"readiness_provider_key": "openai"},
+                )
+            )
+        GateDefinitionService(self.session).seed_definitions()
+
+    def user(
+        self, *, role_key: str = "operator", company_id=None, email_prefix: str = "qual"
+    ) -> User:
+        user = User(
+            email=f"{email_prefix}-{uuid.uuid4().hex[:10]}@example.com",
+            display_name=email_prefix,
+            status="active",
+        )
+        self.session.add(user)
+        self.session.flush()
+        if company_id is not None:
+            RBACService(self.session).assign_role(
+                user_id=user.id, role_key=role_key, company_id=company_id
+            )
+        return user
+
+    def channel_scope(
+        self,
+        *,
+        name: str = "Pre-M7",
+        strict_long_form: bool = False,
+    ) -> SimpleNamespace:
+        self.seed_all()
+        company = CompanyService(self.session).create_company(name=f"{name} Co")
+        operator = self.user(
+            role_key="operator", company_id=company.id, email_prefix="operator"
+        )
+        admin = self.user(
+            role_key="company_admin", company_id=company.id, email_prefix="admin"
+        )
+        channel = ChannelWorkspaceService(self.session).create_channel(
+            company_id=company.id,
+            data=ChannelWorkspaceCreate(
+                key=(
+                    "small-team-ai"
+                    if strict_long_form
+                    else f"ch-{uuid.uuid4().hex[:8]}"
+                ),
+                name=f"{name} Channel",
+            ),
+        )
+        profile = ChannelProfileService(self.session).create_profile_version(
+            channel_id=channel.id,
+            data=ChannelProfileVersionCreate(template_key="saas_digital_leverage"),
+        )
+        if strict_long_form:
+            format_contract = FormatIdentityContractService(self.session).draft(
+                FormatIdentityContractDraftRequest(
+                    channel_id=channel.id,
+                    channel_profile_version_id=profile.id,
+                    created_by="QualificationFactory",
+                )
+            )
+            FormatIdentityContractService(self.session).approve(
+                format_contract.id,
+                decided_by="qualification-operator",
+            )
+        compiled = ChannelProfileCompiler(self.session).compile(
+            profile_version_id=profile.id,
+            correlation_id=f"pre-m7-compile-{uuid.uuid4().hex[:8]}",
+        )
+        profile_service = ChannelProfileService(self.session)
+        if strict_long_form:
+            profile_service.submit_for_approval(profile.id)
+            profile_service.approve_profile_version(
+                profile_version_id=profile.id,
+                approved_by=admin.id,
+                approval_ref="operator-approval://ch1-flex/small-team-ai/profile-v1",
+            )
+        snapshot = profile_service.activate_snapshot(
+            snapshot_id=compiled.snapshot_id
+        )
+        if strict_long_form:
+            profile, snapshot, compiled = self._activate_strict_long_form_authority(
+                channel=channel,
+                active_profile=profile,
+                active_snapshot=snapshot,
+                admin=admin,
+            )
+        return SimpleNamespace(
+            company=company,
+            channel=channel,
+            profile=profile,
+            snapshot=snapshot,
+            operator=operator,
+            admin=admin,
+            compiled=compiled,
+        )
+
+    def _activate_strict_long_form_authority(
+        self,
+        *,
+        channel,
+        active_profile,
+        active_snapshot,
+        admin,
+    ):
+        """Compile a test-only successor from current typed policy contracts.
+
+        The old fixture invoked removed, channel-specific compiler overlay
+        helpers. The replacement obtains the base policy from the regular
+        compiler, then applies synthetic, hash-bound visual and market
+        contracts inside the test transaction. It does not call a provider or
+        restore production runtime overlays that require deleted local reports.
+        """
+
+        base_policy = ChannelScopedPolicy.model_validate(
+            (active_snapshot.compiled_payload or {})["channel_scoped_policy"]
+        )
+        market_profile = TargetMarketProfile(
+            profile_version=1,
+            channel_id=channel.id,
+            channel_key=channel.key,
+            primary_market="US",
+            primary_geo_cluster=["US"],
+            acceptable_secondary_geos=["CA", "GB", "AU"],
+            primary_locale="en-US",
+            content_language="en",
+            narration_locale="en-US",
+            primary_timezone="America/New_York",
+            spelling_system="US",
+            currency="USD",
+            units_policy="US_WITH_METRIC_WHEN_RELEVANT",
+            date_format="MMM D, YYYY",
+            title_locale="en-US",
+            thumbnail_text_locale="en-US",
+            caption_locales=["en-US"],
+            audience_market_context="US_SMALL_BUSINESS",
+            workplace_context="US_SMALL_BUSINESS",
+            source_jurisdiction_policy="TARGET_MARKET_FIRST_CONTEXTUAL_FOREIGN_ALLOWED",
+            preferred_source_jurisdictions=["US"],
+            foreign_source_context_required=True,
+            allowed_market_contexts=["US", "CA", "GB", "AU"],
+            prohibited_market_mismatches=[
+                "TRANSLATED_SOUNDING_ENGLISH",
+                "NON_US_CURRENCY_WITHOUT_USD_EQUIVALENT",
+                "FOREIGN_LEGAL_ASSUMPTION_WITHOUT_CONTEXT",
+                "WRONG_VOICE_LOCALE",
+                "WRONG_METADATA_LOCALE",
+                "WRONG_THUMBNAIL_LOCALE",
+            ],
+            initial_publish_window_hypotheses=[
+                {
+                    "timezone": "America/New_York",
+                    "days": ["TUE", "SAT"],
+                    "local_time": "10:00",
+                    "status": "HYPOTHESIS_ONLY",
+                }
+            ],
+            minimum_comparable_videos=3,
+            video_geo_evaluation_window_days=7,
+            channel_geo_review_window_days=30,
+            target_market="US",
+            actual_viewer_geography_state="UNMEASURED",
+            approval_ref="operator-approval://qualification/strict-long-form",
+        )
+        market_digest = TargetMarketDigestCompiler().compile(market_profile)
+        destination = DestinationBinding(
+            binding_version=1,
+            channel_id=channel.id,
+            channel_key=channel.key,
+            platform="YOUTUBE",
+            channel_handle="@QualificationLongForm",
+            target_market_profile_ref=market_digest.profile_ref,
+            target_market_profile_hash=str(market_profile.content_hash),
+            target_market="US",
+            primary_market="US",
+            primary_locale="en-US",
+            original_language="en",
+            default_visibility="PRIVATE",
+            manual_publish_required=True,
+            destination_status="PENDING_PLATFORM_ID",
+            verification_state="PENDING",
+            approval_ref="operator-approval://qualification/strict-long-form",
+        )
+        policy_payload = deepcopy(base_policy.model_dump(mode="json"))
+        def fixture_ref(key: str) -> PolicyRef:
+            return PolicyRef(
+                ref=f"fixture://qualification/{key}",
+                version="fixture-v1",
+                content_hash="0" * 64,
+            )
+        visual_binding = ChannelVisualSourcePolicyBinding(
+            niche_visual_source_profile=NicheVisualSourceProfile.STOCK_ASSISTED,
+            visual_source_routing_policy=fixture_ref("visual-routing-policy"),
+            visual_source_routing_catalog=fixture_ref("visual-routing-catalog"),
+            gemini_image_provider_registry=fixture_ref("gemini-provider-registry"),
+            gemini_image_model_catalog=fixture_ref("gemini-model-catalog"),
+            image_visual_quality_control=fixture_ref("image-quality-control"),
+            image_canary_v3_qualification=fixture_ref("image-canary"),
+            drive_verified_canary_receipt=fixture_ref("drive-receipt"),
+            allowed_source_routes=list(VisualSourceRoute),
+        )
+        provider_usage = dict(policy_payload["provider_usage_policy"])
+        provider_usage["google_gemini_image"] = GeminiImageUsagePolicy().model_dump(
+            mode="json"
+        )
+        policy_payload.update(
+            {
+                "policy_version": f"{channel.key}.qualification-policy.v3",
+                "approval_ref": "operator-approval://qualification/strict-long-form",
+                "provider_usage_policy": provider_usage,
+                "visual_source_policy_binding": visual_binding.model_dump(mode="json"),
+                "target_market_profile": market_profile.model_dump(mode="json"),
+                "target_market_digest": market_digest.model_dump(mode="json"),
+                "market_alignment_policy": {
+                    "required_gate_order": [item.value for item in MARKET_GATE_STRICT_ORDER]
+                },
+                "destination_binding_policy": {
+                    "destination": destination.model_dump(mode="json")
+                },
+                "market_package_freeze_policy": {
+                    "required_preconditions": [
+                        "TechnicalMediaQC.PASS",
+                        "CreativeHumanReview.PASS",
+                        "MarketAlignmentDossier.PASS",
+                        "DestinationBinding.VERIFIED",
+                        "PublishRiskDossier.PASS",
+                        "ExactPackageHumanApproval.PASS",
+                        "PostApprovalIntegrity.PASS",
+                    ],
+                    "frozen_fields": [
+                        "media_file_and_hash",
+                        "thumbnail_and_hash",
+                        "title",
+                        "description",
+                        "captions",
+                        "disclosures",
+                        "destination_binding",
+                        "target_market_profile",
+                        "publish_window",
+                        "package_hash",
+                    ],
+                },
+                "publish_timing_localization_policy": {
+                    "caption_locales": ["en-US"]
+                },
+                "geo_evaluation_policy": {
+                    "minimum_comparable_videos": 3,
+                    "video_level_evaluation_window_days": 7,
+                    "channel_review_window_days": 30,
+                },
+            }
+        )
+        policy = ChannelScopedPolicy.model_validate(policy_payload)
+        payload = deepcopy(active_snapshot.compiled_payload or {})
+        payload["channel_scoped_policy"] = policy.model_dump(mode="json")
+        successor = CompiledChannelPolicySnapshot(
+            channel_workspace_id=active_snapshot.channel_workspace_id,
+            channel_profile_version_id=active_snapshot.channel_profile_version_id,
+            compile_run_id=active_snapshot.compile_run_id,
+            snapshot_version=active_snapshot.snapshot_version + 1,
+            status="approved",
+            compiler_version="qualification.strict-long-form-fixture.v1",
+            capability_matrix_version=active_snapshot.capability_matrix_version,
+            compiled_payload=payload,
+            content_hash=content_hash(payload),
+            profile_input_hash=active_snapshot.profile_input_hash,
+        )
+        self.session.add(successor)
+
+        metadata = deepcopy(channel.metadata_ or {})
+        metadata["target_market_governance"] = {
+            "drafts": [],
+            "profiles": [market_profile.model_dump(mode="json")],
+            "digests": [market_digest.model_dump(mode="json")],
+            "approvals": [],
+            "active_profile_ref": (
+                f"target-market-profile://{channel.key}/"
+                f"v{market_profile.profile_version}"
+            ),
+            "state": "ACTIVE",
+        }
+        metadata["destination_governance"] = {
+            "bindings": [destination.model_dump(mode="json")],
+            "active_binding_ref": (
+                f"destination-binding://{channel.key}/"
+                f"v{destination.binding_version}"
+            ),
+        }
+        metadata["active_visual_profile"] = "STOCK_ASSISTED"
+        metadata["market_policy_state"] = "ACTIVE"
+        channel.metadata_ = metadata
+        self.session.flush()
+        active_snapshot = ChannelProfileService(self.session).activate_snapshot(
+            snapshot_id=successor.id,
+            correlation_id="qualification-strict-long-form-successor-activate",
+        )
+        self._seed_strict_long_form_voice_authority(
+            channel=channel,
+            profile=active_profile,
+            snapshot=active_snapshot,
+            admin=admin,
+        )
+        return active_profile, active_snapshot, SimpleNamespace(
+            snapshot_id=successor.id,
+            content_hash=successor.content_hash,
+        )
+
+    def _seed_strict_long_form_voice_authority(
+        self,
+        *,
+        channel,
+        profile,
+        snapshot,
+        admin,
+    ) -> None:
+        """Seed complete fixture-only voice authority for the active successor.
+
+        The strict fixture deliberately activates a new immutable policy
+        snapshot.  Voice execution resolves only a pool bound to that exact
+        snapshot, so the synthetic test authority must be created after the
+        successor is active rather than inherited from the superseded policy.
+        """
+
+        evidence_hash = content_hash(
+            {
+                "fixture": "qualification-strict-long-form-voice-authority",
+                "policy_snapshot_id": str(snapshot.id),
+            }
+        )
+        narration_modes = [
+            "TECHNICAL_EXPLAINER",
+            "ANALYTICAL",
+            "TACTICAL",
+            "STORY_CASE_STUDY",
+            "DOCUMENTARY",
+            "CAUTIONARY",
+        ]
+        voice = ProviderVoiceCandidate(
+            voice_id="qualification-us-narrator",
+            display_name="Qualification US Narrator",
+            language_tags=["en"],
+            locale_tags=["en-US"],
+            accent_tags=["GENERAL_AMERICAN"],
+            narration_mode_fit=narration_modes,
+            market_fit_tags=["US"],
+            clarity_score=90,
+            energy_score=72,
+            warmth_score=70,
+            authority_score=88,
+            conversationality_score=76,
+            approved_model_ids=["eleven_multilingual_v2"],
+            default_model_id="eleven_multilingual_v2",
+            default_settings={
+                "speed": 1.0,
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+                "style": 0.0,
+                "use_speaker_boost": True,
+            },
+            safe_setting_bounds={
+                "speed": {"min": 0.7, "max": 1.2},
+                "stability": {"min": 0.0, "max": 1.0},
+                "similarity_boost": {"min": 0.0, "max": 1.0},
+                "style": {"min": 0.0, "max": 1.0},
+            },
+            commercial_use_state="APPROVED",
+            availability_state="AVAILABLE",
+            priority=100,
+            evidence_refs=["fixture://qualification/voice-market-research"],
+        )
+        service = VoiceAuthorityService(self.session)
+        research = service.create_market_research(
+            VoiceMarketResearchCreate(
+                company_id=channel.company_id,
+                channel_workspace_id=channel.id,
+                channel_profile_version_id=profile.id,
+                policy_snapshot_id=snapshot.id,
+                market_identity=VoiceMarketIdentity(
+                    primary_market="US",
+                    target_countries=["US"],
+                    content_language="en",
+                    locale="en-US",
+                    audience_profile={"segment": "small professional teams"},
+                    channel_positioning="evidence-first automation explainers",
+                ),
+                requirements=NarrationMarketRequirements(
+                    accent_families=["GENERAL_AMERICAN"],
+                    pronunciation_locale="en-US",
+                    pacing_profile="MEDIUM",
+                    energy_profile="MEDIUM",
+                    authority_profile="HIGH",
+                    warmth_profile="MEDIUM",
+                    conversationality_profile="MEDIUM",
+                    required_narration_modes=narration_modes,
+                ),
+                evidence=[
+                    VoiceResearchEvidence(
+                        evidence_id="qualification-voice-market-research",
+                        source_title="Qualification strict long-form policy",
+                        source_class="CHANNEL_POLICY",
+                        excerpt="Synthetic test-only voice authority bound to the active policy.",
+                        source_hash=evidence_hash,
+                    )
+                ],
+                confidence_label="HIGH",
+                created_by_user_id=admin.id,
+            )
+        )
+        catalog = service.create_provider_catalog(
+            VoiceProviderCatalogCreate(
+                company_id=channel.company_id,
+                channel_workspace_id=channel.id,
+                provider="elevenlabs",
+                catalog_version="qualification-strict-long-form.v1",
+                voices=[voice],
+                source_refs=["fixture://qualification/voice-provider-catalog"],
+                created_by_user_id=admin.id,
+            )
+        )
+        service.create_approved_pool(
+            ApprovedVoicePoolCreate(
+                company_id=channel.company_id,
+                channel_workspace_id=channel.id,
+                channel_profile_version_id=profile.id,
+                policy_snapshot_id=snapshot.id,
+                voice_market_research_id=research.id,
+                provider_catalog_snapshot_id=catalog.id,
+                version=1,
+                voices=[voice],
+                approved_by_user_id=admin.id,
+            )
+        )
+
+    def m2_project(self, *, scope_name: str = "M2") -> SimpleNamespace:
+        scope = self.channel_scope(name=scope_name)
+        project = VideoProjectService(self.session).create_project(
+            data=VideoProjectCreate(
+                company_id=scope.company.id,
+                channel_workspace_id=scope.channel.id,
+                policy_snapshot_id=scope.snapshot.id,
+                title="Pre-M7 exact-version workflow",
+                description="Qualification fixture project",
+                created_by_user_id=scope.operator.id,
+            )
+        )
+        artifact = ArtifactService(self.session).create_artifact(
+            data=ArtifactCreate(
+                video_project_id=project.id,
+                artifact_type="script",
+                created_by_user_id=scope.operator.id,
+            )
+        )
+        version = ArtifactService(self.session).create_artifact_version(
+            data=ArtifactVersionCreate(
+                artifact_id=artifact.id,
+                content={"title": "v1", "lines": ["hello"]},
+                created_by_user_id=scope.operator.id,
+                external_entity_refs=[{"type": "brand", "id": "brand-1"}],
+                packaging_metadata={"package": "draft"},
+                media_qc_metadata={"ai_used": False},
+                source_manifest={"rights_basis": "licensed"},
+                evidence_refs=[{"type": "manual", "id": "ev-1"}],
+                context_refs=[{"type": "context_pack_snapshot", "id": "ctx-1"}],
+                claim_refs=[{"type": "claim", "id": "cl-1"}],
+            )
+        )
+        return SimpleNamespace(
+            **scope.__dict__, project=project, artifact=artifact, version=version
+        )
+
+    def m5_admitted_project(
+        self,
+        *,
+        evidence_volume: int | None = 1200,
+        mock_mode: str = "success",
+        quota_limit: Decimal | None = None,
+        provider_health_mode: str | None = None,
+    ) -> SimpleNamespace:
+        """Build the canonical research-candidate-preflight long-form source."""
+
+        scope = self.channel_scope(name="M5", strict_long_form=True)
+        permissions = RBACService(self.session).permissions_for_user(
+            user_id=scope.operator.id,
+            company_id=scope.company.id,
+        )
+        actor = authenticated_actor_context(
+            canonical_user_id=scope.operator.id,
+            operator_user_id=scope.operator.id,
+            actor_role="PRODUCER",
+            permissions=permissions,
+        )
+        category = R3D1AdminService(self.session).create_content_category(
+            ContentCategoryCreate(
+                company_id=scope.company.id,
+                channel_workspace_id=scope.channel.id,
+                category_key=f"default-{uuid.uuid4().hex[:8]}",
+                name="Default Long-form Category",
+                sub_niche="small-team automation",
+                audience_segment="small professional teams",
+                content_pillar="AI automation workflows",
+                character_policy_mode="NO_CHARACTER",
+                status="ACTIVE",
+            )
+        )
+        slot = EditorialCalendarService(self.session).create_slot(
+            data=EditorialCalendarSlotCreate(
+                company_id=scope.company.id,
+                channel_workspace_id=scope.channel.id,
+                policy_snapshot_id=scope.snapshot.id,
+                category_id=category.id,
+                slot_date=date(2026, 6, 24),
+                slot_type="RESEARCH",
+                schema_version="v2",
+                production_lane="LONG_FORM",
+                assignment_mode=AssignmentMode.OPEN_MIX,
+                production_goal="Explain a budgeted VCOS workflow",
+                target_platforms=["YOUTUBE"],
+                content_pillar="AI automation workflows",
+                format_hint="long-form explainer",
+                created_by_user_id=scope.operator.id,
+            )
+        )
+        evidence = None
+        if evidence_volume is not None:
+            evidence = SearchDemandEvidenceService(self.session).create_evidence(
+                data=SearchDemandEvidenceCreate(
+                    company_id=scope.company.id,
+                    channel_workspace_id=scope.channel.id,
+                    evidence_source_type="MANUAL_RESEARCH",
+                    query="budgeted video workflow",
+                    platform="YOUTUBE",
+                    geo="US",
+                    search_volume_30d=evidence_volume,
+                    relative_interest_index=Decimal("70"),
+                    competition_index=Decimal("0.30"),
+                    evidence_confidence="MEDIUM",
+                )
+            )
+        research = EditorialResearchService(self.session)
+        research_run = research.create_run(
+            data=EditorialResearchRunCreate(
+                company_id=scope.company.id,
+                channel_workspace_id=scope.channel.id,
+                channel_profile_version_id=scope.profile.id,
+                policy_snapshot_id=scope.snapshot.id,
+                editorial_calendar_slot_id=slot.id,
+                run_date=slot.slot_date,
+                trigger_type="TEST",
+                metadata={"provider_execution": "DISABLED"},
+            ),
+            actor=actor,
+        )
+        research.start_run(run_id=research_run.id, actor=actor)
+        blocked_readiness = (
+            (quota_limit is not None and quota_limit <= 0)
+            or provider_health_mode == "unavailable"
+            or mock_mode != "success"
+        )
+        candidate = research.add_candidate(
+            data=EditorialIdeaCandidateCreate(
+                editorial_research_run_id=research_run.id,
+                proposed_title="How a Small Team Can Audit One Automation",
+                proposed_angle="Evidence-aware long-form operating walkthrough.",
+                proposed_format="long-form explainer",
+                proposed_pillar="AI automation workflows",
+                evidence_refs=[
+                    {
+                        "type": "search_demand_evidence",
+                        "id": str(evidence.id) if evidence else "missing",
+                    }
+                ],
+                confidence_level="MEDIUM",
+                budget_readiness="BLOCKED" if blocked_readiness else "READY",
+                rights_policy_state="PASS",
+                quality_state="BLOCK" if mock_mode != "success" else "PASS",
+                experiment_phase="AUDIENCE_PROMISE",
+            ),
+            actor=actor,
+        )
+        preflight = IdeaMarketPreflightService(self.session).create_preflight(
+            data=IdeaMarketPreflightCreate(
+                company_id=scope.company.id,
+                channel_workspace_id=scope.channel.id,
+                editorial_calendar_slot_id=slot.id,
+                editorial_research_run_id=research_run.id,
+                editorial_idea_candidate_id=candidate.id,
+                demand_score=Decimal("60") if evidence else None,
+                channel_fit_score=Decimal("0.90"),
+                policy_fit_state="PASS",
+                niche_contract_digest_ref=f"niche-contract://{scope.channel.id}",
+                niche_contract_digest_hash="a" * 64,
+                target_market_digest_ref=f"target-market://{scope.channel.id}/US",
+                target_market_digest_hash="b" * 64,
+                editorial_slot_ref=f"editorial-slot://{slot.id}",
+                content_category_ref=str(category.id),
+                target_market="US",
+                market_scope=["US"],
+                market_fit_score=Decimal("0.90"),
+                market_fit_threshold=Decimal("0.60"),
+                evidence_blob={
+                    "search_demand_evidence_ids": [str(evidence.id)]
+                    if evidence is not None
+                    else []
+                },
+            )
+        )
+        if preflight.decision != "PASS" or blocked_readiness:
+            if preflight.decision == "PASS":
+                research.transition_candidate(
+                    candidate_id=candidate.id,
+                    data=EditorialIdeaCandidateTransition(
+                        target_stage="PREFLIGHT_PASS",
+                        idea_market_preflight_id=preflight.id,
+                        reason_codes=["STRICT_LONG_FORM_PREFLIGHT_PASS"],
+                    ),
+                    actor=actor,
+                )
+            research.complete_run(run_id=research_run.id, actor=actor)
+            return SimpleNamespace(
+                **scope.__dict__,
+                actor=actor,
+                category=category,
+                slot=slot,
+                evidence=evidence,
+                quota_account=None,
+                research_run=research_run,
+                candidate=candidate,
+                idea=candidate,
+                preflight=preflight,
+                admission=None,
+                project=None,
+            )
+        research.transition_candidate(
+            candidate_id=candidate.id,
+            data=EditorialIdeaCandidateTransition(
+                target_stage="PREFLIGHT_PASS",
+                idea_market_preflight_id=preflight.id,
+                reason_codes=["STRICT_LONG_FORM_PREFLIGHT_PASS"],
+            ),
+            actor=actor,
+        )
+        research.transition_candidate(
+            candidate_id=candidate.id,
+            data=EditorialIdeaCandidateTransition(
+                target_stage="GREENLIT",
+                idea_market_preflight_id=preflight.id,
+                reason_codes=["DETERMINISTIC_GREENLIGHT"],
+            ),
+            actor=actor,
+        )
+        duration = ChannelDurationContractResolver(self.session).resolve(
+            profile_version_id=scope.profile.id,
+            policy_snapshot_id=scope.snapshot.id,
+            production_lane="LONG_FORM",
+        )
+        admission = LongFormPlanningService(self.session).admit(
+            LongFormPlanningRequest(
+                company_id=scope.company.id,
+                channel_workspace_id=scope.channel.id,
+                channel_profile_version_id=scope.profile.id,
+                policy_snapshot_id=scope.snapshot.id,
+                editorial_calendar_slot_id=slot.id,
+                editorial_idea_candidate_id=candidate.id,
+                idea_market_preflight_id=preflight.id,
+                assignment_mode=AssignmentMode.OPEN_MIX,
+                title=candidate.proposed_title,
+                description=candidate.proposed_angle,
+                category_id=category.id,
+                niche_gate_passed=True,
+                market_gate_passed=True,
+                evidence_refs=list(candidate.evidence_refs),
+                duration_contract=duration,
+                created_by_user_id=scope.operator.id,
+            )
+        )
+        project = self.session.get(VideoProject, admission.admitted_video_project_id)
+        assert project is not None
+        self._seed_m5_project_artifacts(project=project, actor_user_id=scope.operator.id)
+        research.complete_run(run_id=research_run.id, actor=actor)
+        return SimpleNamespace(
+            **scope.__dict__,
+            actor=actor,
+            category=category,
+            slot=slot,
+            evidence=evidence,
+            quota_account=None,
+            research_run=research_run,
+            candidate=candidate,
+            idea=candidate,
+            preflight=preflight,
+            admission=admission,
+            project=project,
+        )
+
+    def _seed_m5_project_artifacts(self, *, project, actor_user_id) -> None:
+        """Provide the admitted project's canonical M5 inputs for M6 tests."""
+
+        artifacts = ArtifactService(self.session)
+        for artifact_type in ("creative_brief", "research_pack", "source_pack"):
+            artifact = artifacts.create_artifact(
+                data=ArtifactCreate(
+                    video_project_id=project.id,
+                    artifact_type=artifact_type,
+                    created_by_user_id=actor_user_id,
+                )
+            )
+            artifacts.create_artifact_version(
+                data=ArtifactVersionCreate(
+                    artifact_id=artifact.id,
+                    content={
+                        "artifact_type": artifact_type,
+                        "project_id": str(project.id),
+                        "source": "qualification-admitted-long-form",
+                    },
+                    created_by_user_id=actor_user_id,
+                    external_entity_refs=[],
+                    packaging_metadata={},
+                    media_qc_metadata={},
+                    source_manifest={"rights_basis": "qualification"},
+                    evidence_refs=[],
+                    context_refs=[],
+                )
+            )
+
+    def m6_full_flow(
+        self, *, output_dir: Path | None = None, require_completed: bool = True
+    ) -> SimpleNamespace:
+        flow = self.m5_admitted_project()
+        run = ProductionArtifactRunService(self.session).create_run(
+            data=ProductionArtifactRunCreate(
+                video_project_id=flow.project.id,
+                source_project_admission_decision_id=flow.admission.id,
+            )
+        )
+        # Test-only, database-backed long-form timeline input. Provider
+        # execution remains disabled in this qualification factory.
+        segments = [
+            {
+                "narration_segment_id": f"segment-{index}",
+                "sequence_index": index - 1,
+                "text": text,
+                "estimated_start_time": float((index - 1) * 8),
+                "estimated_end_time": float(index * 8),
+            }
+            for index, text in enumerate(
+                (
+                    "How small teams can make a reliable workflow.",
+                    "Why canonical timing keeps every production stage aligned.",
+                    "A review boundary protects the final publishing decision.",
+                ),
+                start=1,
+            )
+        ]
+        voice = VoiceTimelineSnapshot(
+            production_artifact_run_id=run.id,
+            video_project_id=flow.project.id,
+            script_artifact_version_id=None,
+            policy_snapshot_id=flow.project.policy_snapshot_id,
+            timeline_blob={"segments": segments},
+            total_duration_seconds=Decimal("24"),
+            timing_source="ESTIMATED",
+            confidence_level="HIGH",
+            timeline_hash="qualification-voice-timeline-hash",
+        )
+        self.session.add(voice)
+        self.session.flush()
+        captions = CaptionTrackSnapshot(
+            production_artifact_run_id=run.id,
+            video_project_id=flow.project.id,
+            voice_timeline_snapshot_id=voice.id,
+            caption_blob={
+                "cues": [
+                    {
+                        "caption_id": f"caption-{index}",
+                        "narration_segment_id": segment["narration_segment_id"],
+                        "text": segment["text"],
+                    }
+                    for index, segment in enumerate(segments, start=1)
+                ]
+            },
+            srt_text=None,
+            language="en",
+            caption_hash="qualification-caption-track-hash",
+        )
+        self.session.add(captions)
+        self.session.flush()
+        visual = VisualPlanSnapshot(
+            production_artifact_run_id=run.id,
+            video_project_id=flow.project.id,
+            voice_timeline_snapshot_id=voice.id,
+            caption_track_snapshot_id=captions.id,
+            visual_plan_blob={
+                "scenes": [
+                    {
+                        "scene_id": f"scene-{index}",
+                        "narration_segment_id": segment["narration_segment_id"],
+                    }
+                    for index, segment in enumerate(segments, start=1)
+                ]
+            },
+            visual_plan_hash="qualification-visual-plan-hash",
+        )
+        self.session.add(visual)
+        # Materialize the generated snapshot identifier before binding it into
+        # the production-run lineage.  SQLAlchemy column defaults are applied
+        # on flush, so assigning ``visual.id`` before this point silently
+        # persisted a NULL run pointer even though the snapshot itself existed.
+        self.session.flush()
+        run.voice_timeline_snapshot_id = voice.id
+        run.caption_track_snapshot_id = captions.id
+        run.visual_plan_snapshot_id = visual.id
+        run.status = "COMPLETED"
+        run.reason_codes = ["QUALIFICATION_LONG_FORM_INPUT_READY"]
+        self.session.flush()
+        executed = run
+        if require_completed:
+            assert executed.status == "COMPLETED"
+        return SimpleNamespace(**flow.__dict__, production_run=executed)
+
+
+@pytest.fixture
+def qualification_factory(db_session) -> QualificationFactory:
+    return QualificationFactory(db_session)

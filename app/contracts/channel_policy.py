@@ -581,14 +581,9 @@ class ChannelScopedPolicy(BaseModel):
             self.publish_timing_localization_policy,
             self.geo_evaluation_policy,
         )
-        is_market_policy = self.policy_version in {
-            "small-team-ai.channel-policy.v3",
-            "small-team-ai.channel-policy.v4",
-        }
+        is_market_policy = any(item is not None for item in market_fields)
         if is_market_policy and any(item is None for item in market_fields):
-            raise ValueError("CH1_MARKET_POLICY_BINDING_INCOMPLETE")
-        if not is_market_policy and any(item is not None for item in market_fields):
-            raise ValueError("CH1_MARKET_POLICY_FIELDS_REQUIRE_MARKET_VERSION")
+            raise ValueError("CHANNEL_MARKET_POLICY_BINDING_INCOMPLETE")
         if is_market_policy:
             profile = self.target_market_profile
             digest = self.target_market_digest
@@ -605,37 +600,37 @@ class ChannelScopedPolicy(BaseModel):
                 or timing.narration_locale != profile.narration_locale
             ):
                 raise ValueError("CH1_MARKET_POLICY_DESTINATION_SCOPE_MISMATCH")
-        if self.policy_version == "small-team-ai.channel-policy.v3":
-            if (
-                self.voice_policy.retry_requires_new_approval is not True
-                or self.voice_policy.unavailable_behavior != "BLOCK_FOR_REVIEW"
-                or self.provider_usage_policy.elevenlabs.controlled_retry_requires_new_approval
-                is not True
-                or self.budget_policy.cost_overrun_review_required is not True
-                or self.market_package_freeze_policy.exact_package_human_approval_required
-                is not True
-                or self.market_package_freeze_policy.post_approval_integrity_required
-                is not True
-            ):
-                raise ValueError("CH1_MARKET_V3_HUMAN_GATE_POLICY_REQUIRED")
-        if self.policy_version == "small-team-ai.channel-policy.v4":
-            if (
-                self.voice_policy.retry_requires_new_approval is not False
-                or self.voice_policy.unavailable_behavior != "BLOCK_EXTERNAL_FAILURE"
-                or self.provider_usage_policy.elevenlabs.controlled_retry_requires_new_approval
-                is not False
-                or self.budget_policy.cost_overrun_review_required is not False
-                or self.market_package_freeze_policy.exact_package_human_approval_required
-                is not False
-                or self.market_package_freeze_policy.post_approval_integrity_required
-                is not False
-            ):
-                raise ValueError("CH1_MARKET_V4_AUTOMATED_EXECUTION_REQUIRED")
-            if any(
-                "human" in item.lower() or "approval" in item.lower()
-                for item in self.market_package_freeze_policy.required_preconditions
-            ):
-                raise ValueError("CH1_MARKET_V4_PRE_RENDER_HUMAN_GATE_FORBIDDEN")
+        if is_market_policy:
+            requires_review = self.voice_policy.retry_requires_new_approval
+            if requires_review:
+                if (
+                    self.voice_policy.unavailable_behavior != "BLOCK_FOR_REVIEW"
+                    or self.provider_usage_policy.elevenlabs.controlled_retry_requires_new_approval
+                    is not True
+                    or self.budget_policy.cost_overrun_review_required is not True
+                    or self.market_package_freeze_policy.exact_package_human_approval_required
+                    is not True
+                    or self.market_package_freeze_policy.post_approval_integrity_required
+                    is not True
+                ):
+                    raise ValueError("CHANNEL_MARKET_HUMAN_GATE_POLICY_INCONSISTENT")
+            else:
+                if (
+                    self.voice_policy.unavailable_behavior != "BLOCK_EXTERNAL_FAILURE"
+                    or self.provider_usage_policy.elevenlabs.controlled_retry_requires_new_approval
+                    is not False
+                    or self.budget_policy.cost_overrun_review_required is not False
+                    or self.market_package_freeze_policy.exact_package_human_approval_required
+                    is not False
+                    or self.market_package_freeze_policy.post_approval_integrity_required
+                    is not False
+                ):
+                    raise ValueError("CHANNEL_MARKET_AUTOMATED_EXECUTION_POLICY_INCONSISTENT")
+                if any(
+                    "human" in item.lower() or "approval" in item.lower()
+                    for item in self.market_package_freeze_policy.required_preconditions
+                ):
+                    raise ValueError("CHANNEL_MARKET_PRE_RENDER_HUMAN_GATE_FORBIDDEN")
         return self
 
 
