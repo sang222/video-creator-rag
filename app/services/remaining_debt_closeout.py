@@ -2745,7 +2745,7 @@ class ArchitectureDebtAuditService:
             ),
             re.compile(r"\bsmall_team_ai\b", re.IGNORECASE),
             re.compile(
-                r"\b[A-Z][A-Z0-9_]*(?:CHANNEL|PROFILE|STRATEGY)[A-Z0-9_]*\s*="
+                r"\b[A-Z0-9_]*(?:CHANNEL|PROFILE|STRATEG(?:Y|IES))[A-Z0-9_]*\s*="
                 r"\s*\{[^}]*[\"']small-team-ai[\"']",
                 re.IGNORECASE | re.DOTALL,
             ),
