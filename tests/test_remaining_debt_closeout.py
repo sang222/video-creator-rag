@@ -900,7 +900,9 @@ def test_architecture_audit_and_portfolio_proof(tmp_path: Path) -> None:
         "def execute():\n    return 'Small Team AI'\n",
         encoding="utf-8",
     )
-    retired_surface_audit = ArchitectureDebtAuditService().audit(retired_surface_root)
+    retired_surface_audit = ArchitectureDebtAuditService().audit(
+        retired_surface_root
+    )
     assert retired_surface_audit.hardcoded_channel_findings == (
         "app/services/runtime_bootstrap.py",
     )
