@@ -6,6 +6,8 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from app.contracts import (
     ArtifactCreate,
     ArtifactVersionCreate,
