@@ -47,6 +47,7 @@ from app.contracts.visual_routing import (
 )
 from app.db.models import (
     CaptionTrackSnapshot,
+    CompiledChannelPolicySnapshot,
     User,
     VideoProject,
     VisualPlanSnapshot,
@@ -349,8 +350,19 @@ class QualificationFactory:
         policy = ChannelScopedPolicy.model_validate(policy_payload)
         payload = deepcopy(active_snapshot.compiled_payload or {})
         payload["channel_scoped_policy"] = policy.model_dump(mode="json")
-        active_snapshot.compiled_payload = payload
-        active_snapshot.content_hash = content_hash(payload)
+        successor = CompiledChannelPolicySnapshot(
+            channel_workspace_id=active_snapshot.channel_workspace_id,
+            channel_profile_version_id=active_snapshot.channel_profile_version_id,
+            compile_run_id=active_snapshot.compile_run_id,
+            snapshot_version=active_snapshot.snapshot_version + 1,
+            status="approved",
+            compiler_version="qualification.strict-long-form-fixture.v1",
+            capability_matrix_version=active_snapshot.capability_matrix_version,
+            compiled_payload=payload,
+            content_hash=content_hash(payload),
+            profile_input_hash=active_snapshot.profile_input_hash,
+        )
+        self.session.add(successor)
 
         metadata = deepcopy(channel.metadata_ or {})
         metadata["target_market_governance"] = {
@@ -375,9 +387,13 @@ class QualificationFactory:
         metadata["market_policy_state"] = "ACTIVE"
         channel.metadata_ = metadata
         self.session.flush()
+        active_snapshot = ChannelProfileService(self.session).activate_snapshot(
+            snapshot_id=successor.id,
+            correlation_id="qualification-strict-long-form-successor-activate",
+        )
         return active_profile, active_snapshot, SimpleNamespace(
-            snapshot_id=active_snapshot.id,
-            content_hash=active_snapshot.content_hash,
+            snapshot_id=successor.id,
+            content_hash=successor.content_hash,
         )
 
     def m2_project(self, *, scope_name: str = "M2") -> SimpleNamespace:
