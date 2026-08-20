@@ -45,7 +45,7 @@ jobs:
         run: |
           alembic upgrade head
           test "$(alembic heads | wc -l | tr -d ' ')" = "1"
-          test "$(alembic heads | awk '{print $1}')" = "0090_learning_review_reassessment"
+          test "$(alembic heads | awk '{print $1}')" = "0090_learning_reassessment"
       - name: Verify remaining debt closeout
         run: pytest -q tests/test_remaining_debt_closeout.py
       - name: Lint closeout runtime

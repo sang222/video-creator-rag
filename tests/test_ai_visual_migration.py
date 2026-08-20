@@ -31,7 +31,7 @@ from app.services.runtime_migration_guard import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HEAD = "0090_learning_review_reassessment"
+HEAD = "0090_learning_reassessment"
 RUNTIME_MINIMUM = "0079_ai_visual"
 HASH_A = "a" * 64
 HASH_B = "b" * 64

@@ -47,7 +47,7 @@ jobs:
         run: |
           alembic upgrade head
           test "$(alembic heads | wc -l | tr -d ' ')" = "1"
-          test "$(alembic heads | awk '{print $1}')" = "0090_learning_review_reassessment"
+          test "$(alembic heads | awk '{print $1}')" = "0090_learning_reassessment"
       - name: Debt closeout tests and regressions
         run: pytest -q tests/test_remaining_debt_closeout.py
       - name: Architecture audit
@@ -71,7 +71,7 @@ jobs:
             alembic/versions/0087_business_os.py \
             alembic/versions/0088_business_action_continuation_authority.py \
             alembic/versions/0089_business_action_lifecycle.py \
-            alembic/versions/0090_learning_review_reassessment.py
+            alembic/versions/0090_learning_reassessment.py
           ruff format --check \
             app/db/models/remaining_debt.py \
             app/services/remaining_debt_closeout.py \
@@ -81,7 +81,7 @@ jobs:
             alembic/versions/0087_business_os.py \
             alembic/versions/0088_business_action_continuation_authority.py \
             alembic/versions/0089_business_action_lifecycle.py \
-            alembic/versions/0090_learning_review_reassessment.py
+            alembic/versions/0090_learning_reassessment.py
       - name: Compile
         run: |
           python -m compileall -q \
@@ -92,4 +92,4 @@ jobs:
             alembic/versions/0087_business_os.py \
             alembic/versions/0088_business_action_continuation_authority.py \
             alembic/versions/0089_business_action_lifecycle.py \
-            alembic/versions/0090_learning_review_reassessment.py
+            alembic/versions/0090_learning_reassessment.py

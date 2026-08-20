@@ -1,6 +1,6 @@
 """allow policy-current learning reassessment of immutable evidence
 
-Revision ID: 0090_learning_review_reassessment
+Revision ID: 0090_learning_reassessment
 Revises: 0089_business_action_lifecycle
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 from alembic import op
 
 
-revision = "0090_learning_review_reassessment"
+revision = "0090_learning_reassessment"
 down_revision = "0089_business_action_lifecycle"
 branch_labels = None
 depends_on = None

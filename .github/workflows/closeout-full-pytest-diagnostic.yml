@@ -55,7 +55,7 @@ jobs:
           python -m compileall -q app tests
           alembic upgrade head
           test "$(alembic heads | wc -l | tr -d ' ')" = "1"
-          test "$(alembic heads | awk '{print $1}')" = "0090_learning_review_reassessment"
+          test "$(alembic heads | awk '{print $1}')" = "0090_learning_reassessment"
       - name: Full repository regression with diagnostic summary
         id: full_pytest
         shell: bash
