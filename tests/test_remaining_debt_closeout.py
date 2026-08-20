@@ -698,6 +698,19 @@ def test_continuation_recommendation_is_durable_and_human_gated(db: Session) -> 
                 content_hash=f"{offset}".zfill(64),
             )
         )
+    db.add(
+        SelfFundingAssessment(
+            id=uuid.uuid4(),
+            company_id=company_id,
+            channel_workspace_id=channel_id,
+            assessment_window_end=now,
+            policy_version="test",
+            decision="FUNDED_EXPERIMENT",
+            reason_codes=[],
+            input_refs=[],
+            assessment_hash="a" * 64,
+        )
+    )
     db.flush()
     frozen = service.freeze_continuation_recommendation(
         company_id=company_id,
@@ -782,15 +795,27 @@ def test_architecture_audit_and_portfolio_proof(tmp_path: Path) -> None:
     assert audit.hardcoded_channel_findings == ("app/bad.py",)
     assert audit.niche_branch_findings == ("app/bad.py",)
 
+    clean_root = tmp_path / "clean"
+    clean_app = clean_root / "app"
+    clean_app.mkdir(parents=True)
+    (clean_app / "service.py").write_text(
+        "def execute(profile_snapshot):\n    return profile_snapshot\n",
+        encoding="utf-8",
+    )
+    clean_audit = ArchitectureDebtAuditService().audit(clean_root)
+    assert clean_audit.one_engine_many_profiles is True
+
     a, b = uuid.uuid4(), uuid.uuid4()
     not_proven = ArchitectureDebtAuditService.portfolio_proof(
         verified_publications_by_channel={a: 1},
         compiled_profile_hash_by_channel={a: "p1"},
+        code_audit=audit,
     )
     assert not_proven["state"] == "NOT_PROVEN"
     proven = ArchitectureDebtAuditService.portfolio_proof(
         verified_publications_by_channel={a: 1, b: 2},
         compiled_profile_hash_by_channel={a: "p1", b: "p2"},
+        code_audit=clean_audit,
     )
     assert proven["state"] == "PROVEN"
 

@@ -26,6 +26,14 @@ def upgrade() -> None:
         existing_type=UUID,
         nullable=True,
     )
+    op.drop_constraint(
+        "ck_business_action_state", "business_action_items", type_="check"
+    )
+    op.create_check_constraint(
+        "ck_business_action_state",
+        "business_action_items",
+        "state IN ('OPEN','IN_PROGRESS','DONE','RESOLVED','DISMISSED')",
+    )
     op.create_table(
         "continuation_capital_reviews",
         sa.Column("id", UUID, primary_key=True),
@@ -73,6 +81,14 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("continuation_capital_reviews")
+    op.drop_constraint(
+        "ck_business_action_state", "business_action_items", type_="check"
+    )
+    op.create_check_constraint(
+        "ck_business_action_state",
+        "business_action_items",
+        "state IN ('OPEN','IN_PROGRESS','DONE','DISMISSED')",
+    )
     op.alter_column(
         "business_action_items",
         "channel_workspace_id",
