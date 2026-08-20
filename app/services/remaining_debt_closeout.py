@@ -17,6 +17,7 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlsplit
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -298,6 +299,8 @@ class SeriesAuthorityService:
         reason: str,
     ) -> SeriesArcVersion:
         arc = self._arc(arc_id, lock=True)
+        reason = reason.strip()
+        _require(bool(reason), "SERIES_LIFECYCLE_REASON_REQUIRED")
         existing_command = self.session.scalar(
             select(SeriesLifecycleDecision).where(
                 SeriesLifecycleDecision.command_id == command_id
@@ -398,7 +401,13 @@ class SeriesAuthorityService:
             )
         )
         if existing is not None:
-            if existing.video_project_id != video_project_id:
+            if (
+                existing.video_project_id != video_project_id
+                or (
+                    technical_attempt_ref is not None
+                    and existing.technical_attempt_ref != technical_attempt_ref
+                )
+            ):
                 raise ConflictError("SERIES_PUBLICATION_RECEIPT_REUSE_CONFLICT")
             return existing
         arc = self.session.scalar(
@@ -455,6 +464,17 @@ class SeriesAuthorityService:
             ):
                 raise ConflictError("SERIES_BLUEPRINT_ALREADY_PUBLISHED")
             return ordinal
+        _require(
+            blueprint.state == "ASSIGNED"
+            and blueprint.video_project_id == video_project_id,
+            "SERIES_PUBLICATION_TECHNICAL_ATTEMPT_REQUIRED",
+        )
+        attempt_ref = technical_attempt_ref or blueprint.technical_attempt_ref
+        _require(bool(attempt_ref), "SERIES_PUBLICATION_TECHNICAL_ATTEMPT_REQUIRED")
+        _require(
+            blueprint.technical_attempt_ref == attempt_ref,
+            "SERIES_PUBLICATION_TECHNICAL_ATTEMPT_MISMATCH",
+        )
         maximum = self.session.scalar(
             select(func.max(SeriesPublicOrdinal.public_ordinal)).where(
                 SeriesPublicOrdinal.series_plan_id == series_plan_id
@@ -475,7 +495,7 @@ class SeriesAuthorityService:
             "publication_receipt_id": publication_receipt_id,
             "public_ordinal": public_ordinal,
             "playlist_position": public_ordinal - 1,
-            "technical_attempt_ref": technical_attempt_ref,
+            "technical_attempt_ref": attempt_ref,
             "published_at": published_at,
         }
         row = SeriesPublicOrdinal(
@@ -489,7 +509,7 @@ class SeriesAuthorityService:
             publication_receipt_id=publication_receipt_id,
             public_ordinal=public_ordinal,
             playlist_position=public_ordinal - 1,
-            technical_attempt_ref=technical_attempt_ref,
+            technical_attempt_ref=attempt_ref,
             identity_hash=_hash(payload),
             published_at=published_at,
         )
@@ -498,8 +518,7 @@ class SeriesAuthorityService:
         blueprint.publication_receipt_id = publication_receipt_id
         blueprint.public_ordinal = public_ordinal
         blueprint.video_project_id = video_project_id
-        if technical_attempt_ref:
-            blueprint.technical_attempt_ref = technical_attempt_ref
+        blueprint.technical_attempt_ref = attempt_ref
         self.session.flush()
         progress = self.progress(series_plan_id=series_plan_id)
         if (
@@ -520,6 +539,8 @@ class SeriesAuthorityService:
         reason: str,
     ) -> SeriesArcVersion:
         arc = self._arc(arc_id, lock=True)
+        reason = reason.strip()
+        _require(bool(reason), "SERIES_LIFECYCLE_REASON_REQUIRED")
         _require(arc.state == "ACTIVE", "SERIES_EARLY_COMPLETION_NOT_ALLOWED")
         progress = self.progress(series_plan_id=arc.series_plan_id)
         _require(
@@ -548,7 +569,13 @@ class SeriesAuthorityService:
         reason: str,
     ) -> SeriesArcVersion:
         arc = self._arc(arc_id, lock=True)
+        reason = reason.strip()
+        _require(bool(reason), "SERIES_LIFECYCLE_REASON_REQUIRED")
         _require(arc.arc_mode == "FIXED_COUNT", "SERIES_EXTENSION_REQUIRES_FIXED_COUNT")
+        _require(
+            arc.state in {"ACTIVE", "COMPLETION_PENDING"},
+            "SERIES_EXTENSION_NOT_ALLOWED",
+        )
         old_count = int(arc.planned_episode_count or 0)
         _require(
             new_planned_episode_count > old_count, "SERIES_EXTENSION_COUNT_INVALID"
@@ -663,6 +690,8 @@ class SeriesAuthorityService:
         reason: str,
     ) -> SeriesArcVersion:
         arc = self._arc(arc_id, lock=True)
+        reason = reason.strip()
+        _require(bool(reason), "SERIES_LIFECYCLE_REASON_REQUIRED")
         _require(arc.state == "COMPLETION_PENDING", "SERIES_COMPLETION_NOT_PENDING")
         self._decision(
             arc=arc,
@@ -818,6 +847,12 @@ class LearningAuthorityService:
         format_key: str,
         normalized_features: Mapping[str, Any],
     ) -> LearningEquivalenceFingerprint:
+        _require(
+            re.fullmatch(r"[0-9a-f]{64}", profile_snapshot_hash) is not None,
+            "LEARNING_PROFILE_SNAPSHOT_HASH_INVALID",
+        )
+        source_entity_ref = source_entity_ref.strip()
+        _require(bool(source_entity_ref), "LEARNING_SOURCE_ENTITY_REF_REQUIRED")
         payload = {
             "schema_version": "vcos.learning-equivalence-fingerprint.v1",
             "company_id": company_id,
@@ -1197,18 +1232,15 @@ class LearningAuthorityService:
         window = self.session.get(AnalyticsEvidenceWindow, analytics_evidence_window_id)
         if fingerprint is None or window is None:
             raise NotFoundError("learning fingerprint or analytics window not found")
-        if fingerprint.channel_workspace_id != window.channel_workspace_id:
-            raise ValidationFailureError("LEARNING_SCOPE_MISMATCH")
-        command_match = self.session.scalar(
-            select(LearningReview).where(LearningReview.command_id == command_id)
+        _require(
+            re.fullmatch(r"[0-9a-f]{64}", current_policy_hash) is not None,
+            "LEARNING_CURRENT_POLICY_HASH_INVALID",
         )
-        if command_match is not None:
-            if (
-                command_match.fingerprint_id != fingerprint.id
-                or command_match.analytics_evidence_window_id != window.id
-            ):
-                raise ConflictError("LEARNING_REVIEW_COMMAND_REUSE_CONFLICT")
-            return command_match
+        if (
+            fingerprint.company_id != window.company_id
+            or fingerprint.channel_workspace_id != window.channel_workspace_id
+        ):
+            raise ValidationFailureError("LEARNING_SCOPE_MISMATCH")
         derived_comparable_count = int(
             self.session.scalar(
                 select(func.count(LearningEquivalenceFingerprint.id)).where(
@@ -1270,6 +1302,13 @@ class LearningAuthorityService:
             "reason_codes": sorted(reasons),
             "command_id": command_id,
         }
+        command_match = self.session.scalar(
+            select(LearningReview).where(LearningReview.command_id == command_id)
+        )
+        if command_match is not None:
+            if command_match.decision_hash != _hash(payload):
+                raise ConflictError("LEARNING_REVIEW_COMMAND_REUSE_CONFLICT")
+            return command_match
         row = LearningReview(
             id=_deterministic_id(_LEARNING_NAMESPACE, payload),
             company_id=fingerprint.company_id,
@@ -1295,6 +1334,10 @@ class LearningAuthorityService:
         )
         self.session.add(row)
         self.session.flush()
+        self.cleanup_superseded_reviews(
+            fingerprint_id=fingerprint.id,
+            keep_review_id=row.id,
+        )
         return row
 
     def promote(
@@ -1449,6 +1492,9 @@ class BusinessMonitoringService:
         source_updated_at: datetime,
         valid_until: datetime | None,
     ) -> PaymentProfileStatus:
+        _require(
+            source_updated_at <= utc_now(), "PAYMENT_STATUS_SOURCE_FUTURE"
+        )
         version = self.session.scalar(
             select(func.max(PaymentProfileStatus.version_number)).where(
                 PaymentProfileStatus.company_id == company_id
@@ -1488,7 +1534,15 @@ class BusinessMonitoringService:
         )
         self.session.add(row)
         self.session.flush()
-        self._sync_payment_actions(row)
+        current = self.session.scalar(
+            select(PaymentProfileStatus)
+            .where(PaymentProfileStatus.company_id == company_id)
+            .order_by(
+                PaymentProfileStatus.source_updated_at.desc(),
+                PaymentProfileStatus.version_number.desc(),
+            )
+        )
+        self._sync_payment_actions(current)
         return row
 
     def record_monetization_status(
@@ -1507,6 +1561,9 @@ class BusinessMonitoringService:
         source_updated_at: datetime,
         valid_until: datetime | None,
     ) -> MonetizationAccountStatus:
+        _require(
+            source_updated_at <= utc_now(), "MONETIZATION_STATUS_SOURCE_FUTURE"
+        )
         version = self.session.scalar(
             select(func.max(MonetizationAccountStatus.version_number)).where(
                 MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
@@ -1549,7 +1606,19 @@ class BusinessMonitoringService:
         )
         self.session.add(row)
         self.session.flush()
-        self._sync_monetization_actions(row)
+        current = self.session.scalar(
+            select(MonetizationAccountStatus)
+            .where(
+                MonetizationAccountStatus.company_id == company_id,
+                MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
+                MonetizationAccountStatus.platform == payload["platform"],
+            )
+            .order_by(
+                MonetizationAccountStatus.source_updated_at.desc(),
+                MonetizationAccountStatus.version_number.desc(),
+            )
+        )
+        self._sync_monetization_actions(current)
         return row
 
     def record_revenue(
@@ -1771,13 +1840,23 @@ class BusinessMonitoringService:
                 MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
                 MonetizationAccountStatus.company_id == company_id,
                 MonetizationAccountStatus.platform == "YOUTUBE",
+                MonetizationAccountStatus.source_updated_at <= assessment_window_end,
             )
-            .order_by(MonetizationAccountStatus.version_number.desc())
+            .order_by(
+                MonetizationAccountStatus.source_updated_at.desc(),
+                MonetizationAccountStatus.version_number.desc(),
+            )
         )
         payment = self.session.scalar(
             select(PaymentProfileStatus)
-            .where(PaymentProfileStatus.company_id == company_id)
-            .order_by(PaymentProfileStatus.version_number.desc())
+            .where(
+                PaymentProfileStatus.company_id == company_id,
+                PaymentProfileStatus.source_updated_at <= assessment_window_end,
+            )
+            .order_by(
+                PaymentProfileStatus.source_updated_at.desc(),
+                PaymentProfileStatus.version_number.desc(),
+            )
         )
         pnl = list(
             self.session.scalars(
@@ -1785,6 +1864,7 @@ class BusinessMonitoringService:
                 .where(
                     ChannelPnlSnapshot.company_id == company_id,
                     ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id,
+                    ChannelPnlSnapshot.period_end <= assessment_window_end,
                 )
                 .order_by(ChannelPnlSnapshot.period_end.desc())
                 .limit(2)
@@ -2019,16 +2099,35 @@ class BusinessMonitoringService:
         freeze_learning: bool = True,
     ) -> PlatformEnforcementIncident:
         severity = _enum(severity, SEVERITIES, "ENFORCEMENT_SEVERITY_INVALID")
+        platform = platform.strip().upper()
+        external_incident_ref = external_incident_ref.strip()
+        incident_type = incident_type.strip().upper()
+        scope = scope.strip().upper()
+        source_ref = source_ref.strip()
+        _require(
+            bool(
+                platform
+                and external_incident_ref
+                and incident_type
+                and scope
+                and source_ref
+            ),
+            "ENFORCEMENT_INCIDENT_IDENTITY_REQUIRED",
+        )
+        _require(
+            deadline_at is None or deadline_at > detected_at,
+            "ENFORCEMENT_INCIDENT_DEADLINE_INVALID",
+        )
         payload = {
             "schema_version": "vcos.platform-enforcement-incident.v1",
             "company_id": company_id,
             "channel_workspace_id": channel_workspace_id,
             "uploaded_video_id": uploaded_video_id,
-            "platform": platform.upper(),
+            "platform": platform,
             "external_incident_ref": external_incident_ref,
-            "incident_type": incident_type.upper(),
+            "incident_type": incident_type,
             "severity": severity,
-            "scope": scope.upper(),
+            "scope": scope,
             "freeze_learning": freeze_learning,
             "deadline_at": deadline_at,
             "source_ref": source_ref,
@@ -2037,7 +2136,7 @@ class BusinessMonitoringService:
         }
         existing = self.session.scalar(
             select(PlatformEnforcementIncident).where(
-                PlatformEnforcementIncident.platform == platform.upper(),
+                PlatformEnforcementIncident.platform == platform,
                 PlatformEnforcementIncident.external_incident_ref
                 == external_incident_ref,
             )
@@ -2051,11 +2150,11 @@ class BusinessMonitoringService:
             company_id=company_id,
             channel_workspace_id=channel_workspace_id,
             uploaded_video_id=uploaded_video_id,
-            platform=platform.upper(),
+            platform=platform,
             external_incident_ref=external_incident_ref,
-            incident_type=incident_type.upper(),
+            incident_type=incident_type,
             severity=severity,
-            scope=scope.upper(),
+            scope=scope,
             state="OPEN",
             freeze_learning=freeze_learning,
             deadline_at=deadline_at,
@@ -2071,7 +2170,7 @@ class BusinessMonitoringService:
             action_type="REVIEW_ENFORCEMENT",
             target_ref=f"platform-enforcement://{row.id}",
             priority="CRITICAL" if severity == "CRITICAL" else "HIGH",
-            reason_code=f"PLATFORM_{incident_type.upper()}",
+            reason_code=f"PLATFORM_{incident_type}",
             evidence_refs=[source_ref],
             due_at=deadline_at,
         )
@@ -2171,6 +2270,14 @@ class BusinessMonitoringService:
         effective_at: datetime,
         expires_at: datetime | None,
     ) -> AffiliateOfferSnapshot:
+        merchant = merchant.strip()
+        offer_ref = offer_ref.strip()
+        attribution_window_text = attribution_window_text.strip()
+        _require(
+            bool(merchant and offer_ref and attribution_window_text),
+            "AFFILIATE_OFFER_IDENTITY_REQUIRED",
+        )
+        _require(bool(commission_model), "AFFILIATE_COMMISSION_MODEL_REQUIRED")
         _require(
             re.fullmatch(r"[0-9a-f]{64}", terms_hash) is not None,
             "AFFILIATE_TERMS_HASH_INVALID",
@@ -2182,11 +2289,11 @@ class BusinessMonitoringService:
         payload = {
             "schema_version": "vcos.affiliate-offer-snapshot.v1",
             "channel_workspace_id": channel_workspace_id,
-            "merchant": merchant.strip(),
-            "offer_ref": offer_ref.strip(),
+            "merchant": merchant,
+            "offer_ref": offer_ref,
             "product_ref": product_ref,
             "commission_model": dict(commission_model),
-            "attribution_window_text": attribution_window_text.strip(),
+            "attribution_window_text": attribution_window_text,
             "terms_hash": terms_hash,
             "disclosure_required": disclosure_required,
             "effective_at": effective_at,
@@ -2236,7 +2343,17 @@ class BusinessMonitoringService:
         offer = self.session.get(AffiliateOfferSnapshot, offer_snapshot_id)
         if offer is None:
             raise NotFoundError(f"affiliate offer not found: {offer_snapshot_id}")
-        _require(canonical_url.startswith("https://"), "AFFILIATE_LINK_HTTPS_REQUIRED")
+        canonical_url = canonical_url.strip()
+        _require(
+            self._is_https_url(canonical_url), "AFFILIATE_LINK_HTTPS_REQUIRED"
+        )
+        if short_url is not None:
+            short_url = short_url.strip()
+            _require(
+                self._is_https_url(short_url), "AFFILIATE_SHORT_LINK_HTTPS_REQUIRED"
+            )
+        utm_policy_version = utm_policy_version.strip()
+        _require(bool(utm_policy_version), "AFFILIATE_UTM_POLICY_REQUIRED")
         payload = {
             "schema_version": "vcos.affiliate-link-registry.v1",
             "offer_snapshot_id": offer.id,
@@ -2396,12 +2513,18 @@ class BusinessMonitoringService:
                 MonetizationAccountStatus.company_id == company_id,
                 MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
             )
-            .order_by(MonetizationAccountStatus.version_number.desc())
+            .order_by(
+                MonetizationAccountStatus.source_updated_at.desc(),
+                MonetizationAccountStatus.version_number.desc(),
+            )
         )
         payment = self.session.scalar(
             select(PaymentProfileStatus)
             .where(PaymentProfileStatus.company_id == company_id)
-            .order_by(PaymentProfileStatus.version_number.desc())
+            .order_by(
+                PaymentProfileStatus.source_updated_at.desc(),
+                PaymentProfileStatus.version_number.desc(),
+            )
         )
         pnl = self.session.scalar(
             select(ChannelPnlSnapshot)
@@ -2514,12 +2637,12 @@ class BusinessMonitoringService:
             )
         )
         if existing is not None:
+            existing.priority = priority
+            existing.due_at = due_at
+            existing.evidence_refs = list(evidence_refs)
+            existing.action_hash = _hash(payload)
             if existing.state in {"RESOLVED", "DONE", "DISMISSED"}:
-                existing.priority = priority
                 existing.state = "OPEN"
-                existing.due_at = due_at
-                existing.evidence_refs = list(evidence_refs)
-                existing.action_hash = _hash(payload)
             return existing
         row = BusinessActionItem(
             id=_deterministic_id(_BUSINESS_NAMESPACE, payload),
@@ -2705,6 +2828,16 @@ class BusinessMonitoringService:
                 due_at=None,
             )
 
+    @staticmethod
+    def _is_https_url(value: str) -> bool:
+        parsed = urlsplit(value)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.netloc)
+            and parsed.username is None
+            and parsed.password is None
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ArchitectureAuditResult:
@@ -2842,6 +2975,14 @@ class ArchitectureDebtAuditService:
         compiled_profile_hash_by_channel: Mapping[uuid.UUID, str],
         code_audit: ArchitectureAuditResult,
     ) -> dict[str, Any]:
+        """Report portfolio readiness without manufacturing external proof.
+
+        The caller supplies only code-local aggregates.  Even when they show
+        multiple channels and distinct snapshots, they cannot establish that
+        those publications were verified by a live platform.  That evidence is
+        intentionally retained as a separate operational checkpoint.
+        """
+
         proven_channels = {
             channel_id
             for channel_id, count in verified_publications_by_channel.items()
@@ -2851,20 +2992,17 @@ class ArchitectureDebtAuditService:
             compiled_profile_hash_by_channel[channel_id]
             for channel_id in proven_channels
         }
-        passed = len(proven_channels) >= 2 and len(profile_hashes) >= 2
         return {
-            "state": "PROVEN" if passed else "NOT_PROVEN",
+            "state": "NOT_PROVEN",
             "code_isolation_state": (
                 "CODE_ISOLATION_PROVEN"
                 if code_audit.one_engine_many_profiles
                 else "CODE_ISOLATION_NOT_PROVEN"
             ),
-            "live_portfolio_state": (
-                "LIVE_PORTFOLIO_PROVEN" if passed else "LIVE_PORTFOLIO_PROOF_NOT_PROVEN"
-            ),
+            "live_portfolio_state": "LIVE_PORTFOLIO_PROOF_NOT_PROVEN",
             "verified_channel_count": len(proven_channels),
             "distinct_profile_count": len(profile_hashes),
-            "live_provider_proof_required": not passed,
+            "live_provider_proof_required": True,
         }
 
 

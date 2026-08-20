@@ -185,6 +185,62 @@ def test_fixed_series_requires_full_blueprint_coverage_before_activation(
         )
 
 
+def test_public_ordinal_requires_the_assigned_technical_attempt(db: Session) -> None:
+    company_id, channel_id, series_plan_id = _scope()
+    service = SeriesAuthorityService(db)
+    arc = service.create_arc(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        series_plan_id=series_plan_id,
+        arc_mode="FIXED_COUNT",
+        planned_episode_count=1,
+        premise="Only verified technical work may become public progress",
+        coverage_policy={},
+    )
+    blueprint = service.add_blueprint(
+        arc_id=arc.id,
+        blueprint_key="EP-001",
+        planned_position=1,
+        title="One",
+        editorial_contract={},
+        coverage_tags=[],
+    )
+    service.activate_arc(
+        arc_id=arc.id,
+        actor_id=uuid.uuid4(),
+        command_id=uuid.uuid4(),
+        reason="Activate the bounded arc",
+    )
+    project_id = uuid.uuid4()
+    with pytest.raises(
+        ValidationFailureError, match="SERIES_PUBLICATION_TECHNICAL_ATTEMPT_REQUIRED"
+    ):
+        service.record_publication(
+            series_plan_id=series_plan_id,
+            publication_receipt_id=uuid.uuid4(),
+            video_project_id=project_id,
+            blueprint_id=blueprint.id,
+            technical_attempt_ref="attempt-1",
+            published_at=utc_now(),
+        )
+    service.bind_technical_attempt(
+        blueprint_id=blueprint.id,
+        video_project_id=project_id,
+        technical_attempt_ref="attempt-1",
+    )
+    with pytest.raises(
+        ValidationFailureError, match="SERIES_PUBLICATION_TECHNICAL_ATTEMPT_MISMATCH"
+    ):
+        service.record_publication(
+            series_plan_id=series_plan_id,
+            publication_receipt_id=uuid.uuid4(),
+            video_project_id=project_id,
+            blueprint_id=blueprint.id,
+            technical_attempt_ref="attempt-2",
+            published_at=utc_now(),
+        )
+
+
 def test_series_extension_is_new_version_and_preserves_public_truth(
     db: Session,
 ) -> None:
@@ -430,6 +486,53 @@ def test_learning_is_blocked_by_policy_drift_and_enforcement(db: Session) -> Non
     assert "LEARNING_OPERATIONAL_INCIDENT_OPEN" in review.reason_codes
 
 
+def test_learning_review_can_reassess_immutable_evidence_after_policy_change(
+    db: Session,
+) -> None:
+    company_id, channel_id, _ = _scope()
+    learning = LearningAuthorityService(db)
+    fingerprints = [
+        learning.create_fingerprint(
+            company_id=company_id,
+            channel_workspace_id=channel_id,
+            source_entity_ref=f"publication://policy-current-{index}",
+            content_product_type="EDITORIAL_NARRATED_VIDEO",
+            series_plan_id=None,
+            profile_snapshot_hash="a" * 64,
+            target_market="US",
+            content_language="en-US",
+            format_key="STANDALONE",
+            normalized_features={"format": "explainer"},
+        )
+        for index in range(3)
+    ]
+    window = _learning_window(
+        db,
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        uploaded_video_id=uuid.uuid4(),
+        window_key="D30",
+        confidence_state="ACTION_READY",
+    )
+    blocked = learning.review(
+        fingerprint_id=fingerprints[0].id,
+        analytics_evidence_window_id=window.id,
+        current_policy_hash="b" * 64,
+        comparable_count=3,
+        command_id=uuid.uuid4(),
+    )
+    eligible = learning.review(
+        fingerprint_id=fingerprints[0].id,
+        analytics_evidence_window_id=window.id,
+        current_policy_hash="a" * 64,
+        comparable_count=3,
+        command_id=uuid.uuid4(),
+    )
+    assert blocked.decision == "SUPERSEDED"
+    assert eligible.decision == "ELIGIBLE"
+    assert blocked.id != eligible.id
+
+
 def test_business_self_funding_requires_two_trusted_profitable_cycles(
     db: Session,
 ) -> None:
@@ -566,6 +669,70 @@ def test_high_enforcement_blocks_self_funding_and_creates_action(db: Session) ->
     )
 
 
+def test_self_funding_assessment_does_not_use_future_status_or_pnl(
+    db: Session,
+) -> None:
+    company_id, channel_id, _ = _scope()
+    service = BusinessMonitoringService(db)
+    now = utc_now()
+    service.record_payment_status(
+        company_id=company_id,
+        payee_ref="payee://temporal-authority",
+        tax_state="VERIFIED",
+        address_verification_state="VERIFIED",
+        payment_method_state="READY",
+        payment_hold_state="NONE",
+        source_type="OPERATOR_ATTESTATION",
+        source_ref="evidence://payment/current",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=30),
+    )
+    service.record_monetization_status(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        platform="YOUTUBE",
+        program_type="YPP",
+        eligibility_state="ELIGIBLE",
+        enrollment_state="ACTIVE",
+        restriction_state="NONE",
+        source_type="API",
+        source_ref="youtube://monetization/current",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=30),
+    )
+    for offset, margin in ((60, "20"), (30, "20"), (-30, "-100")):
+        db.add(
+            ChannelPnlSnapshot(
+                id=uuid.uuid4(),
+                company_id=company_id,
+                channel_workspace_id=channel_id,
+                period_start=now - timedelta(days=offset),
+                period_end=now - timedelta(days=offset - 30),
+                currency="USD",
+                estimated_revenue=Decimal("0"),
+                locked_revenue=Decimal("100"),
+                finalized_revenue=Decimal("0"),
+                cash_received=Decimal("0"),
+                reversed_revenue=Decimal("0"),
+                direct_cost=Decimal("80" if margin == "20" else "200"),
+                allocated_ops_cost=Decimal("0"),
+                contribution_margin=Decimal(margin),
+                calculation_version=f"temporal-{offset}",
+                source_snapshot_refs=[],
+                content_hash=uuid.uuid4().hex * 2,
+            )
+        )
+    db.flush()
+    assessment = service.evaluate_self_funding(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        assessment_window_end=now,
+    )
+    assert assessment.decision == "SELF_FUNDING"
+
+
 def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
     company_id, channel_id, _ = _scope()
     service = BusinessMonitoringService(db)
@@ -589,6 +756,13 @@ def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
         short_url=None,
         utm_policy_version="utm-v1",
     )
+    with pytest.raises(ValidationFailureError, match="AFFILIATE_LINK_HTTPS_REQUIRED"):
+        service.register_affiliate_link(
+            offer_snapshot_id=offer.id,
+            canonical_url="https://",
+            short_url=None,
+            utm_policy_version="utm-v1",
+        )
     blocked = service.assess_disclosures(
         company_id=company_id,
         channel_workspace_id=channel_id,
@@ -682,7 +856,7 @@ def test_business_statuses_create_idempotent_actions_and_truthful_dashboard(
     )
     assert dashboard.payment_state.startswith("ACTION_REQUIRED:")
     assert dashboard.monetization_state.startswith("ACTION_REQUIRED:")
-    service.record_monetization_status(
+    refreshed_status = service.record_monetization_status(
         company_id=company_id,
         channel_workspace_id=channel_id,
         platform="YOUTUBE",
@@ -708,6 +882,15 @@ def test_business_statuses_create_idempotent_actions_and_truthful_dashboard(
         )
         == 1
     )
+    restriction_action = db.scalar(
+        select(BusinessActionItem).where(
+            BusinessActionItem.reason_code == "MONETIZATION_RESTRICTED"
+        )
+    )
+    assert restriction_action is not None
+    assert restriction_action.evidence_refs == [
+        f"monetization-account-status://{refreshed_status.id}"
+    ]
     service.record_payment_status(
         company_id=company_id,
         payee_ref="payee://owner",
@@ -932,12 +1115,16 @@ def test_architecture_audit_and_portfolio_proof(tmp_path: Path) -> None:
         code_audit=audit,
     )
     assert not_proven["state"] == "NOT_PROVEN"
-    proven = ArchitectureDebtAuditService.portfolio_proof(
+    multi_channel_code_projection = ArchitectureDebtAuditService.portfolio_proof(
         verified_publications_by_channel={a: 1, b: 2},
         compiled_profile_hash_by_channel={a: "p1", b: "p2"},
         code_audit=clean_audit,
     )
-    assert proven["state"] == "PROVEN"
+    assert multi_channel_code_projection["state"] == "NOT_PROVEN"
+    assert (
+        multi_channel_code_projection["live_portfolio_state"]
+        == "LIVE_PORTFOLIO_PROOF_NOT_PROVEN"
+    )
 
 
 def test_publication_closeout_requires_the_compiled_policy_hash(db: Session) -> None:

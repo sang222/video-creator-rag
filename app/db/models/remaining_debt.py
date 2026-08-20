@@ -254,12 +254,6 @@ class LearningReview(Base):
     __tablename__ = "learning_reviews"
     __table_args__ = (
         UniqueConstraint("command_id", name="uq_learning_review_command"),
-        UniqueConstraint(
-            "fingerprint_id",
-            "window_key",
-            "evidence_hash",
-            name="uq_learning_review_evidence",
-        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
