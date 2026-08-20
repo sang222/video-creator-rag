@@ -12,11 +12,15 @@ import pytest
 from app.contracts import (
     ArtifactCreate,
     ArtifactVersionCreate,
-    ChannelProfileInput,
     ChannelProfileVersionCreate,
     ChannelWorkspaceCreate,
 )
-from app.contracts.channel_policy import ChannelScopedPolicy
+from app.contracts.channel_policy import (
+    ChannelScopedPolicy,
+    ChannelVisualSourcePolicyBinding,
+    GeminiImageUsagePolicy,
+    PolicyRef,
+)
 from app.contracts.geo_market import (
     MARKET_GATE_STRICT_ORDER,
     DestinationBinding,
@@ -37,6 +41,10 @@ from app.contracts.r3d1 import ContentCategoryCreate
 from app.contracts.m6 import ProductionArtifactRunCreate
 from app.contracts.ops import ProviderRegistryEntryCreate
 from app.contracts.workflow import VideoProjectCreate
+from app.contracts.visual_routing import (
+    NicheVisualSourceProfile,
+    VisualSourceRoute,
+)
 from app.db.models import (
     CaptionTrackSnapshot,
     User,
@@ -62,6 +70,7 @@ from app.services import (
     VideoProjectService,
 )
 from app.services.editorial_research import EditorialResearchService
+from app.services.config_registry import content_hash
 from app.services.geo_market import TargetMarketDigestCompiler
 from app.services.production_package import ChannelDurationContractResolver
 from app.services.ofv0 import FormatIdentityContractService
@@ -193,13 +202,12 @@ class QualificationFactory:
         """Compile a test-only successor from current typed policy contracts.
 
         The old fixture invoked removed, channel-specific compiler overlay
-        helpers.  The replacement obtains the base policy from the regular
-        compiler, binds its visual evidence from the current catalog, and
-        provides the typed market inputs required by long-form regression
-        scenarios.  It does not call a provider or mutate any runtime policy.
+        helpers. The replacement obtains the base policy from the regular
+        compiler, then applies synthetic, hash-bound visual and market
+        contracts inside the test transaction. It does not call a provider or
+        restore production runtime overlays that require deleted local reports.
         """
 
-        compiler = ChannelProfileCompiler(self.session)
         base_policy = ChannelScopedPolicy.model_validate(
             (active_snapshot.compiled_payload or {})["channel_scoped_policy"]
         )
@@ -270,13 +278,33 @@ class QualificationFactory:
             approval_ref="operator-approval://qualification/strict-long-form",
         )
         policy_payload = deepcopy(base_policy.model_dump(mode="json"))
+        def fixture_ref(key: str) -> PolicyRef:
+            return PolicyRef(
+                ref=f"fixture://qualification/{key}",
+                version="fixture-v1",
+                content_hash="0" * 64,
+            )
+        visual_binding = ChannelVisualSourcePolicyBinding(
+            niche_visual_source_profile=NicheVisualSourceProfile.STOCK_ASSISTED,
+            visual_source_routing_policy=fixture_ref("visual-routing-policy"),
+            visual_source_routing_catalog=fixture_ref("visual-routing-catalog"),
+            gemini_image_provider_registry=fixture_ref("gemini-provider-registry"),
+            gemini_image_model_catalog=fixture_ref("gemini-model-catalog"),
+            image_visual_quality_control=fixture_ref("image-quality-control"),
+            image_canary_v3_qualification=fixture_ref("image-canary"),
+            drive_verified_canary_receipt=fixture_ref("drive-receipt"),
+            allowed_source_routes=list(VisualSourceRoute),
+        )
+        provider_usage = dict(policy_payload["provider_usage_policy"])
+        provider_usage["google_gemini_image"] = GeminiImageUsagePolicy().model_dump(
+            mode="json"
+        )
         policy_payload.update(
             {
                 "policy_version": f"{channel.key}.qualification-policy.v3",
                 "approval_ref": "operator-approval://qualification/strict-long-form",
-                "visual_source_policy_binding": compiler._qualified_visual_source_binding().model_dump(
-                    mode="json"
-                ),
+                "provider_usage_policy": provider_usage,
+                "visual_source_policy_binding": visual_binding.model_dump(mode="json"),
                 "target_market_profile": market_profile.model_dump(mode="json"),
                 "target_market_digest": market_digest.model_dump(mode="json"),
                 "market_alignment_policy": {
@@ -319,32 +347,38 @@ class QualificationFactory:
             }
         )
         policy = ChannelScopedPolicy.model_validate(policy_payload)
-        profile_payload = ChannelProfileInput.model_validate(
-            active_profile.profile_input
-        ).model_dump(mode="json")
-        profile_payload["channel_policy"] = policy.model_dump(mode="json")
-        strict_profile = ChannelProfileService(self.session).create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=ChannelProfileInput.model_validate(profile_payload),
-                created_by=admin.id,
+        payload = deepcopy(active_snapshot.compiled_payload or {})
+        payload["channel_scoped_policy"] = policy.model_dump(mode="json")
+        active_snapshot.compiled_payload = payload
+        active_snapshot.content_hash = content_hash(payload)
+
+        metadata = deepcopy(channel.metadata_ or {})
+        metadata["target_market_governance"] = {
+            "drafts": [],
+            "profiles": [market_profile.model_dump(mode="json")],
+            "digests": [market_digest.model_dump(mode="json")],
+            "approvals": [],
+            "active_profile_ref": (
+                f"target-market-profile://{channel.key}/"
+                f"v{market_profile.profile_version}"
             ),
+            "state": "ACTIVE",
+        }
+        metadata["destination_governance"] = {
+            "bindings": [destination.model_dump(mode="json")],
+            "active_binding_ref": (
+                f"destination-binding://{channel.key}/"
+                f"v{destination.binding_version}"
+            ),
+        }
+        metadata["active_visual_profile"] = "STOCK_ASSISTED"
+        metadata["market_policy_state"] = "ACTIVE"
+        channel.metadata_ = metadata
+        self.session.flush()
+        return active_profile, active_snapshot, SimpleNamespace(
+            snapshot_id=active_snapshot.id,
+            content_hash=active_snapshot.content_hash,
         )
-        compiled = compiler.compile(
-            profile_version_id=strict_profile.id,
-            correlation_id=f"qualification-strict-compile-{uuid.uuid4().hex[:8]}",
-        )
-        profiles = ChannelProfileService(self.session)
-        profiles.submit_for_approval(strict_profile.id)
-        profiles.approve_profile_version(
-            profile_version_id=strict_profile.id,
-            approved_by=admin.id,
-            approval_ref="operator-approval://qualification/strict-long-form",
-        )
-        snapshot = profiles.activate_snapshot(snapshot_id=compiled.snapshot_id)
-        profile = profiles.get_profile_version(strict_profile.id)
-        assert profile is not None
-        return profile, snapshot, compiled
 
     def m2_project(self, *, scope_name: str = "M2") -> SimpleNamespace:
         scope = self.channel_scope(name=scope_name)
