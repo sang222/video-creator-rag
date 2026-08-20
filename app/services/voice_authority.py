@@ -622,11 +622,16 @@ class VoiceAuthorityService:
         return record
 
     def compile_tts_projection(
-        self, *, performance_plan_id: uuid.UUID
+        self,
+        *,
+        performance_plan_id: uuid.UUID,
+        canonical_narration: str,
     ) -> TTSPerformanceProjection:
         plan = self.session.get(NarrationPerformancePlan, performance_plan_id)
         if plan is None or plan.state != "FROZEN":
             raise ValidationFailureError("FROZEN_PERFORMANCE_PLAN_REQUIRED")
+        if _text_hash(canonical_narration) != plan.canonical_narration_hash:
+            raise ValidationFailureError("TTS_PROJECTION_CANONICAL_NARRATION_MISMATCH")
         existing = self.session.scalar(
             select(TTSPerformanceProjection).where(
                 TTSPerformanceProjection.narration_performance_plan_id == plan.id,
@@ -662,6 +667,7 @@ class VoiceAuthorityService:
         }
         beats = [NarrationPerformanceBeat.model_validate(item) for item in plan.beats]
         segments = self._compile_segments(
+            canonical_narration=canonical_narration,
             beats=beats,
             voice=voice,
             capabilities=capabilities,
@@ -760,7 +766,10 @@ class VoiceAuthorityService:
                 created_by_user_id=created_by_user_id,
             )
         )
-        projection = self.compile_tts_projection(performance_plan_id=performance.id)
+        projection = self.compile_tts_projection(
+            performance_plan_id=performance.id,
+            canonical_narration=canonical_narration,
+        )
         return VoiceAuthorityBundle(
             pool=pool,
             casting=casting,
@@ -879,6 +888,7 @@ class VoiceAuthorityService:
     @staticmethod
     def _compile_segments(
         *,
+        canonical_narration: str,
         beats: Sequence[NarrationPerformanceBeat],
         voice: ProviderVoiceCandidate,
         capabilities: dict[str, Any],
@@ -900,6 +910,9 @@ class VoiceAuthorityService:
         for index, group in enumerate(grouped, start=1):
             start = group[0].source_text_start
             end = group[-1].source_text_end
+            text = canonical_narration[start:end]
+            if not text:
+                raise ValidationFailureError("TTS_PROJECTION_SEGMENT_TEXT_REQUIRED")
             intent = group[0].delivery_intent
             settings = _compile_voice_settings(
                 voice=voice,
@@ -913,13 +926,7 @@ class VoiceAuthorityService:
                     beat_ids=[beat.beat_id for beat in group],
                     source_text_start=start,
                     source_text_end=end,
-                    text_hash=content_hash(
-                        {
-                            "source_text_start": start,
-                            "source_text_end": end,
-                            "beat_hashes": [beat.source_text_hash for beat in group],
-                        }
-                    ),
+                    text_hash=_text_hash(text),
                     voice_settings=settings,
                 )
             )

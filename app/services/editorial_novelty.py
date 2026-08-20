@@ -468,16 +468,15 @@ class EditorialNoveltyService:
         )
 
     def _current_strict_preflight_pass(self, candidate: EditorialIdeaCandidate) -> bool:
-        from app.services.launch_cadence import _preflight_has_active_demand_authority
+        from app.services.launch_cadence import _preflight_demand_authority_valid
 
-        preflight = self.session.scalar(
+        preflights = self.session.scalars(
             select(IdeaMarketPreflight)
             .where(IdeaMarketPreflight.editorial_idea_candidate_id == candidate.id)
             .order_by(IdeaMarketPreflight.created_at.desc())
-        )
-        return bool(
-            preflight is not None
-            and preflight.decision == "PASS"
+        ).all()
+        return any(
+            preflight.decision == "PASS"
             and preflight.policy_fit_state == "PASS"
             and preflight.niche_contract_digest_hash
             and preflight.target_market_digest_hash
@@ -485,9 +484,8 @@ class EditorialNoveltyService:
             and preflight.evidence_blob.get("canonical_authority_verified") is True
             and candidate.rights_policy_state == "PASS"
             and candidate.quality_state == "PASS"
-            and _preflight_has_active_demand_authority(
-                self.session, candidate_id=candidate.id
-            )
+            and _preflight_demand_authority_valid(preflight)
+            for preflight in preflights
         )
 
     @staticmethod
