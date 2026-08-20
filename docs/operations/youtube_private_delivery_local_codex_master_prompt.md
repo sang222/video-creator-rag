@@ -95,7 +95,6 @@ ruff check --isolated \
   app/services/outbox_dispatcher.py \
   app/services/pkg1.py \
   app/services/production_start_readiness.py \
-  app/services/runtime_bootstrap.py \
   app/services/security_boundary.py \
   app/services/v2_native_effects.py \
   app/services/v2_package_readiness.py \

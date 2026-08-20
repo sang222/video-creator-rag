@@ -893,6 +893,30 @@ def test_architecture_audit_and_portfolio_proof(tmp_path: Path) -> None:
         "app/services/remaining_debt_closeout.py",
     )
 
+    retired_surface_root = tmp_path / "retired-surface"
+    retired_surface = retired_surface_root / "app" / "services"
+    retired_surface.mkdir(parents=True)
+    (retired_surface / "runtime_bootstrap.py").write_text(
+        "def execute():\n    return 'Small Team AI'\n",
+        encoding="utf-8",
+    )
+    retired_surface_audit = ArchitectureDebtAuditService().audit(retired_surface_root)
+    assert retired_surface_audit.hardcoded_channel_findings == (
+        "app/services/runtime_bootstrap.py",
+    )
+
+    mapping_root = tmp_path / "mapping"
+    mapping_app = mapping_root / "app"
+    mapping_app.mkdir(parents=True)
+    (mapping_app / "hardcoded_mapping.py").write_text(
+        "CHANNEL_SCOPED_STRATEGIES = {'NR2_B_BALANCED': 'small-team-ai'}\n",
+        encoding="utf-8",
+    )
+    mapping_audit = ArchitectureDebtAuditService().audit(mapping_root)
+    assert mapping_audit.hardcoded_channel_findings == (
+        "app/hardcoded_mapping.py",
+    )
+
     clean_root = tmp_path / "clean"
     clean_app = clean_root / "app"
     clean_app.mkdir(parents=True)

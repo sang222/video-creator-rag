@@ -2729,7 +2729,6 @@ class ArchitectureDebtAuditService:
         "app/services/pkg1_market_revision.py": "historical revision fixture",
         "app/services/pkg1_market_revision_closeout.py": "historical closeout fixture",
         "app/services/pkg1_sc07_sc09_revision.py": "historical revision fixture",
-        "app/services/runtime_bootstrap.py": "offline one-time bootstrap helper",
     }
 
     def audit(self, root: Path) -> ArchitectureAuditResult:
@@ -2745,6 +2744,11 @@ class ArchitectureDebtAuditService:
                 re.IGNORECASE,
             ),
             re.compile(r"\bsmall_team_ai\b", re.IGNORECASE),
+            re.compile(
+                r"\b[A-Z][A-Z0-9_]*(?:CHANNEL|PROFILE|STRATEGY)[A-Z0-9_]*\s*="
+                r"\s*\{[^}]*[\"']small-team-ai[\"']",
+                re.IGNORECASE | re.DOTALL,
+            ),
         )
         niche_patterns = (
             re.compile(r"\bif\s+[^\n]*\bniche\s*=="),
