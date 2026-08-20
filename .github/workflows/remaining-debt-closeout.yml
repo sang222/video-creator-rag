@@ -72,16 +72,6 @@ jobs:
             alembic/versions/0088_business_action_continuation_authority.py \
             alembic/versions/0089_business_action_lifecycle.py \
             alembic/versions/0090_learning_reassessment.py
-          ruff format --diff \
-            app/db/models/remaining_debt.py \
-            app/services/remaining_debt_closeout.py \
-            tests/test_remaining_debt_closeout.py \
-            alembic/versions/0085_series_authority.py \
-            alembic/versions/0086_learning_authority.py \
-            alembic/versions/0087_business_os.py \
-            alembic/versions/0088_business_action_continuation_authority.py \
-            alembic/versions/0089_business_action_lifecycle.py \
-            alembic/versions/0090_learning_reassessment.py
           ruff format --check \
             app/db/models/remaining_debt.py \
             app/services/remaining_debt_closeout.py \

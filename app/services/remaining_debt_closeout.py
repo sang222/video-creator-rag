@@ -401,12 +401,9 @@ class SeriesAuthorityService:
             )
         )
         if existing is not None:
-            if (
-                existing.video_project_id != video_project_id
-                or (
-                    technical_attempt_ref is not None
-                    and existing.technical_attempt_ref != technical_attempt_ref
-                )
+            if existing.video_project_id != video_project_id or (
+                technical_attempt_ref is not None
+                and existing.technical_attempt_ref != technical_attempt_ref
             ):
                 raise ConflictError("SERIES_PUBLICATION_RECEIPT_REUSE_CONFLICT")
             return existing
