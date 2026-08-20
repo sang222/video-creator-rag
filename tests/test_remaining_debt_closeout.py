@@ -615,7 +615,8 @@ def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
         db.scalar(
             select(BusinessActionItem).where(
                 BusinessActionItem.action_type == "REMEDIATE_DISCLOSURE",
-                BusinessActionItem.target_ref == "business-disclosure://package://blocked",
+                BusinessActionItem.target_ref
+                == "business-disclosure://package://blocked",
             )
         ).state
         == "RESOLVED"
