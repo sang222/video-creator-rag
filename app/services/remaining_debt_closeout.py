@@ -1492,9 +1492,7 @@ class BusinessMonitoringService:
         source_updated_at: datetime,
         valid_until: datetime | None,
     ) -> PaymentProfileStatus:
-        _require(
-            source_updated_at <= utc_now(), "PAYMENT_STATUS_SOURCE_FUTURE"
-        )
+        _require(source_updated_at <= utc_now(), "PAYMENT_STATUS_SOURCE_FUTURE")
         version = self.session.scalar(
             select(func.max(PaymentProfileStatus.version_number)).where(
                 PaymentProfileStatus.company_id == company_id
@@ -1561,9 +1559,7 @@ class BusinessMonitoringService:
         source_updated_at: datetime,
         valid_until: datetime | None,
     ) -> MonetizationAccountStatus:
-        _require(
-            source_updated_at <= utc_now(), "MONETIZATION_STATUS_SOURCE_FUTURE"
-        )
+        _require(source_updated_at <= utc_now(), "MONETIZATION_STATUS_SOURCE_FUTURE")
         version = self.session.scalar(
             select(func.max(MonetizationAccountStatus.version_number)).where(
                 MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
@@ -2344,9 +2340,7 @@ class BusinessMonitoringService:
         if offer is None:
             raise NotFoundError(f"affiliate offer not found: {offer_snapshot_id}")
         canonical_url = canonical_url.strip()
-        _require(
-            self._is_https_url(canonical_url), "AFFILIATE_LINK_HTTPS_REQUIRED"
-        )
+        _require(self._is_https_url(canonical_url), "AFFILIATE_LINK_HTTPS_REQUIRED")
         if short_url is not None:
             short_url = short_url.strip()
             _require(
