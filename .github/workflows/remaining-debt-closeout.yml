@@ -60,8 +60,6 @@ jobs:
           if not result.one_engine_many_profiles:
               raise SystemExit(f"P3_ARCHITECTURE_AUDIT_FAILED: {result}")
           PY
-      - name: Show pending closeout format diff
-        run: ruff format --diff tests/test_remaining_debt_closeout.py || true
       - name: Ruff
         run: |
           ruff check \
