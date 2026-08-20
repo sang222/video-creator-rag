@@ -15,11 +15,13 @@ from typing import Any
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -677,9 +679,8 @@ class BusinessDisclosureAssessment(Base):
     __tablename__ = "business_disclosure_assessments"
     __table_args__ = (
         UniqueConstraint(
-            "publish_package_ref",
-            "policy_version",
-            name="uq_business_disclosure_package",
+            "assessment_hash",
+            name="uq_business_disclosure_hash",
         ),
     )
 
@@ -707,6 +708,15 @@ class BusinessActionItem(Base):
             "target_ref",
             "reason_code",
             name="uq_business_action_identity",
+        ),
+        Index(
+            "uq_business_action_company_global_identity",
+            "company_id",
+            "action_type",
+            "target_ref",
+            "reason_code",
+            unique=True,
+            postgresql_where=text("channel_workspace_id IS NULL"),
         ),
     )
 

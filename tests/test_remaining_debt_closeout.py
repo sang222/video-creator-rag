@@ -553,6 +553,16 @@ def test_high_enforcement_blocks_self_funding_and_creates_action(db: Session) ->
         ).state
         == "OPEN"
     )
+    service.resolve_enforcement_incident(
+        incident_id=incident.id,
+        resolution_summary="Operator confirmed the platform remediation.",
+    )
+    assert action.state == "RESOLVED"
+    assert (
+        service.dashboard(company_id=company_id, channel_workspace_id=channel_id)
+        .disclosure_health
+        == "CLEAN"
+    )
 
 
 def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
@@ -592,14 +602,35 @@ def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
     passed = service.assess_disclosures(
         company_id=company_id,
         channel_workspace_id=channel_id,
-        video_project_id=uuid.uuid4(),
-        publish_package_ref="package://passed",
+        video_project_id=blocked.video_project_id,
+        publish_package_ref="package://blocked",
         policy_version="disclosure-v1",
         required_disclosures=["AFFILIATE"],
         observed_disclosures=["AFFILIATE"],
         link_registry_refs=[link.id],
     )
     assert passed.decision == "PASS"
+    assert passed.id != blocked.id
+    assert (
+        db.scalar(
+            select(BusinessActionItem).where(
+                BusinessActionItem.action_type == "REMEDIATE_DISCLOSURE",
+                BusinessActionItem.target_ref == "business-disclosure://package://blocked",
+            )
+        ).state
+        == "RESOLVED"
+    )
+    with pytest.raises(ValidationFailureError, match="AFFILIATE_LINK_SCOPE_MISMATCH"):
+        service.assess_disclosures(
+            company_id=uuid.uuid4(),
+            channel_workspace_id=uuid.uuid4(),
+            video_project_id=uuid.uuid4(),
+            publish_package_ref="package://cross-channel",
+            policy_version="disclosure-v1",
+            required_disclosures=["AFFILIATE"],
+            observed_disclosures=["AFFILIATE"],
+            link_registry_refs=[link.id],
+        )
 
 
 def test_business_statuses_create_idempotent_actions_and_truthful_dashboard(
@@ -649,6 +680,32 @@ def test_business_statuses_create_idempotent_actions_and_truthful_dashboard(
     )
     assert dashboard.payment_state.startswith("ACTION_REQUIRED:")
     assert dashboard.monetization_state.startswith("ACTION_REQUIRED:")
+    service.record_monetization_status(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        platform="YOUTUBE",
+        program_type="YPP",
+        eligibility_state="ELIGIBLE",
+        enrollment_state="ACTIVE",
+        restriction_state="RESTRICTED",
+        source_type="API",
+        source_ref="youtube://monetization/restricted",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=7),
+    )
+    assert (
+        len(
+            list(
+                db.scalars(
+                    select(BusinessActionItem).where(
+                        BusinessActionItem.reason_code == "MONETIZATION_RESTRICTED"
+                    )
+                )
+            )
+        )
+        == 1
+    )
     service.record_payment_status(
         company_id=company_id,
         payee_ref="payee://owner",
@@ -670,6 +727,27 @@ def test_business_statuses_create_idempotent_actions_and_truthful_dashboard(
         )
     )
     assert resolved and all(item.state == "RESOLVED" for item in resolved)
+    service.record_payment_status(
+        company_id=company_id,
+        payee_ref="payee://owner",
+        tax_state="PENDING",
+        address_verification_state="VERIFIED",
+        payment_method_state="READY",
+        payment_hold_state="NONE",
+        source_type="OPERATOR_ATTESTATION",
+        source_ref="evidence://payment/recurred",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=30),
+    )
+    assert (
+        db.scalar(
+            select(BusinessActionItem).where(
+                BusinessActionItem.reason_code == "PAYMENT_TAX_VERIFICATION_REQUIRED"
+            )
+        ).state
+        == "OPEN"
+    )
 
 
 def test_continuation_recommendation_is_durable_and_human_gated(db: Session) -> None:
@@ -797,6 +875,21 @@ def test_architecture_audit_and_portfolio_proof(tmp_path: Path) -> None:
     assert audit.one_engine_many_profiles is False
     assert audit.hardcoded_channel_findings == ("app/bad.py",)
     assert audit.niche_branch_findings == ("app/bad.py",)
+
+    own_service_root = tmp_path / "own-service"
+    own_service = own_service_root / "app" / "services"
+    own_service.mkdir(parents=True)
+    (own_service / "remaining_debt_closeout.py").write_text(
+        "class ArchitectureDebtAuditService:\n"
+        "    detector_vocabulary = 'SmallTeamAIPipeline'\n\n"
+        "def active_executor():\n"
+        "    return 'Small Team AI'\n",
+        encoding="utf-8",
+    )
+    own_service_audit = ArchitectureDebtAuditService().audit(own_service_root)
+    assert own_service_audit.hardcoded_channel_findings == (
+        "app/services/remaining_debt_closeout.py",
+    )
 
     clean_root = tmp_path / "clean"
     clean_app = clean_root / "app"

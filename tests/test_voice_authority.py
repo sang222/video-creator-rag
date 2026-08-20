@@ -215,4 +215,4 @@ def test_voice_migration_is_single_head() -> None:
     config.set_main_option("script_location", "alembic")
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
-    assert heads == ["0088_business_continuation"]
+    assert heads == ["0089_business_action_lifecycle"]

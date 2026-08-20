@@ -7,6 +7,7 @@ platform, payment, analytics, or legal action is executed from this module.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
@@ -2080,6 +2081,12 @@ class BusinessMonitoringService:
         row.state = "RESOLVED"
         row.resolution_summary = summary
         row.resolved_at = utc_now()
+        self._resolve_actions(
+            channel_workspace_id=row.channel_workspace_id,
+            action_type="REVIEW_ENFORCEMENT",
+            target_ref=f"platform-enforcement://{row.id}",
+            resolved_reasons={f"PLATFORM_{row.incident_type}"},
+        )
         self.session.flush()
         return row
 
@@ -2265,16 +2272,29 @@ class BusinessMonitoringService:
         required = sorted({str(item) for item in required_disclosures})
         observed = sorted({str(item) for item in observed_disclosures})
         missing = sorted(set(required) - set(observed))
+        link_ref_set = set(link_registry_refs)
         link_rows = (
             list(
                 self.session.scalars(
                     select(AffiliateLinkRegistry).where(
-                        AffiliateLinkRegistry.id.in_(list(link_registry_refs))
+                        AffiliateLinkRegistry.id.in_(list(link_ref_set))
                     )
                 ).all()
             )
-            if link_registry_refs
+            if link_ref_set
             else []
+        )
+        _require(
+            {item.id for item in link_rows} == link_ref_set,
+            "AFFILIATE_LINK_NOT_FOUND",
+        )
+        _require(
+            all(
+                item.company_id == company_id
+                and item.channel_workspace_id == channel_workspace_id
+                for item in link_rows
+            ),
+            "AFFILIATE_LINK_SCOPE_MISMATCH",
         )
         reasons = [f"DISCLOSURE_MISSING:{item}" for item in missing]
         now = utc_now()
@@ -2295,6 +2315,9 @@ class BusinessMonitoringService:
         decision = "PASS" if not reasons else "BLOCK"
         payload = {
             "schema_version": "vcos.business-disclosure-assessment.v1",
+            "company_id": company_id,
+            "channel_workspace_id": channel_workspace_id,
+            "video_project_id": video_project_id,
             "publish_package_ref": publish_package_ref,
             "policy_version": policy_version,
             "required_disclosures": required,
@@ -2306,14 +2329,24 @@ class BusinessMonitoringService:
         digest = _hash(payload)
         existing = self.session.scalar(
             select(BusinessDisclosureAssessment).where(
+                BusinessDisclosureAssessment.assessment_hash == digest
+            )
+        )
+        if existing is not None:
+            return existing
+        conflicting_scope = self.session.scalar(
+            select(BusinessDisclosureAssessment).where(
                 BusinessDisclosureAssessment.publish_package_ref == publish_package_ref,
                 BusinessDisclosureAssessment.policy_version == policy_version,
             )
         )
-        if existing is not None:
-            if existing.assessment_hash != digest:
-                raise ConflictError("BUSINESS_DISCLOSURE_ASSESSMENT_IMMUTABLE")
-            return existing
+        if conflicting_scope is not None:
+            _require(
+                conflicting_scope.company_id == company_id
+                and conflicting_scope.channel_workspace_id == channel_workspace_id
+                and conflicting_scope.video_project_id == video_project_id,
+                "BUSINESS_DISCLOSURE_SCOPE_MISMATCH",
+            )
         row = BusinessDisclosureAssessment(
             id=_deterministic_id(_BUSINESS_NAMESPACE, payload),
             company_id=company_id,
@@ -2371,9 +2404,8 @@ class BusinessMonitoringService:
             )
             or 0
         )
-        actions = tuple(
-            str(item.reason_code)
-            for item in self.session.scalars(
+        open_actions = tuple(
+            self.session.scalars(
                 select(BusinessActionItem)
                 .where(
                     or_(
@@ -2385,6 +2417,7 @@ class BusinessMonitoringService:
                 .order_by(BusinessActionItem.created_at)
             ).all()
         )
+        actions = tuple(str(item.reason_code) for item in open_actions)
         total_cost = (
             Decimal(pnl.direct_cost) + Decimal(pnl.allocated_ops_cost)
             if pnl is not None
@@ -2395,7 +2428,13 @@ class BusinessMonitoringService:
             monetization_state=self._effective_monetization_state(monetization),
             payment_state=self._effective_payment_state(payment),
             open_enforcement_count=open_count,
-            disclosure_health="ACTION_REQUIRED" if actions else "CLEAN",
+            disclosure_health=(
+                "ACTION_REQUIRED"
+                if any(
+                    item.action_type == "REMEDIATE_DISCLOSURE" for item in open_actions
+                )
+                else "CLEAN"
+            ),
             trailing_finalized_revenue=(
                 Decimal(pnl.finalized_revenue) if pnl else Decimal("0")
             ),
@@ -2447,6 +2486,12 @@ class BusinessMonitoringService:
             )
         )
         if existing is not None:
+            if existing.state in {"RESOLVED", "DONE", "DISMISSED"}:
+                existing.priority = priority
+                existing.state = "OPEN"
+                existing.due_at = due_at
+                existing.evidence_refs = list(evidence_refs)
+                existing.action_hash = _hash(payload)
             return existing
         row = BusinessActionItem(
             id=_deterministic_id(_BUSINESS_NAMESPACE, payload),
@@ -2533,7 +2578,7 @@ class BusinessMonitoringService:
                 ),
                 BusinessActionItem.action_type == action_type,
                 BusinessActionItem.target_ref == target_ref,
-                BusinessActionItem.state == "OPEN",
+                BusinessActionItem.state.in_({"OPEN", "IN_PROGRESS"}),
             )
         ):
             if item.reason_code in resolved_reasons:
@@ -2640,6 +2685,7 @@ class ArchitectureDebtAuditService:
 
     _runtime_suffixes = {".py", ".yaml", ".yml", ".json"}
     _excluded_parts = {"tests", "docs", "alembic", ".git", "reports"}
+    _audit_service_relative_path = "app/services/remaining_debt_closeout.py"
     _classified_non_runtime_surfaces = {
         "app/contracts/nich1.py": "historical policy reason-code vocabulary",
         "app/services/img_canary.py": "non-production canary fixture generator",
@@ -2692,8 +2738,8 @@ class ArchitectureDebtAuditService:
             relative = str(path.relative_to(root))
             if relative in self._classified_non_runtime_surfaces:
                 continue
-            if relative == "app/services/remaining_debt_closeout.py":
-                continue
+            if relative == self._audit_service_relative_path:
+                text = self._without_audit_detector_source(text)
             if any(pattern.search(text) for pattern in channel_patterns):
                 hardcoded.append(relative)
             if any(pattern.search(text) for pattern in niche_patterns):
@@ -2706,6 +2752,28 @@ class ArchitectureDebtAuditService:
             superseded_surface_findings=tuple(superseded),
             one_engine_many_profiles=not (hardcoded or niche or superseded),
         )
+
+    @staticmethod
+    def _without_audit_detector_source(text: str) -> str:
+        """Remove only this audit class's detector vocabulary from its own file.
+
+        The surrounding closeout services remain scanned, so a real executor
+        violation added alongside the detector is still a hard finding.
+        """
+
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return text
+        lines = text.splitlines(keepends=True)
+        for node in tree.body:
+            if (
+                isinstance(node, ast.ClassDef)
+                and node.name == "ArchitectureDebtAuditService"
+            ):
+                for index in range(node.lineno - 1, node.end_lineno):
+                    lines[index] = "\n"
+        return "".join(lines)
 
     @staticmethod
     def code_isolation_proof(result: ArchitectureAuditResult) -> dict[str, Any]:

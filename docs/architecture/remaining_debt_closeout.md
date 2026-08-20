@@ -20,7 +20,8 @@ All database changes are additive and form one Alembic chain:
 → 0085_series_authority
 → 0086_learning_authority
 → 0087_business_os
-→ 0088_business_action_continuation
+→ 0088_business_continuation
+→ 0089_business_action_lifecycle
 ```
 
 The migrations are executed against ephemeral PostgreSQL in CI. They are not
