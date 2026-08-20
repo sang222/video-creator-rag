@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import copy
 import uuid
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
-from app.contracts.m5 import EditorialIdeaCandidateTransition, SearchDemandEvidenceCreate
+from app.contracts.m5 import (
+    EditorialIdeaCandidateTransition,
+    IdeaMarketPreflightCreate,
+    SearchDemandEvidenceCreate,
+)
 from app.core.actor import _system_worker_actor
 from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight
 from app.services.config_registry import content_hash
@@ -31,7 +36,11 @@ from app.services.editorial_runway_replenishment import (
     _canonical_hash,
     _scheduled_scope_key,
 )
-from app.services.m5 import IDEA_MARKET_PREFLIGHT_VERSION, SearchDemandEvidenceService
+from app.services.m5 import (
+    IDEA_MARKET_PREFLIGHT_VERSION,
+    IdeaMarketPreflightService,
+    SearchDemandEvidenceService,
+)
 from app.services.script_qualification import (
     TOPIC_GATE_VERSION,
     TopicDefinitionService,
@@ -188,6 +197,36 @@ def _flow_with_current_topic(session):
     )
     assert TopicDefinitionService(session).evaluate(topic).state == "PASS"
     _attach_specific_proposal(session, candidate)
+    demand = SearchDemandEvidenceService(session).create_evidence(
+        data=SearchDemandEvidenceCreate(
+            company_id=candidate.company_id,
+            channel_workspace_id=candidate.channel_workspace_id,
+            evidence_source_type="GOOGLE_TRENDS_CSV",
+            authority_purpose="MARKET_DEMAND",
+            source_ref="fixture://editorial-novelty/market-demand",
+            query="approval checkpoint automation workflow",
+            platform="GOOGLE",
+            geo="US",
+            search_volume_30d=1200,
+            relative_interest_index=Decimal("70"),
+            competition_index=Decimal("0.30"),
+            evidence_confidence="HIGH",
+        ),
+        correlation_id="test-editorial-novelty-demand",
+    )
+    flow.preflight = IdeaMarketPreflightService(session).create_preflight(
+        data=IdeaMarketPreflightCreate(
+            company_id=candidate.company_id,
+            channel_workspace_id=candidate.channel_workspace_id,
+            editorial_calendar_slot_id=flow.slot.id,
+            editorial_research_run_id=flow.research_run.id,
+            editorial_idea_candidate_id=candidate.id,
+            claim_evidence_refs=copy.deepcopy(candidate.evidence_refs),
+            market_demand_evidence_refs=[{"id": str(demand.id)}],
+        ),
+        correlation_id="test-editorial-novelty-current-preflight",
+    )
+    assert flow.preflight.decision == "PASS"
     return flow
 
 
