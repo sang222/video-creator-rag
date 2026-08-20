@@ -22,7 +22,6 @@ from app.contracts.m5 import (
     IdeaMarketPreflightCreate,
     SearchDemandEvidenceCreate,
 )
-from app.contracts.geo_market import DestinationBinding, TargetMarketProfile
 from app.contracts.ofv0 import FormatIdentityContractDraftRequest
 from app.contracts.vcos_v2 import AssignmentMode, LongFormPlanningRequest
 from app.core.actor import authenticated_actor_context
@@ -32,7 +31,6 @@ from app.contracts.ops import ProviderRegistryEntryCreate
 from app.contracts.workflow import VideoProjectCreate
 from app.db.models import (
     CaptionTrackSnapshot,
-    CompiledChannelPolicySnapshot,
     User,
     VideoProject,
     VisualPlanSnapshot,
@@ -56,11 +54,6 @@ from app.services import (
     VideoProjectService,
 )
 from app.services.editorial_research import EditorialResearchService
-from app.services.geo_market import TargetMarketDigestCompiler
-from app.services.profile_compiler import (
-    CH1_FLEX_V2_MASTER_APPROVAL_REF,
-    CH1_MARKET_V3_MASTER_APPROVAL_REF,
-)
 from app.services.production_package import ChannelDurationContractResolver
 from app.services.ofv0 import FormatIdentityContractService
 from app.services.vcos_v2 import LongFormPlanningService
@@ -164,16 +157,11 @@ class QualificationFactory:
             profile_service.approve_profile_version(
                 profile_version_id=profile.id,
                 approved_by=admin.id,
-                approval_ref=CH1_FLEX_V2_MASTER_APPROVAL_REF,
+                approval_ref="operator-approval://ch1-flex/small-team-ai/profile-v1",
             )
         snapshot = profile_service.activate_snapshot(
             snapshot_id=compiled.snapshot_id
         )
-        if strict_long_form:
-            profile, snapshot, compiled = self._activate_strict_long_form_authority(
-                channel=channel,
-                admin=admin,
-            )
         return SimpleNamespace(
             company=company,
             channel=channel,
@@ -182,102 +170,6 @@ class QualificationFactory:
             operator=operator,
             admin=admin,
             compiled=compiled,
-        )
-
-    def _activate_strict_long_form_authority(self, *, channel, admin):
-        """Build an immutable v1 → v2 → v3 authority chain for production tests."""
-
-        profiles = ChannelProfileService(self.session)
-        profiles.approve_and_activate_ch1_flex_v2(
-            channel_id=channel.id,
-            approval_ref=CH1_FLEX_V2_MASTER_APPROVAL_REF,
-            approved_by=admin.id,
-        )
-        target_profile = TargetMarketProfile(
-            profile_version=1,
-            channel_id=channel.id,
-            channel_key=channel.key,
-            primary_market="US",
-            primary_geo_cluster=["US"],
-            acceptable_secondary_geos=["CA", "GB", "AU"],
-            primary_locale="en-US",
-            content_language="en",
-            narration_locale="en-US",
-            primary_timezone="America/New_York",
-            spelling_system="US",
-            currency="USD",
-            units_policy="US_WITH_METRIC_WHEN_RELEVANT",
-            date_format="MMM D, YYYY",
-            title_locale="en-US",
-            thumbnail_text_locale="en-US",
-            caption_locales=["en-US"],
-            audience_market_context="US_SMALL_BUSINESS",
-            workplace_context="US_SMALL_BUSINESS",
-            source_jurisdiction_policy="TARGET_MARKET_FIRST_CONTEXTUAL_FOREIGN_ALLOWED",
-            preferred_source_jurisdictions=["US"],
-            foreign_source_context_required=True,
-            allowed_market_contexts=["US", "CA", "GB", "AU"],
-            prohibited_market_mismatches=[
-                "TRANSLATED_SOUNDING_ENGLISH",
-                "NON_US_CURRENCY_WITHOUT_USD_EQUIVALENT",
-                "FOREIGN_LEGAL_ASSUMPTION_WITHOUT_CONTEXT",
-                "WRONG_VOICE_LOCALE",
-                "WRONG_METADATA_LOCALE",
-                "WRONG_THUMBNAIL_LOCALE",
-            ],
-            initial_publish_window_hypotheses=[
-                {
-                    "timezone": "America/New_York",
-                    "days": ["TUE", "SAT"],
-                    "local_time": "10:00",
-                    "status": "HYPOTHESIS_ONLY",
-                }
-            ],
-            minimum_comparable_videos=3,
-            video_geo_evaluation_window_days=7,
-            channel_geo_review_window_days=30,
-            target_market="US",
-            actual_viewer_geography_state="UNMEASURED",
-            approval_ref=CH1_MARKET_V3_MASTER_APPROVAL_REF,
-        )
-        target_digest = TargetMarketDigestCompiler().compile(target_profile)
-        destination = DestinationBinding(
-            binding_version=1,
-            channel_id=channel.id,
-            channel_key=channel.key,
-            platform="YOUTUBE",
-            channel_handle="@SmallTeamAIQualification",
-            target_market_profile_ref=target_digest.profile_ref,
-            target_market_profile_hash=str(target_profile.content_hash),
-            target_market="US",
-            primary_market="US",
-            primary_locale="en-US",
-            original_language="en",
-            default_visibility="PRIVATE",
-            manual_publish_required=True,
-            destination_status="PENDING_PLATFORM_ID",
-            verification_state="PENDING",
-            approval_ref=CH1_MARKET_V3_MASTER_APPROVAL_REF,
-        )
-        activated = profiles.approve_and_activate_ch1_market_v3(
-            channel_id=channel.id,
-            target_market_profile=target_profile,
-            target_market_digest=target_digest,
-            destination_binding=destination,
-            approval_ref=CH1_MARKET_V3_MASTER_APPROVAL_REF,
-            approved_by=admin.id,
-        )
-        profile = profiles.get_profile_version(
-            uuid.UUID(activated["channel_profile_version_id"])
-        )
-        snapshot = self.session.get(
-            CompiledChannelPolicySnapshot,
-            uuid.UUID(activated["compiled_policy_snapshot_id"]),
-        )
-        assert profile is not None and snapshot is not None
-        return profile, snapshot, SimpleNamespace(
-            snapshot_id=snapshot.id,
-            content_hash=snapshot.content_hash,
         )
 
     def m2_project(self, *, scope_name: str = "M2") -> SimpleNamespace:
