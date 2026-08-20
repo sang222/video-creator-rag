@@ -6,8 +6,6 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from app.contracts import (
     ArtifactCreate,
     ArtifactVersionCreate,
@@ -58,13 +56,7 @@ from app.services.production_package import ChannelDurationContractResolver
 from app.services.ofv0 import FormatIdentityContractService
 from app.services.vcos_v2 import LongFormPlanningService
 
-from .helpers.network_sentinel import install_network_sentinel
-from .helpers.qualification_asserts import ROOT
-
-
-@pytest.fixture(autouse=True)
-def outbound_network_sentinel(monkeypatch):
-    install_network_sentinel(monkeypatch)
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class QualificationFactory:
