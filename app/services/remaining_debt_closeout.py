@@ -35,6 +35,7 @@ from app.db.models.remaining_debt import (
     BusinessActionItem,
     BusinessDisclosureAssessment,
     ChannelPnlSnapshot,
+    ContinuationCapitalReview,
     LearningEquivalenceFingerprint,
     LearningOperationalIncident,
     LearningReview,
@@ -1485,6 +1486,7 @@ class BusinessMonitoringService:
         )
         self.session.add(row)
         self.session.flush()
+        self._sync_payment_actions(row)
         return row
 
     def record_monetization_status(
@@ -1545,6 +1547,7 @@ class BusinessMonitoringService:
         )
         self.session.add(row)
         self.session.flush()
+        self._sync_monetization_actions(row)
         return row
 
     def record_revenue(
@@ -1923,6 +1926,63 @@ class BusinessMonitoringService:
             ),
         }
 
+    def freeze_continuation_recommendation(
+        self,
+        *,
+        company_id: uuid.UUID,
+        channel_workspace_id: uuid.UUID,
+        evaluated_at: datetime,
+        policy_version: str = "vcos.continuation-capital-review.v1",
+    ) -> ContinuationCapitalReview:
+        """Persist a recommendation for human review; never enact a strategy change."""
+
+        projection = self.continuation_recommendation(
+            channel_workspace_id=channel_workspace_id
+        )
+        payload = {
+            "schema_version": policy_version,
+            "channel_workspace_id": channel_workspace_id,
+            "recommendation": projection["action"],
+            "reason_codes": projection["reason_codes"],
+            "input_refs": projection["input_refs"],
+            "human_decision_required": projection["human_decision_required"],
+        }
+        digest = _hash(payload)
+        existing = self.session.scalar(
+            select(ContinuationCapitalReview).where(
+                ContinuationCapitalReview.channel_workspace_id == channel_workspace_id,
+                ContinuationCapitalReview.evidence_snapshot_hash == digest,
+            )
+        )
+        if existing is not None:
+            return existing
+        row = ContinuationCapitalReview(
+            id=_deterministic_id(_BUSINESS_NAMESPACE, payload),
+            company_id=company_id,
+            channel_workspace_id=channel_workspace_id,
+            recommendation=projection["action"],
+            reason_codes=list(projection["reason_codes"]),
+            input_refs=list(projection["input_refs"]),
+            evidence_snapshot_hash=digest,
+            policy_version=policy_version,
+            evaluated_at=evaluated_at,
+            human_decision_required=projection["human_decision_required"],
+        )
+        self.session.add(row)
+        self.session.flush()
+        if row.human_decision_required:
+            self._action(
+                company_id=company_id,
+                channel_workspace_id=channel_workspace_id,
+                action_type="HUMAN_CAPITAL_REVIEW",
+                target_ref=f"continuation-capital://{channel_workspace_id}",
+                priority="HIGH",
+                reason_code=row.recommendation,
+                evidence_refs=[f"continuation-capital-review://{row.id}"],
+                due_at=None,
+            )
+        return row
+
     def open_enforcement_incident(
         self,
         *,
@@ -2270,6 +2330,7 @@ class BusinessMonitoringService:
         )
         self.session.add(row)
         self.session.flush()
+        self._sync_disclosure_actions(row)
         return row
 
     def dashboard(
@@ -2315,7 +2376,10 @@ class BusinessMonitoringService:
             for item in self.session.scalars(
                 select(BusinessActionItem)
                 .where(
-                    BusinessActionItem.channel_workspace_id == channel_workspace_id,
+                    or_(
+                        BusinessActionItem.channel_workspace_id == channel_workspace_id,
+                        BusinessActionItem.channel_workspace_id.is_(None),
+                    ),
                     BusinessActionItem.state == "OPEN",
                 )
                 .order_by(BusinessActionItem.created_at)
@@ -2328,10 +2392,8 @@ class BusinessMonitoringService:
         )
         return BusinessDashboardProjection(
             channel_workspace_id=channel_workspace_id,
-            monetization_state=(
-                monetization.enrollment_state if monetization else "UNKNOWN"
-            ),
-            payment_state=(payment.payment_method_state if payment else "UNKNOWN"),
+            monetization_state=self._effective_monetization_state(monetization),
+            payment_state=self._effective_payment_state(payment),
             open_enforcement_count=open_count,
             disclosure_health="ACTION_REQUIRED" if actions else "CLEAN",
             trailing_finalized_revenue=(
@@ -2354,7 +2416,7 @@ class BusinessMonitoringService:
         self,
         *,
         company_id: uuid.UUID,
-        channel_workspace_id: uuid.UUID,
+        channel_workspace_id: uuid.UUID | None,
         action_type: str,
         target_ref: str,
         priority: str,
@@ -2374,7 +2436,11 @@ class BusinessMonitoringService:
         }
         existing = self.session.scalar(
             select(BusinessActionItem).where(
-                BusinessActionItem.channel_workspace_id == channel_workspace_id,
+                (
+                    BusinessActionItem.channel_workspace_id.is_(None)
+                    if channel_workspace_id is None
+                    else BusinessActionItem.channel_workspace_id == channel_workspace_id
+                ),
                 BusinessActionItem.action_type == action_type,
                 BusinessActionItem.target_ref == target_ref,
                 BusinessActionItem.reason_code == reason_code,
@@ -2397,6 +2463,167 @@ class BusinessMonitoringService:
         )
         self.session.add(row)
         return row
+
+    @staticmethod
+    def _payment_action_reasons(row: PaymentProfileStatus) -> set[str]:
+        reasons: set[str] = set()
+        if row.tax_state != "VERIFIED":
+            reasons.add("PAYMENT_TAX_VERIFICATION_REQUIRED")
+        if row.address_verification_state != "VERIFIED":
+            reasons.add("PAYMENT_ADDRESS_VERIFICATION_REQUIRED")
+        if row.payment_method_state != "READY":
+            reasons.add("PAYMENT_METHOD_ACTION_REQUIRED")
+        if row.payment_hold_state not in {"NONE", "CLEAR"}:
+            reasons.add("PAYMENT_HOLD_OPEN")
+        if (
+            row.confidence_state not in TRUSTED_SOURCE_CONFIDENCE
+            or row.valid_until is None
+            or row.valid_until <= utc_now()
+        ):
+            reasons.add("PAYMENT_STATUS_STALE_OR_UNTRUSTED")
+        return reasons
+
+    @staticmethod
+    def _monetization_action_reasons(row: MonetizationAccountStatus) -> set[str]:
+        reasons: set[str] = set()
+        if row.eligibility_state not in {"ELIGIBLE", "ACTIVE"}:
+            reasons.add("MONETIZATION_UNAVAILABLE")
+        if row.enrollment_state != "ACTIVE":
+            reasons.add("MONETIZATION_ENROLLMENT_INCOMPLETE")
+        if row.restriction_state not in {"NONE", "CLEAR"}:
+            reasons.add("MONETIZATION_RESTRICTED")
+        if (
+            row.confidence_state not in TRUSTED_SOURCE_CONFIDENCE
+            or row.valid_until is None
+            or row.valid_until <= utc_now()
+        ):
+            reasons.add("MONETIZATION_STATUS_STALE_OR_UNTRUSTED")
+        return reasons
+
+    @classmethod
+    def _effective_payment_state(cls, row: PaymentProfileStatus | None) -> str:
+        if row is None:
+            return "UNKNOWN"
+        reasons = cls._payment_action_reasons(row)
+        return "READY" if not reasons else f"ACTION_REQUIRED:{sorted(reasons)[0]}"
+
+    @classmethod
+    def _effective_monetization_state(
+        cls, row: MonetizationAccountStatus | None
+    ) -> str:
+        if row is None:
+            return "UNKNOWN"
+        reasons = cls._monetization_action_reasons(row)
+        return "ACTIVE" if not reasons else f"ACTION_REQUIRED:{sorted(reasons)[0]}"
+
+    def _resolve_actions(
+        self,
+        *,
+        channel_workspace_id: uuid.UUID | None,
+        action_type: str,
+        target_ref: str,
+        resolved_reasons: set[str],
+    ) -> None:
+        for item in self.session.scalars(
+            select(BusinessActionItem).where(
+                (
+                    BusinessActionItem.channel_workspace_id.is_(None)
+                    if channel_workspace_id is None
+                    else BusinessActionItem.channel_workspace_id == channel_workspace_id
+                ),
+                BusinessActionItem.action_type == action_type,
+                BusinessActionItem.target_ref == target_ref,
+                BusinessActionItem.state == "OPEN",
+            )
+        ):
+            if item.reason_code in resolved_reasons:
+                item.state = "RESOLVED"
+
+    def _sync_payment_actions(self, row: PaymentProfileStatus) -> None:
+        target_ref = f"payment-profile://{row.company_id}"
+        reasons = self._payment_action_reasons(row)
+        all_reasons = {
+            "PAYMENT_TAX_VERIFICATION_REQUIRED",
+            "PAYMENT_ADDRESS_VERIFICATION_REQUIRED",
+            "PAYMENT_METHOD_ACTION_REQUIRED",
+            "PAYMENT_HOLD_OPEN",
+            "PAYMENT_STATUS_STALE_OR_UNTRUSTED",
+        }
+        self._resolve_actions(
+            channel_workspace_id=None,
+            action_type="RESOLVE_PAYMENT_PROFILE",
+            target_ref=target_ref,
+            resolved_reasons=all_reasons - reasons,
+        )
+        for reason in sorted(reasons):
+            self._action(
+                company_id=row.company_id,
+                channel_workspace_id=None,
+                action_type="RESOLVE_PAYMENT_PROFILE",
+                target_ref=target_ref,
+                priority="HIGH",
+                reason_code=reason,
+                evidence_refs=[f"payment-profile-status://{row.id}"],
+                due_at=row.valid_until,
+            )
+
+    def _sync_monetization_actions(self, row: MonetizationAccountStatus) -> None:
+        target_ref = f"monetization-account://{row.platform}/{row.channel_workspace_id}"
+        reasons = self._monetization_action_reasons(row)
+        all_reasons = {
+            "MONETIZATION_UNAVAILABLE",
+            "MONETIZATION_ENROLLMENT_INCOMPLETE",
+            "MONETIZATION_RESTRICTED",
+            "MONETIZATION_STATUS_STALE_OR_UNTRUSTED",
+        }
+        self._resolve_actions(
+            channel_workspace_id=row.channel_workspace_id,
+            action_type="RESOLVE_MONETIZATION_ACCOUNT",
+            target_ref=target_ref,
+            resolved_reasons=all_reasons - reasons,
+        )
+        for reason in sorted(reasons):
+            self._action(
+                company_id=row.company_id,
+                channel_workspace_id=row.channel_workspace_id,
+                action_type="RESOLVE_MONETIZATION_ACCOUNT",
+                target_ref=target_ref,
+                priority="HIGH",
+                reason_code=reason,
+                evidence_refs=[f"monetization-account-status://{row.id}"],
+                due_at=row.valid_until,
+            )
+
+    def _sync_disclosure_actions(self, row: BusinessDisclosureAssessment) -> None:
+        target_ref = f"business-disclosure://{row.publish_package_ref}"
+        reasons = set(row.reason_codes)
+        self._resolve_actions(
+            channel_workspace_id=row.channel_workspace_id,
+            action_type="REMEDIATE_DISCLOSURE",
+            target_ref=target_ref,
+            resolved_reasons={
+                item.reason_code
+                for item in self.session.scalars(
+                    select(BusinessActionItem).where(
+                        BusinessActionItem.channel_workspace_id == row.channel_workspace_id,
+                        BusinessActionItem.action_type == "REMEDIATE_DISCLOSURE",
+                        BusinessActionItem.target_ref == target_ref,
+                    )
+                )
+            }
+            - reasons,
+        )
+        for reason in sorted(reasons):
+            self._action(
+                company_id=row.company_id,
+                channel_workspace_id=row.channel_workspace_id,
+                action_type="REMEDIATE_DISCLOSURE",
+                target_ref=target_ref,
+                priority="HIGH",
+                reason_code=reason,
+                evidence_refs=[f"business-disclosure-assessment://{row.id}"],
+                due_at=None,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2491,6 +2718,7 @@ class ArchitectureDebtAuditService:
         *,
         verified_publications_by_channel: Mapping[uuid.UUID, int],
         compiled_profile_hash_by_channel: Mapping[uuid.UUID, str],
+        code_audit: ArchitectureAuditResult,
     ) -> dict[str, Any]:
         proven_channels = {
             channel_id
@@ -2504,7 +2732,11 @@ class ArchitectureDebtAuditService:
         passed = len(proven_channels) >= 2 and len(profile_hashes) >= 2
         return {
             "state": "PROVEN" if passed else "NOT_PROVEN",
-            "code_isolation_state": "CODE_ISOLATION_PROVEN",
+            "code_isolation_state": (
+                "CODE_ISOLATION_PROVEN"
+                if code_audit.one_engine_many_profiles
+                else "CODE_ISOLATION_NOT_PROVEN"
+            ),
             "live_portfolio_state": (
                 "LIVE_PORTFOLIO_PROVEN" if passed else "LIVE_PORTFOLIO_PROOF_NOT_PROVEN"
             ),

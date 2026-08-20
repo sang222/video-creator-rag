@@ -522,6 +522,31 @@ class SelfFundingAssessment(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class ContinuationCapitalReview(Base):
+    """Frozen, human-governed continuation/capital recommendation authority."""
+
+    __tablename__ = "continuation_capital_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "channel_workspace_id",
+            "evidence_snapshot_hash",
+            name="uq_continuation_capital_evidence",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _uuid_indexed()
+    channel_workspace_id: Mapped[uuid.UUID] = _uuid_indexed()
+    recommendation: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    reason_codes: Mapped[list[Any]] = _json_list()
+    input_refs: Mapped[list[Any]] = _json_list()
+    evidence_snapshot_hash: Mapped[str] = _hash_column()
+    policy_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    human_decision_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class PlatformEnforcementIncident(Base):
     __tablename__ = "platform_enforcement_incidents"
     __table_args__ = (
@@ -685,7 +710,7 @@ class BusinessActionItem(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     company_id: Mapped[uuid.UUID] = _uuid_indexed()
-    channel_workspace_id: Mapped[uuid.UUID] = _uuid_indexed()
+    channel_workspace_id: Mapped[uuid.UUID | None] = _uuid_indexed(nullable=True)
     action_type: Mapped[str] = mapped_column(String(64), nullable=False)
     target_ref: Mapped[str] = mapped_column(String(260), nullable=False)
     priority: Mapped[str] = mapped_column(String(16), nullable=False)

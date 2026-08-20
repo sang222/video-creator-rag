@@ -19,6 +19,7 @@ from app.db.models.remaining_debt import (
     AudienceDeliveryPlan,
     BusinessActionItem,
     ChannelPnlSnapshot,
+    ContinuationCapitalReview,
     LearningEquivalenceFingerprint,
     PlatformEnforcementIncident,
     SelfFundingAssessment,
@@ -599,6 +600,125 @@ def test_affiliate_and_disclosure_gate_fails_closed(db: Session) -> None:
         link_registry_refs=[link.id],
     )
     assert passed.decision == "PASS"
+
+
+def test_business_statuses_create_idempotent_actions_and_truthful_dashboard(
+    db: Session,
+) -> None:
+    company_id, channel_id, _ = _scope()
+    service = BusinessMonitoringService(db)
+    now = utc_now()
+    service.record_payment_status(
+        company_id=company_id,
+        payee_ref="payee://owner",
+        tax_state="PENDING",
+        address_verification_state="VERIFIED",
+        payment_method_state="READY",
+        payment_hold_state="ON_HOLD",
+        source_type="OPERATOR_ATTESTATION",
+        source_ref="evidence://payment/pending",
+        confidence_state="LOW",
+        source_updated_at=now,
+        valid_until=now - timedelta(days=1),
+    )
+    service.record_monetization_status(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        platform="YOUTUBE",
+        program_type="YPP",
+        eligibility_state="ELIGIBLE",
+        enrollment_state="ACTIVE",
+        restriction_state="RESTRICTED",
+        source_type="API",
+        source_ref="youtube://monetization/restricted",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=7),
+    )
+    first_actions = list(
+        db.scalars(select(BusinessActionItem).where(BusinessActionItem.state == "OPEN"))
+    )
+    assert {item.reason_code for item in first_actions} >= {
+        "PAYMENT_TAX_VERIFICATION_REQUIRED",
+        "PAYMENT_HOLD_OPEN",
+        "PAYMENT_STATUS_STALE_OR_UNTRUSTED",
+        "MONETIZATION_RESTRICTED",
+    }
+    dashboard = service.dashboard(
+        company_id=company_id, channel_workspace_id=channel_id
+    )
+    assert dashboard.payment_state.startswith("ACTION_REQUIRED:")
+    assert dashboard.monetization_state.startswith("ACTION_REQUIRED:")
+    service.record_payment_status(
+        company_id=company_id,
+        payee_ref="payee://owner",
+        tax_state="VERIFIED",
+        address_verification_state="VERIFIED",
+        payment_method_state="READY",
+        payment_hold_state="NONE",
+        source_type="OPERATOR_ATTESTATION",
+        source_ref="evidence://payment/ready",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=30),
+    )
+    resolved = list(
+        db.scalars(
+            select(BusinessActionItem).where(
+                BusinessActionItem.action_type == "RESOLVE_PAYMENT_PROFILE"
+            )
+        )
+    )
+    assert resolved and all(item.state == "RESOLVED" for item in resolved)
+
+
+def test_continuation_recommendation_is_durable_and_human_gated(db: Session) -> None:
+    company_id, channel_id, _ = _scope()
+    service = BusinessMonitoringService(db)
+    now = utc_now()
+    for offset in (60, 30):
+        db.add(
+            ChannelPnlSnapshot(
+                id=uuid.uuid4(),
+                company_id=company_id,
+                channel_workspace_id=channel_id,
+                period_start=now - timedelta(days=offset),
+                period_end=now - timedelta(days=offset - 30),
+                currency="USD",
+                estimated_revenue=Decimal("0"),
+                locked_revenue=Decimal("0"),
+                finalized_revenue=Decimal("0"),
+                cash_received=Decimal("0"),
+                reversed_revenue=Decimal("0"),
+                direct_cost=Decimal("10"),
+                allocated_ops_cost=Decimal("0"),
+                contribution_margin=Decimal("-10"),
+                calculation_version=f"test-{offset}",
+                source_snapshot_refs=[],
+                content_hash=f"{offset}".zfill(64),
+            )
+        )
+    db.flush()
+    frozen = service.freeze_continuation_recommendation(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        evaluated_at=now,
+    )
+    replay = service.freeze_continuation_recommendation(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+        evaluated_at=now + timedelta(minutes=1),
+    )
+    assert frozen.id == replay.id
+    assert frozen.recommendation == "KILL_REVIEW"
+    assert frozen.human_decision_required is True
+    assert db.get(ContinuationCapitalReview, frozen.id) is not None
+    assert db.scalar(
+        select(BusinessActionItem).where(
+            BusinessActionItem.action_type == "HUMAN_CAPITAL_REVIEW",
+            BusinessActionItem.reason_code == "KILL_REVIEW",
+        )
+    ) is not None
 
 
 def test_publication_coordinator_seeds_learning_and_audience_delivery(
