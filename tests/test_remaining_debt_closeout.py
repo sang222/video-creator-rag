@@ -726,12 +726,15 @@ def test_continuation_recommendation_is_durable_and_human_gated(db: Session) -> 
     assert frozen.recommendation == "KILL_REVIEW"
     assert frozen.human_decision_required is True
     assert db.get(ContinuationCapitalReview, frozen.id) is not None
-    assert db.scalar(
-        select(BusinessActionItem).where(
-            BusinessActionItem.action_type == "HUMAN_CAPITAL_REVIEW",
-            BusinessActionItem.reason_code == "KILL_REVIEW",
+    assert (
+        db.scalar(
+            select(BusinessActionItem).where(
+                BusinessActionItem.action_type == "HUMAN_CAPITAL_REVIEW",
+                BusinessActionItem.reason_code == "KILL_REVIEW",
+            )
         )
-    ) is not None
+        is not None
+    )
 
 
 def test_publication_coordinator_seeds_learning_and_audience_delivery(

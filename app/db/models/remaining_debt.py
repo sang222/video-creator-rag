@@ -542,7 +542,9 @@ class ContinuationCapitalReview(Base):
     input_refs: Mapped[list[Any]] = _json_list()
     evidence_snapshot_hash: Mapped[str] = _hash_column()
     policy_version: Mapped[str] = mapped_column(String(80), nullable=False)
-    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     human_decision_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = _created_at()
 

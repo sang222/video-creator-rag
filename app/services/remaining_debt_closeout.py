@@ -2605,7 +2605,8 @@ class BusinessMonitoringService:
                 item.reason_code
                 for item in self.session.scalars(
                     select(BusinessActionItem).where(
-                        BusinessActionItem.channel_workspace_id == row.channel_workspace_id,
+                        BusinessActionItem.channel_workspace_id
+                        == row.channel_workspace_id,
                         BusinessActionItem.action_type == "REMEDIATE_DISCLOSURE",
                         BusinessActionItem.target_ref == target_ref,
                     )
