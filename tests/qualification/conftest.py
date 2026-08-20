@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -11,8 +12,15 @@ import pytest
 from app.contracts import (
     ArtifactCreate,
     ArtifactVersionCreate,
+    ChannelProfileInput,
     ChannelProfileVersionCreate,
     ChannelWorkspaceCreate,
+)
+from app.contracts.channel_policy import ChannelScopedPolicy
+from app.contracts.geo_market import (
+    MARKET_GATE_STRICT_ORDER,
+    DestinationBinding,
+    TargetMarketProfile,
 )
 from app.contracts.m5 import (
     EditorialCalendarSlotCreate,
@@ -54,6 +62,7 @@ from app.services import (
     VideoProjectService,
 )
 from app.services.editorial_research import EditorialResearchService
+from app.services.geo_market import TargetMarketDigestCompiler
 from app.services.production_package import ChannelDurationContractResolver
 from app.services.ofv0 import FormatIdentityContractService
 from app.services.vcos_v2 import LongFormPlanningService
@@ -156,6 +165,13 @@ class QualificationFactory:
         snapshot = profile_service.activate_snapshot(
             snapshot_id=compiled.snapshot_id
         )
+        if strict_long_form:
+            profile, snapshot, compiled = self._activate_strict_long_form_authority(
+                channel=channel,
+                active_profile=profile,
+                active_snapshot=snapshot,
+                admin=admin,
+            )
         return SimpleNamespace(
             company=company,
             channel=channel,
@@ -165,6 +181,170 @@ class QualificationFactory:
             admin=admin,
             compiled=compiled,
         )
+
+    def _activate_strict_long_form_authority(
+        self,
+        *,
+        channel,
+        active_profile,
+        active_snapshot,
+        admin,
+    ):
+        """Compile a test-only successor from current typed policy contracts.
+
+        The old fixture invoked removed, channel-specific compiler overlay
+        helpers.  The replacement obtains the base policy from the regular
+        compiler, binds its visual evidence from the current catalog, and
+        provides the typed market inputs required by long-form regression
+        scenarios.  It does not call a provider or mutate any runtime policy.
+        """
+
+        compiler = ChannelProfileCompiler(self.session)
+        base_policy = ChannelScopedPolicy.model_validate(
+            (active_snapshot.compiled_payload or {})["channel_scoped_policy"]
+        )
+        market_profile = TargetMarketProfile(
+            profile_version=1,
+            channel_id=channel.id,
+            channel_key=channel.key,
+            primary_market="US",
+            primary_geo_cluster=["US"],
+            acceptable_secondary_geos=["CA", "GB", "AU"],
+            primary_locale="en-US",
+            content_language="en",
+            narration_locale="en-US",
+            primary_timezone="America/New_York",
+            spelling_system="US",
+            currency="USD",
+            units_policy="US_WITH_METRIC_WHEN_RELEVANT",
+            date_format="MMM D, YYYY",
+            title_locale="en-US",
+            thumbnail_text_locale="en-US",
+            caption_locales=["en-US"],
+            audience_market_context="US_SMALL_BUSINESS",
+            workplace_context="US_SMALL_BUSINESS",
+            source_jurisdiction_policy="TARGET_MARKET_FIRST_CONTEXTUAL_FOREIGN_ALLOWED",
+            preferred_source_jurisdictions=["US"],
+            foreign_source_context_required=True,
+            allowed_market_contexts=["US", "CA", "GB", "AU"],
+            prohibited_market_mismatches=[
+                "TRANSLATED_SOUNDING_ENGLISH",
+                "NON_US_CURRENCY_WITHOUT_USD_EQUIVALENT",
+                "FOREIGN_LEGAL_ASSUMPTION_WITHOUT_CONTEXT",
+                "WRONG_VOICE_LOCALE",
+                "WRONG_METADATA_LOCALE",
+                "WRONG_THUMBNAIL_LOCALE",
+            ],
+            initial_publish_window_hypotheses=[
+                {
+                    "timezone": "America/New_York",
+                    "days": ["TUE", "SAT"],
+                    "local_time": "10:00",
+                    "status": "HYPOTHESIS_ONLY",
+                }
+            ],
+            minimum_comparable_videos=3,
+            video_geo_evaluation_window_days=7,
+            channel_geo_review_window_days=30,
+            target_market="US",
+            actual_viewer_geography_state="UNMEASURED",
+            approval_ref="operator-approval://qualification/strict-long-form",
+        )
+        market_digest = TargetMarketDigestCompiler().compile(market_profile)
+        destination = DestinationBinding(
+            binding_version=1,
+            channel_id=channel.id,
+            channel_key=channel.key,
+            platform="YOUTUBE",
+            channel_handle="@QualificationLongForm",
+            target_market_profile_ref=market_digest.profile_ref,
+            target_market_profile_hash=str(market_profile.content_hash),
+            target_market="US",
+            primary_market="US",
+            primary_locale="en-US",
+            original_language="en",
+            default_visibility="PRIVATE",
+            manual_publish_required=True,
+            destination_status="PENDING_PLATFORM_ID",
+            verification_state="PENDING",
+            approval_ref="operator-approval://qualification/strict-long-form",
+        )
+        policy_payload = deepcopy(base_policy.model_dump(mode="json"))
+        policy_payload.update(
+            {
+                "policy_version": f"{channel.key}.qualification-policy.v3",
+                "approval_ref": "operator-approval://qualification/strict-long-form",
+                "visual_source_policy_binding": compiler._qualified_visual_source_binding().model_dump(
+                    mode="json"
+                ),
+                "target_market_profile": market_profile.model_dump(mode="json"),
+                "target_market_digest": market_digest.model_dump(mode="json"),
+                "market_alignment_policy": {
+                    "required_gate_order": [item.value for item in MARKET_GATE_STRICT_ORDER]
+                },
+                "destination_binding_policy": {
+                    "destination": destination.model_dump(mode="json")
+                },
+                "market_package_freeze_policy": {
+                    "required_preconditions": [
+                        "TechnicalMediaQC.PASS",
+                        "CreativeHumanReview.PASS",
+                        "MarketAlignmentDossier.PASS",
+                        "DestinationBinding.VERIFIED",
+                        "PublishRiskDossier.PASS",
+                        "ExactPackageHumanApproval.PASS",
+                        "PostApprovalIntegrity.PASS",
+                    ],
+                    "frozen_fields": [
+                        "media_file_and_hash",
+                        "thumbnail_and_hash",
+                        "title",
+                        "description",
+                        "captions",
+                        "disclosures",
+                        "destination_binding",
+                        "target_market_profile",
+                        "publish_window",
+                        "package_hash",
+                    ],
+                },
+                "publish_timing_localization_policy": {
+                    "caption_locales": ["en-US"]
+                },
+                "geo_evaluation_policy": {
+                    "minimum_comparable_videos": 3,
+                    "video_level_evaluation_window_days": 7,
+                    "channel_review_window_days": 30,
+                },
+            }
+        )
+        policy = ChannelScopedPolicy.model_validate(policy_payload)
+        profile_payload = ChannelProfileInput.model_validate(
+            active_profile.profile_input
+        ).model_dump(mode="json")
+        profile_payload["channel_policy"] = policy.model_dump(mode="json")
+        strict_profile = ChannelProfileService(self.session).create_profile_version(
+            channel_id=channel.id,
+            data=ChannelProfileVersionCreate(
+                profile_input=ChannelProfileInput.model_validate(profile_payload),
+                created_by=admin.id,
+            ),
+        )
+        compiled = compiler.compile(
+            profile_version_id=strict_profile.id,
+            correlation_id=f"qualification-strict-compile-{uuid.uuid4().hex[:8]}",
+        )
+        profiles = ChannelProfileService(self.session)
+        profiles.submit_for_approval(strict_profile.id)
+        profiles.approve_profile_version(
+            profile_version_id=strict_profile.id,
+            approved_by=admin.id,
+            approval_ref="operator-approval://qualification/strict-long-form",
+        )
+        snapshot = profiles.activate_snapshot(snapshot_id=compiled.snapshot_id)
+        profile = profiles.get_profile_version(strict_profile.id)
+        assert profile is not None
+        return profile, snapshot, compiled
 
     def m2_project(self, *, scope_name: str = "M2") -> SimpleNamespace:
         scope = self.channel_scope(name=scope_name)
