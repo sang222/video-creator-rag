@@ -1247,6 +1247,7 @@ class LearningAuthorityService:
             select(PlatformEnforcementIncident.id).where(
                 PlatformEnforcementIncident.channel_workspace_id
                 == fingerprint.channel_workspace_id,
+                PlatformEnforcementIncident.company_id == fingerprint.company_id,
                 PlatformEnforcementIncident.state == "OPEN",
                 PlatformEnforcementIncident.freeze_learning.is_(True),
             )
@@ -1626,6 +1627,7 @@ class BusinessMonitoringService:
         rows = list(
             self.session.scalars(
                 select(RevenueSnapshot).where(
+                    RevenueSnapshot.company_id == company_id,
                     RevenueSnapshot.channel_workspace_id == channel_workspace_id,
                     RevenueSnapshot.period_start >= period_start,
                     RevenueSnapshot.period_end <= period_end,
@@ -1684,6 +1686,7 @@ class BusinessMonitoringService:
         digest = _hash(payload)
         existing = self.session.scalar(
             select(ChannelPnlSnapshot).where(
+                ChannelPnlSnapshot.company_id == company_id,
                 ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id,
                 ChannelPnlSnapshot.period_start == period_start,
                 ChannelPnlSnapshot.period_end == period_end,
@@ -1766,6 +1769,7 @@ class BusinessMonitoringService:
             select(MonetizationAccountStatus)
             .where(
                 MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
+                MonetizationAccountStatus.company_id == company_id,
                 MonetizationAccountStatus.platform == "YOUTUBE",
             )
             .order_by(MonetizationAccountStatus.version_number.desc())
@@ -1778,7 +1782,10 @@ class BusinessMonitoringService:
         pnl = list(
             self.session.scalars(
                 select(ChannelPnlSnapshot)
-                .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
+                .where(
+                    ChannelPnlSnapshot.company_id == company_id,
+                    ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id,
+                )
                 .order_by(ChannelPnlSnapshot.period_end.desc())
                 .limit(2)
             ).all()
@@ -1787,6 +1794,7 @@ class BusinessMonitoringService:
             select(PlatformEnforcementIncident.id).where(
                 PlatformEnforcementIncident.channel_workspace_id
                 == channel_workspace_id,
+                PlatformEnforcementIncident.company_id == company_id,
                 PlatformEnforcementIncident.state == "OPEN",
                 PlatformEnforcementIncident.severity.in_({"HIGH", "CRITICAL"}),
             )
@@ -1854,6 +1862,7 @@ class BusinessMonitoringService:
         existing = self.session.scalar(
             select(SelfFundingAssessment).where(
                 SelfFundingAssessment.channel_workspace_id == channel_workspace_id,
+                SelfFundingAssessment.company_id == company_id,
                 SelfFundingAssessment.assessment_window_end == assessment_window_end,
                 SelfFundingAssessment.policy_version == policy_version,
             )
@@ -1878,19 +1887,25 @@ class BusinessMonitoringService:
         return row
 
     def continuation_recommendation(
-        self, *, channel_workspace_id: uuid.UUID
+        self, *, company_id: uuid.UUID, channel_workspace_id: uuid.UUID
     ) -> dict[str, Any]:
         """Project a review action; never executes a kill or pivot decision."""
 
         assessment = self.session.scalar(
             select(SelfFundingAssessment)
-            .where(SelfFundingAssessment.channel_workspace_id == channel_workspace_id)
+            .where(
+                SelfFundingAssessment.company_id == company_id,
+                SelfFundingAssessment.channel_workspace_id == channel_workspace_id,
+            )
             .order_by(SelfFundingAssessment.assessment_window_end.desc())
         )
         pnl = list(
             self.session.scalars(
                 select(ChannelPnlSnapshot)
-                .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
+                .where(
+                    ChannelPnlSnapshot.company_id == company_id,
+                    ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id,
+                )
                 .order_by(ChannelPnlSnapshot.period_end.desc())
                 .limit(2)
             ).all()
@@ -1899,6 +1914,7 @@ class BusinessMonitoringService:
             select(PlatformEnforcementIncident.id).where(
                 PlatformEnforcementIncident.channel_workspace_id
                 == channel_workspace_id,
+                PlatformEnforcementIncident.company_id == company_id,
                 PlatformEnforcementIncident.state == "OPEN",
                 PlatformEnforcementIncident.severity.in_({"HIGH", "CRITICAL"}),
             )
@@ -1938,7 +1954,8 @@ class BusinessMonitoringService:
         """Persist a recommendation for human review; never enact a strategy change."""
 
         projection = self.continuation_recommendation(
-            channel_workspace_id=channel_workspace_id
+            company_id=company_id,
+            channel_workspace_id=channel_workspace_id,
         )
         payload = {
             "schema_version": policy_version,
@@ -2082,6 +2099,7 @@ class BusinessMonitoringService:
         row.resolution_summary = summary
         row.resolved_at = utc_now()
         self._resolve_actions(
+            company_id=row.company_id,
             channel_workspace_id=row.channel_workspace_id,
             action_type="REVIEW_ENFORCEMENT",
             target_ref=f"platform-enforcement://{row.id}",
@@ -2375,7 +2393,8 @@ class BusinessMonitoringService:
         monetization = self.session.scalar(
             select(MonetizationAccountStatus)
             .where(
-                MonetizationAccountStatus.channel_workspace_id == channel_workspace_id
+                MonetizationAccountStatus.company_id == company_id,
+                MonetizationAccountStatus.channel_workspace_id == channel_workspace_id,
             )
             .order_by(MonetizationAccountStatus.version_number.desc())
         )
@@ -2386,12 +2405,18 @@ class BusinessMonitoringService:
         )
         pnl = self.session.scalar(
             select(ChannelPnlSnapshot)
-            .where(ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id)
+            .where(
+                ChannelPnlSnapshot.company_id == company_id,
+                ChannelPnlSnapshot.channel_workspace_id == channel_workspace_id,
+            )
             .order_by(ChannelPnlSnapshot.period_end.desc())
         )
         self_funding = self.session.scalar(
             select(SelfFundingAssessment)
-            .where(SelfFundingAssessment.channel_workspace_id == channel_workspace_id)
+            .where(
+                SelfFundingAssessment.company_id == company_id,
+                SelfFundingAssessment.channel_workspace_id == channel_workspace_id,
+            )
             .order_by(SelfFundingAssessment.assessment_window_end.desc())
         )
         open_count = int(
@@ -2399,6 +2424,7 @@ class BusinessMonitoringService:
                 select(func.count(PlatformEnforcementIncident.id)).where(
                     PlatformEnforcementIncident.channel_workspace_id
                     == channel_workspace_id,
+                    PlatformEnforcementIncident.company_id == company_id,
                     PlatformEnforcementIncident.state == "OPEN",
                 )
             )
@@ -2408,6 +2434,7 @@ class BusinessMonitoringService:
             self.session.scalars(
                 select(BusinessActionItem)
                 .where(
+                    BusinessActionItem.company_id == company_id,
                     or_(
                         BusinessActionItem.channel_workspace_id == channel_workspace_id,
                         BusinessActionItem.channel_workspace_id.is_(None),
@@ -2475,6 +2502,7 @@ class BusinessMonitoringService:
         }
         existing = self.session.scalar(
             select(BusinessActionItem).where(
+                BusinessActionItem.company_id == company_id,
                 (
                     BusinessActionItem.channel_workspace_id.is_(None)
                     if channel_workspace_id is None
@@ -2564,6 +2592,7 @@ class BusinessMonitoringService:
     def _resolve_actions(
         self,
         *,
+        company_id: uuid.UUID,
         channel_workspace_id: uuid.UUID | None,
         action_type: str,
         target_ref: str,
@@ -2571,6 +2600,7 @@ class BusinessMonitoringService:
     ) -> None:
         for item in self.session.scalars(
             select(BusinessActionItem).where(
+                BusinessActionItem.company_id == company_id,
                 (
                     BusinessActionItem.channel_workspace_id.is_(None)
                     if channel_workspace_id is None
@@ -2595,6 +2625,7 @@ class BusinessMonitoringService:
             "PAYMENT_STATUS_STALE_OR_UNTRUSTED",
         }
         self._resolve_actions(
+            company_id=row.company_id,
             channel_workspace_id=None,
             action_type="RESOLVE_PAYMENT_PROFILE",
             target_ref=target_ref,
@@ -2622,6 +2653,7 @@ class BusinessMonitoringService:
             "MONETIZATION_STATUS_STALE_OR_UNTRUSTED",
         }
         self._resolve_actions(
+            company_id=row.company_id,
             channel_workspace_id=row.channel_workspace_id,
             action_type="RESOLVE_MONETIZATION_ACCOUNT",
             target_ref=target_ref,
@@ -2643,6 +2675,7 @@ class BusinessMonitoringService:
         target_ref = f"business-disclosure://{row.publish_package_ref}"
         reasons = set(row.reason_codes)
         self._resolve_actions(
+            company_id=row.company_id,
             channel_workspace_id=row.channel_workspace_id,
             action_type="REMEDIATE_DISCLOSURE",
             target_ref=target_ref,
@@ -2650,6 +2683,7 @@ class BusinessMonitoringService:
                 item.reason_code
                 for item in self.session.scalars(
                     select(BusinessActionItem).where(
+                        BusinessActionItem.company_id == row.company_id,
                         BusinessActionItem.channel_workspace_id
                         == row.channel_workspace_id,
                         BusinessActionItem.action_type == "REMEDIATE_DISCLOSURE",

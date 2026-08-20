@@ -1120,7 +1120,10 @@ def test_business_pnl_uses_cost_events_and_review_actions_are_human_gated(
         )
     )
     db.flush()
-    projection = service.continuation_recommendation(channel_workspace_id=channel_id)
+    projection = service.continuation_recommendation(
+        company_id=company_id,
+        channel_workspace_id=channel_id,
+    )
     assert projection["action"] == "PIVOT"
     assert projection["human_decision_required"] is True
 
@@ -1182,6 +1185,41 @@ def test_closeout_records_are_strictly_channel_isolated(db: Session) -> None:
         playlist_refs=[],
     )
     assert delivery_b.channel_workspace_id == channel_b
+    business = BusinessMonitoringService(db)
+    now = utc_now()
+    other_company = uuid.uuid4()
+    business.record_payment_status(
+        company_id=company_id,
+        payee_ref="payee://a",
+        tax_state="PENDING",
+        address_verification_state="VERIFIED",
+        payment_method_state="READY",
+        payment_hold_state="NONE",
+        source_type="OPERATOR_ATTESTATION",
+        source_ref="payment://a/pending",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=30),
+    )
+    business.record_payment_status(
+        company_id=other_company,
+        payee_ref="payee://b",
+        tax_state="VERIFIED",
+        address_verification_state="VERIFIED",
+        payment_method_state="READY",
+        payment_hold_state="NONE",
+        source_type="OPERATOR_ATTESTATION",
+        source_ref="payment://b/ready",
+        confidence_state="HIGH",
+        source_updated_at=now,
+        valid_until=now + timedelta(days=30),
+    )
+    dashboard_b = business.dashboard(
+        company_id=other_company,
+        channel_workspace_id=channel_b,
+    )
+    assert dashboard_b.payment_state == "READY"
+    assert "PAYMENT_TAX_VERIFICATION_REQUIRED" not in dashboard_b.next_actions
     audit = ArchitectureDebtAuditService().code_isolation_proof(
         ArchitectureDebtAuditService().audit(Path(__file__).parents[1])
     )
