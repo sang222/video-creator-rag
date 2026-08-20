@@ -145,6 +145,10 @@ def _flow_with_current_topic(session):
     flow = QualificationFactory(session).m5_admitted_project(mock_mode="blocked")
     candidate = flow.candidate
     candidate.stage = "GREENLIT"
+    # This helper promotes a historical blocked candidate solely to exercise
+    # current runway eligibility.  Keep its quality authority consistent with
+    # that state so the active-policy predicate is what the test measures.
+    candidate.quality_state = "PASS"
     subject = candidate.proposed_title
     evidence_id = str(candidate.evidence_refs[0]["id"])
     topic = TopicDefinitionService(session).create(

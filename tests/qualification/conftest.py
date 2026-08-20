@@ -36,6 +36,15 @@ from app.contracts.m5 import (
 )
 from app.contracts.ofv0 import FormatIdentityContractDraftRequest
 from app.contracts.vcos_v2 import AssignmentMode, LongFormPlanningRequest
+from app.contracts.voice_authority import (
+    ApprovedVoicePoolCreate,
+    NarrationMarketRequirements,
+    ProviderVoiceCandidate,
+    VoiceMarketIdentity,
+    VoiceMarketResearchCreate,
+    VoiceProviderCatalogCreate,
+    VoiceResearchEvidence,
+)
 from app.core.actor import authenticated_actor_context
 from app.contracts.r3d1 import ContentCategoryCreate
 from app.contracts.m6 import ProductionArtifactRunCreate
@@ -76,6 +85,7 @@ from app.services.geo_market import TargetMarketDigestCompiler
 from app.services.production_package import ChannelDurationContractResolver
 from app.services.ofv0 import FormatIdentityContractService
 from app.services.vcos_v2 import LongFormPlanningService
+from app.services.voice_authority import VoiceAuthorityService
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -391,9 +401,141 @@ class QualificationFactory:
             snapshot_id=successor.id,
             correlation_id="qualification-strict-long-form-successor-activate",
         )
+        self._seed_strict_long_form_voice_authority(
+            channel=channel,
+            profile=active_profile,
+            snapshot=active_snapshot,
+            admin=admin,
+        )
         return active_profile, active_snapshot, SimpleNamespace(
             snapshot_id=successor.id,
             content_hash=successor.content_hash,
+        )
+
+    def _seed_strict_long_form_voice_authority(
+        self,
+        *,
+        channel,
+        profile,
+        snapshot,
+        admin,
+    ) -> None:
+        """Seed complete fixture-only voice authority for the active successor.
+
+        The strict fixture deliberately activates a new immutable policy
+        snapshot.  Voice execution resolves only a pool bound to that exact
+        snapshot, so the synthetic test authority must be created after the
+        successor is active rather than inherited from the superseded policy.
+        """
+
+        evidence_hash = content_hash(
+            {
+                "fixture": "qualification-strict-long-form-voice-authority",
+                "policy_snapshot_id": str(snapshot.id),
+            }
+        )
+        narration_modes = [
+            "TECHNICAL_EXPLAINER",
+            "ANALYTICAL",
+            "TACTICAL",
+            "STORY_CASE_STUDY",
+            "DOCUMENTARY",
+            "CAUTIONARY",
+        ]
+        voice = ProviderVoiceCandidate(
+            voice_id="qualification-us-narrator",
+            display_name="Qualification US Narrator",
+            language_tags=["en"],
+            locale_tags=["en-US"],
+            accent_tags=["GENERAL_AMERICAN"],
+            narration_mode_fit=narration_modes,
+            market_fit_tags=["US"],
+            clarity_score=90,
+            energy_score=72,
+            warmth_score=70,
+            authority_score=88,
+            conversationality_score=76,
+            approved_model_ids=["eleven_multilingual_v2"],
+            default_model_id="eleven_multilingual_v2",
+            default_settings={
+                "speed": 1.0,
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+                "style": 0.0,
+                "use_speaker_boost": True,
+            },
+            safe_setting_bounds={
+                "speed": {"min": 0.7, "max": 1.2},
+                "stability": {"min": 0.0, "max": 1.0},
+                "similarity_boost": {"min": 0.0, "max": 1.0},
+                "style": {"min": 0.0, "max": 1.0},
+            },
+            commercial_use_state="APPROVED",
+            availability_state="AVAILABLE",
+            priority=100,
+            evidence_refs=["fixture://qualification/voice-market-research"],
+        )
+        service = VoiceAuthorityService(self.session)
+        research = service.create_market_research(
+            VoiceMarketResearchCreate(
+                company_id=channel.company_id,
+                channel_workspace_id=channel.id,
+                channel_profile_version_id=profile.id,
+                policy_snapshot_id=snapshot.id,
+                market_identity=VoiceMarketIdentity(
+                    primary_market="US",
+                    target_countries=["US"],
+                    content_language="en",
+                    locale="en-US",
+                    audience_profile={"segment": "small professional teams"},
+                    channel_positioning="evidence-first automation explainers",
+                ),
+                requirements=NarrationMarketRequirements(
+                    accent_families=["GENERAL_AMERICAN"],
+                    pronunciation_locale="en-US",
+                    pacing_profile="MEDIUM",
+                    energy_profile="MEDIUM",
+                    authority_profile="HIGH",
+                    warmth_profile="MEDIUM",
+                    conversationality_profile="MEDIUM",
+                    required_narration_modes=narration_modes,
+                ),
+                evidence=[
+                    VoiceResearchEvidence(
+                        evidence_id="qualification-voice-market-research",
+                        source_title="Qualification strict long-form policy",
+                        source_class="CHANNEL_POLICY",
+                        excerpt="Synthetic test-only voice authority bound to the active policy.",
+                        source_hash=evidence_hash,
+                    )
+                ],
+                confidence_label="HIGH",
+                created_by_user_id=admin.id,
+            )
+        )
+        catalog = service.create_provider_catalog(
+            VoiceProviderCatalogCreate(
+                company_id=channel.company_id,
+                channel_workspace_id=channel.id,
+                provider="elevenlabs",
+                catalog_version="qualification-strict-long-form.v1",
+                voices=[voice],
+                source_refs=["fixture://qualification/voice-provider-catalog"],
+                created_by_user_id=admin.id,
+            )
+        )
+        service.create_approved_pool(
+            ApprovedVoicePoolCreate(
+                company_id=channel.company_id,
+                channel_workspace_id=channel.id,
+                channel_profile_version_id=profile.id,
+                policy_snapshot_id=snapshot.id,
+                voice_market_research_id=research.id,
+                provider_catalog_snapshot_id=catalog.id,
+                version=1,
+                voices=[voice],
+                approved_by_user_id=admin.id,
+            )
         )
 
     def m2_project(self, *, scope_name: str = "M2") -> SimpleNamespace:
