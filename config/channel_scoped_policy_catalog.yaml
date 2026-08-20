@@ -123,8 +123,12 @@ items:
       channel_stage: NEW_UNPROVEN
       tier: TIER_1_LOW_COST_PRODUCTION
       currency: USD
-      max_estimated_cost_per_video: 1.0
-      max_actual_cost_per_video: 1.0
+      # The package ceiling includes the one bounded Veo clip plus required
+      # narration, alignment, and AI-image authority.  The $1 Veo sub-cap
+      # remains intact; a $1 package cap could not truthfully authorize that
+      # required combined path.
+      max_estimated_cost_per_video: 2.0
+      max_actual_cost_per_video: 2.0
       max_paid_attempts_per_provider_per_video: 1
       max_veo_clips_per_video: 1
       max_veo_seconds_per_video: 8

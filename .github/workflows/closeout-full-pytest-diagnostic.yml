@@ -34,8 +34,8 @@ jobs:
       VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
       # Non-secret, reviewed fixture prices let real-production planning paths
       # freeze their combined-cost authority without enabling provider calls.
-      VCOS_ELEVENLABS_TTS_COST_PER_CHARACTER_USD: "0.010000"
-      VCOS_ELEVENLABS_FORCED_ALIGNMENT_COST_USD: "0.250000"
+      VCOS_ELEVENLABS_TTS_COST_PER_CHARACTER_USD: "0.000100"
+      VCOS_ELEVENLABS_FORCED_ALIGNMENT_COST_USD: "0.050000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
