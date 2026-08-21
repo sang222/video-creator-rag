@@ -60,6 +60,7 @@ BUILTIN_GATE_KEYS = [
     "production_assignment_integrity_gate",
     "production_duration_contract_gate",
     "production_editorial_depth_gate",
+    "production_editorial_authorship_gate",
     "production_anti_padding_gate",
     "production_script_integrity_gate",
     "production_visual_metadata_gate",
@@ -964,6 +965,7 @@ def _evaluate_gate(
         "production_assignment_integrity_gate": _production_assignment_integrity_gate,
         "production_duration_contract_gate": _production_duration_contract_gate,
         "production_editorial_depth_gate": _production_editorial_depth_gate,
+        "production_editorial_authorship_gate": _production_editorial_authorship_gate,
         "production_anti_padding_gate": _production_anti_padding_gate,
         "production_script_integrity_gate": _production_script_integrity_gate,
         "production_visual_metadata_gate": _production_visual_metadata_gate,
@@ -1151,6 +1153,51 @@ def _production_editorial_depth_gate(
             "supported_claim_count": supported_claims,
             "distinct_editorial_section_count": sections,
             "research_coverage_ratio": coverage,
+        },
+    )
+
+
+def _production_editorial_authorship_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, _evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    raw_contract = content.get("editorial_authorship")
+    if not isinstance(raw_contract, dict):
+        return _production_block(
+            snapshot,
+            "EDITORIAL_AUTHORSHIP_CONTRACT_REQUIRED",
+        )
+    try:
+        from app.contracts.editorial_authorship import EditorialAuthorshipContract
+
+        contract = EditorialAuthorshipContract.model_validate(raw_contract)
+    except (TypeError, ValueError):
+        return _production_block(
+            snapshot,
+            "EDITORIAL_AUTHORSHIP_CONTRACT_INVALID",
+        )
+    readiness_hash = (_evidence or {}).get("authorship_contract_hash")
+    if readiness_hash != contract.content_hash:
+        return _production_block(
+            snapshot,
+            "EDITORIAL_AUTHORSHIP_HASH_MISMATCH",
+        )
+    return _production_pass(
+        snapshot,
+        "EDITORIAL_AUTHORSHIP_PASS",
+        evidence=[
+            {
+                "type": "editorial_authorship_contract",
+                "ref": f"editorial-authorship://{contract.content_hash}",
+                "content_hash": contract.content_hash,
+            }
+        ],
+        basis={
+            "law_version": contract.schema_version,
+            "source_role": contract.source_role,
+            "viewer_facing_law_hash": contract.viewer_facing_presentation.content_hash,
         },
     )
 
@@ -2222,6 +2269,12 @@ def _reason_refs_for_gate(gate_key: str) -> list[str]:
         "production_editorial_depth_gate": [
             "EDITORIAL_DEPTH_PASS",
             "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH",
+        ],
+        "production_editorial_authorship_gate": [
+            "EDITORIAL_AUTHORSHIP_PASS",
+            "EDITORIAL_AUTHORSHIP_CONTRACT_REQUIRED",
+            "EDITORIAL_AUTHORSHIP_CONTRACT_INVALID",
+            "EDITORIAL_AUTHORSHIP_HASH_MISMATCH",
         ],
         "production_anti_padding_gate": [
             "ANTI_PADDING_PASS",

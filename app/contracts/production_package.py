@@ -13,6 +13,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.editorial_authorship import EditorialAuthorshipContract
 from app.contracts.vcos_v2 import (
     AssignmentMode,
     ContentMode,
@@ -74,6 +75,11 @@ class ProductionReadinessEvidenceV2(BaseModel):
     rights_disclosure_gates_pass: bool
     provider_plan_valid: bool
     budget_scope_valid: bool
+    # Optional for immutable historical packages; current v2 package builders
+    # always bind the global authorship contract below.
+    authorship_contract_hash: str | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
     package_integrity_inputs_complete: bool = True
     unresolved_exception_types: list[
         Literal["RIGHTS", "EVIDENCE", "POLICY", "SECURITY"]
@@ -124,6 +130,9 @@ class ProductionPackageContentV2(BaseModel):
     episode_role: str | None = None
     standalone_reason_code: str | None = None
     duration_contract: ProductionDurationContractV2
+    # Historical package rows predate Card D and remain readable.  Current
+    # publishable v2 packages must carry this contract and pass its gate.
+    editorial_authorship: EditorialAuthorshipContract | None = None
     # Optional only so already-sealed Phase 3 package payloads remain readable.
     # The canonical Phase 4+ compiler always binds this exact authority.
     support_envelope_ref: ExactContentRefV2 | None = None
@@ -168,6 +177,12 @@ class ProductionPackageContentV2(BaseModel):
                 raise ValueError("PRODUCTION_PACKAGE_AI_VISUAL_POLICY_INVALID")
         elif self.active_primary_visual_routes:
             raise ValueError("PRODUCTION_PACKAGE_AI_VISUAL_POLICY_PARTIAL")
+        if (
+            self.editorial_authorship is not None
+            and self.readiness_evidence.authorship_contract_hash
+            != self.editorial_authorship.content_hash
+        ):
+            raise ValueError("PRODUCTION_PACKAGE_AUTHORSHIP_HASH_MISMATCH")
         if self.content_mode == ContentMode.SERIES_EPISODE:
             if (
                 self.series_plan_id is None
@@ -268,6 +283,9 @@ class ProductionReadinessReceiptContentV2(BaseModel):
     # Mirrors the package's immutable audience/intent/launch authority.
     strategic_lineage: StrategicLineageV2 | None = None
     duration_contract_hash: str = Field(pattern=SHA256_PATTERN)
+    editorial_authorship_hash: str | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
     required_gate_runs: list[GateRunBindingV2] = Field(min_length=1)
     research_evidence_refs: list[ExactContentRefV2] = Field(min_length=1)
     rights_evidence_refs: list[ExactContentRefV2] = Field(min_length=1)

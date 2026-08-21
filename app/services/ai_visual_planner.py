@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from app.contracts.editorial_authorship import validate_viewer_facing_presentation
 from app.contracts.ai_visual_production import (
     AIVisualCapabilityProjection,
     AIVisualNarrationUnit,
@@ -80,6 +82,18 @@ def _scene_function_key(value: str) -> str:
     return value.strip().upper().replace("-", "_").replace(" ", "_")
 
 
+def _authored_scene_semantic_key(scene: AIVisualScenePlan) -> str:
+    """Return only authored scene bindings used for deterministic presentation."""
+
+    return ai_visual_stable_hash(
+        {
+            "narration_unit_ids": scene.narration_unit_ids,
+            "information_unit_ids": scene.information_unit_ids,
+            "visual_function": scene.visual_function,
+        }
+    )
+
+
 def _maximum_scene_duration_ms(
     unit: AIVisualNarrationUnit,
     policy: AIVisualPlanningPolicy,
@@ -98,7 +112,7 @@ def _transition_for_reason(
     reason: str,
     grammar: VideoMotionGrammar,
     *,
-    ordinal: int,
+    semantic_key: str | None = None,
 ) -> TransitionPreset:
     semantic_candidates: dict[str, tuple[TransitionPreset, ...]] = {
         "CONTINUATION": ("cut", "dissolve", "fade_soft"),
@@ -122,10 +136,20 @@ def _transition_for_reason(
     candidates = semantic_candidates.get(reason, ("cut",))
     compatible = [candidate for candidate in candidates if candidate in allowed]
     if compatible:
-        return compatible[(ordinal - 1) % len(compatible)]
+        # Ordinal is retained as a compatibility argument, but never creates
+        # variation.  Variation may only come from the authored semantic
+        # identity of the scene, which keeps repeated semantic transitions
+        # from becoming a mechanical preset loop.
+        if semantic_key:
+            digest = hashlib.sha256(semantic_key.encode("utf-8")).digest()
+            return compatible[int.from_bytes(digest[:4], "big") % len(compatible)]
+        return compatible[0]
     if "cut" in allowed:
         return "cut"
-    return allowed[(ordinal - 1) % len(allowed)]
+    if semantic_key:
+        digest = hashlib.sha256(semantic_key.encode("utf-8")).digest()
+        return allowed[int.from_bytes(digest[:4], "big") % len(allowed)]
+    return allowed[0]
 
 
 def _motion_function(scene: AIVisualScenePlan) -> MotionFunction:
@@ -170,8 +194,6 @@ def _subject_anchor(scene: AIVisualScenePlan) -> tuple[SubjectAnchor, Normalized
 
 def _image_motion_choice(
     scene: AIVisualScenePlan,
-    *,
-    previous_preset: str | None = None,
 ) -> tuple[CameraMotion, str, float, float, MotionFunction]:
     function = _motion_function(scene)
     anchor, _ = _subject_anchor(scene)
@@ -220,10 +242,11 @@ def _image_motion_choice(
             ("DRIFT_UP", "drift_up_soft", 1.035, 1.04),
             ("PULL_OUT", "pullout_slow", 1.05, 1.0),
         ]
-    selected_index = (scene.ordinal - 1) % len(candidates)
-    selected = candidates[selected_index]
-    if selected[1] == previous_preset and len(candidates) > 1:
-        selected = candidates[(selected_index + 1) % len(candidates)]
+    # A scene ordinal or anti-repeat heuristic cannot authorize a visual
+    # change.  Deterministic variation is derived only from authored scene
+    # bindings; repeated presets remain valid when those bindings repeat.
+    semantic_key = _authored_scene_semantic_key(scene)
+    selected = candidates[int(semantic_key[:8], 16) % len(candidates)]
     return (*selected, function)
 
 
@@ -770,21 +793,21 @@ class MotionIntentPlanner:
         transition_in = _transition_for_reason(
             scene_plan.transition_semantic_reason,
             motion_grammar,
-            ordinal=scene_plan.ordinal,
+            semantic_key=_authored_scene_semantic_key(scene_plan),
         )
-        if scene_plan.ordinal == 1:
+        if previous_projection is None:
             transition_in = "cut"
         transition_out = (
             _transition_for_reason(
                 next_scene_plan.transition_semantic_reason,
                 motion_grammar,
-                ordinal=scene_plan.ordinal + 1,
+                semantic_key=_authored_scene_semantic_key(next_scene_plan),
             )
             if next_scene_plan is not None
             else _transition_for_reason(
-                "CONCLUSION",
+                scene_plan.transition_semantic_reason,
                 motion_grammar,
-                ordinal=scene_plan.ordinal,
+                semantic_key=_authored_scene_semantic_key(scene_plan),
             )
         )
         if scene_plan.production_route == "AI_VIDEO":
@@ -797,14 +820,21 @@ class MotionIntentPlanner:
             camera_motion, motion_preset, start_scale, end_scale, function = (
                 _image_motion_choice(
                     scene_plan,
-                    previous_preset=(
-                        previous_projection.motion_preset
-                        if previous_projection
-                        else None
-                    ),
                 )
             )
             semantic_reason = f"Use {motion_preset} to {function.lower()} the narrated meaning without generating primary visual content."
+        validate_viewer_facing_presentation(
+            [
+                {
+                    "outcome": "HOLD" if function == "HOLD" else "CHANGE",
+                    "editorial_reason": semantic_reason,
+                    "editorial_authority_ref": (
+                        "scene-plan-semantic://"
+                        + _authored_scene_semantic_key(scene_plan)
+                    ),
+                }
+            ]
+        )
         safe_crop = NormalizedRegion(x=0.04, y=0.04, width=0.92, height=0.92)
         body: dict[str, Any] = {
             "schema_version": "vcos.motion-intent-projection.v1",

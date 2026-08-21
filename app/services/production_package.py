@@ -64,6 +64,7 @@ REQUIRED_PRODUCTION_GATE_KEYS = (
     "production_assignment_integrity_gate",
     "production_duration_contract_gate",
     "production_editorial_depth_gate",
+    "production_editorial_authorship_gate",
     "production_anti_padding_gate",
     "production_script_integrity_gate",
     "production_visual_metadata_gate",
@@ -909,6 +910,11 @@ class ProductionReadinessService:
             compiled_policy_snapshot_hash=package_content.compiled_policy_snapshot_hash,
             strategic_lineage=package_content.strategic_lineage,
             duration_contract_hash=package_content.duration_contract.duration_contract_hash,
+            editorial_authorship_hash=(
+                package_content.editorial_authorship.content_hash
+                if package_content.editorial_authorship is not None
+                else None
+            ),
             required_gate_runs=gate_bindings,
             research_evidence_refs=package_content.research_refs,
             rights_evidence_refs=package_content.rights_disclosure_refs,
@@ -1110,6 +1116,8 @@ def _package_semantic_payload(
         payload.pop("support_envelope_ref", None)
     if content.strategic_lineage is None:
         payload.pop("strategic_lineage", None)
+    if getattr(content, "editorial_authorship", None) is None:
+        payload.pop("editorial_authorship", None)
     if (
         content.production_visual_policy_version is None
         and content.production_visual_policy_ref is None
@@ -1133,6 +1141,8 @@ def _readiness_receipt_semantic_payload(
         payload.pop("support_envelope_ref", None)
     if content.strategic_lineage is None:
         payload.pop("strategic_lineage", None)
+    if content.editorial_authorship_hash is None:
+        payload.pop("editorial_authorship_hash", None)
     return payload
 
 
