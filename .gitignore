@@ -25,6 +25,7 @@ tests/*
 !tests/test_v2_veo_visual_provider.py
 !tests/test_ai_visual_planner.py
 !tests/test_editorial_authorship.py
+!tests/test_canonical_semantic_language.py
 !tests/test_native_motion_compiler_v2.py
 !tests/test_v2_ai_visual_renderer.py
 !tests/test_v2_ai_visual_workflow_integration.py

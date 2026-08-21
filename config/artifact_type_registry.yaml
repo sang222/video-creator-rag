@@ -9,6 +9,8 @@ items:
     description: Research package artifact allowance.
   - key: source_pack
     description: Source package artifact allowance.
+  - key: project_semantic_snapshot
+    description: Immutable Card E rich semantic snapshot with versioned profile and format provenance.
   - key: v2_frozen_support_envelope
     description: Immutable domain-only v2 planning, script, rights, route, budget, and destination authority.
   - key: script
