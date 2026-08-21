@@ -21,6 +21,20 @@ The local thumbnail/caption effect hash and the provider component receipt are s
 
 There is no active Drive dependency: the active candidate must reference checksum-verified local/archive bytes. Drive remains readable only for historical compatibility.
 
+## Durable human wait
+
+When the exact staged video and channel read back successfully but remain
+`PRIVATE`, the observer records no error and returns a dedicated
+`WAITING_FOR_HUMAN_PUBLIC` settlement. The observation event stays pending,
+its lease is cleared, and `next_attempt_at` is scheduled at the existing
+delivery backoff cap. `attempt_count` remains the truthful number of event
+executions; `human_wait_count` records expected waiting cycles separately.
+
+Technical readback failures use a separate `technical_failure_count` and keep
+the existing bounded retry/dead-letter policy. Human delay alone therefore
+cannot exhaust that budget or dead-letter the observer, while rejected,
+blocked, stale, or superseded stages remain ineligible for publication.
+
 ## Operator surface
 
 The cockpit exposes the actual staged Studio URL and the next action to review it. It does not render the legacy UPLOAD/DO_NOT_UPLOAD decision or manual publication-confirmation form for the active lane. The only public action is the human’s action in YouTube Studio. VCOS then observes and reconciles the result.

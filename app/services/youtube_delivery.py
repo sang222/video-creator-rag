@@ -101,6 +101,10 @@ _DELIVERY_EVENT_NAMESPACE = uuid.UUID("a33d093f-9f24-5938-a75a-9379b391fc81")
 
 YOUTUBE_PRIVATE_STAGE_EVENT_TYPE = "YOUTUBE_PRIVATE_STAGE_EXECUTION_REQUESTED"
 YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE = "YOUTUBE_PUBLICATION_OBSERVATION_REQUESTED"
+YOUTUBE_PUBLICATION_NOT_YET_PUBLIC = "YOUTUBE_PUBLICATION_NOT_YET_PUBLIC"
+YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED = (
+    "YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED"
+)
 TELEGRAM_DELIVERY_EVENT_TYPE = "TELEGRAM_DELIVERY_NOTIFICATION_REQUESTED"
 LOCAL_MEDIA_PURGE_EVENT_TYPE = "LOCAL_MEDIA_PURGE_REQUESTED"
 YOUTUBE_PRIVATE_STAGE_AGGREGATE_TYPE = "youtube_private_stage"
@@ -114,6 +118,13 @@ DELIVERY_EVENT_TYPES = frozenset(
         LOCAL_MEDIA_PURGE_EVENT_TYPE,
     }
 )
+
+
+class YouTubePublicationWaitingForHuman(Exception):
+    """The exact staged video is still private and awaits human PUBLIC."""
+
+    def __init__(self) -> None:
+        super().__init__(YOUTUBE_PUBLICATION_NOT_YET_PUBLIC)
 
 
 def _hash(payload: Mapping[str, Any]) -> str:
@@ -2751,7 +2762,7 @@ class YouTubePublicPublicationObserver:
             )
         except Exception as exc:
             raise ValidationFailureError(
-                "YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED"
+                YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED
             ) from exc
 
         snippet = dict(observed.get("snippet") or {})
@@ -2788,9 +2799,9 @@ class YouTubePublicPublicationObserver:
             if stage.state != "PRIVATE_VERIFIED":
                 raise ValidationFailureError("YOUTUBE_PUBLICATION_OBSERVATION_NOT_ALLOWED")
             if privacy != "PUBLIC":
-                stage.last_error_code = "YOUTUBE_PUBLICATION_NOT_YET_PUBLIC"
+                stage.last_error_code = None
                 session.commit()
-                raise ValidationFailureError("YOUTUBE_PUBLICATION_NOT_YET_PUBLIC")
+                raise YouTubePublicationWaitingForHuman()
             published_at = _parse_provider_datetime(snippet.get("publishedAt"))
             if published_at is None:
                 stage.state = "BLOCKED"

@@ -4,6 +4,7 @@ import hashlib
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
 from typing import get_args
@@ -18,6 +19,7 @@ from app.contracts.production_publish import UploadedVideoReadV2
 from app.contracts.youtube_delivery import ResumableUploadStatus
 from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
+from app.db.models.foundation import DomainEvent
 from app.db.models.youtube_delivery import (
     YouTubeComponentAttempt,
     YouTubeComponentReceipt,
@@ -25,6 +27,7 @@ from app.db.models.youtube_delivery import (
     YouTubeUploadAttempt,
 )
 from app.services.config_registry import ConfigRegistryService, content_hash
+from app.services.outbox_dispatcher import DurableOutboxDispatcher, HumanWaitDisposition
 from app.services.youtube_delivery import (
     LocalSessionSecretStore,
     ResolvedMediaBytes,
@@ -34,6 +37,7 @@ from app.services.youtube_delivery import (
     _normalize_youtube_readback,
     _youtube_insert_body,
     _validate_public_release_observation,
+    YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE,
 )
 
 
@@ -87,6 +91,43 @@ def _insert_stage(session: Session, *, label: str) -> YouTubePrivateStage:
     session.execute(text("SET session_replication_role = origin"))
     session.commit()
     return stage
+
+
+def _insert_public_observation_event(
+    session: Session, *, stage: YouTubePrivateStage, label: str, max_attempts: int
+) -> DomainEvent:
+    event_id = uuid.uuid5(
+        uuid.NAMESPACE_URL, f"youtube-public-observation-event:{label}"
+    )
+    event = DomainEvent(
+        id=event_id,
+        event_type=YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE,
+        event_version=1,
+        aggregate_type="youtube_private_stage",
+        aggregate_id=stage.id,
+        company_id=stage.company_id,
+        channel_workspace_id=stage.channel_workspace_id,
+        correlation_id=f"youtube-public-observation:{stage.id}",
+        causation_id=stage.id,
+        command_id=f"youtube-public-observation:{label}",
+        payload={
+            "youtube_private_stage_id": str(stage.id),
+            "stage_identity_hash": stage.identity_hash,
+        },
+        metadata_={
+            "queue": "production-workflow",
+            "delivery_authority": True,
+            "at_most_once": True,
+        },
+        max_attempts=max_attempts,
+        next_attempt_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    session.execute(text("SET session_replication_role = replica"))
+    session.add(event)
+    session.flush()
+    session.execute(text("SET session_replication_role = origin"))
+    session.commit()
+    return event
 
 
 class _SuccessfulUploadTransport:
@@ -658,3 +699,116 @@ def test_concurrent_component_write_is_fail_closed(
         release.set()
         first.result(timeout=15)
     assert calls == ["called"]
+
+
+def test_still_private_is_durable_human_wait_without_failure_budget_exhaustion(
+    db_session: Session,
+) -> None:
+    now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    stage = _insert_stage(db_session, label="durable-human-wait")
+    event = _insert_public_observation_event(
+        db_session, stage=stage, label="durable-human-wait", max_attempts=1
+    )
+    dispatcher = DurableOutboxDispatcher(
+        db_session,
+        backoff_base_seconds=5,
+        backoff_cap_seconds=900,
+        now=lambda: now[0],
+    )
+
+    for expected_wait_count in range(1, 5):
+        claim = dispatcher.claim_next(worker_id="human-wait-worker")
+        assert claim is not None
+        disposition = dispatcher.defer_human_public_wait(
+            event_id=event.id,
+            worker_id="human-wait-worker",
+        )
+        db_session.commit()
+        db_session.refresh(event)
+
+        assert disposition.wait_count == expected_wait_count
+        assert event.attempt_count == expected_wait_count
+        assert event.delivered_at is None
+        assert event.dead_lettered_at is None
+        assert event.metadata_["waiting_semantic"] == "WAITING_FOR_HUMAN_PUBLIC"
+        assert event.metadata_["human_wait_count"] == expected_wait_count
+        assert event.next_attempt_at == now[0] + timedelta(seconds=900)
+        now[0] = event.next_attempt_at + timedelta(seconds=1)
+
+
+def test_not_yet_public_code_defers_instead_of_entering_delivery_failure_budget(
+    db_session: Session,
+) -> None:
+    now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    stage = _insert_stage(db_session, label="not-yet-public-deferral")
+    event = _insert_public_observation_event(
+        db_session, stage=stage, label="not-yet-public-deferral", max_attempts=1
+    )
+    dispatcher = DurableOutboxDispatcher(db_session, now=lambda: now[0])
+    claim = dispatcher.claim_next(worker_id="not-yet-public-worker")
+    assert claim is not None
+
+    disposition = dispatcher.record_failure(
+        event_id=event.id,
+        worker_id="not-yet-public-worker",
+        error=ValidationFailureError("YOUTUBE_PUBLICATION_NOT_YET_PUBLIC"),
+    )
+    db_session.commit()
+    db_session.refresh(event)
+
+    assert isinstance(disposition, HumanWaitDisposition)
+    assert disposition.wait_count == 1
+    assert event.attempt_count == 1
+    assert event.metadata_["human_wait_count"] == 1
+    assert event.metadata_.get("technical_failure_count", 0) == 0
+    assert event.last_error_code is None
+    assert event.dead_lettered_at is None
+    assert event.next_attempt_at > now[0]
+
+
+def test_readback_failures_remain_bounded_after_human_wait(
+    db_session: Session,
+) -> None:
+    now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    stage = _insert_stage(db_session, label="bounded-after-human-wait")
+    event = _insert_public_observation_event(
+        db_session, stage=stage, label="bounded-after-human-wait", max_attempts=2
+    )
+    dispatcher = DurableOutboxDispatcher(
+        db_session,
+        backoff_base_seconds=5,
+        backoff_cap_seconds=900,
+        now=lambda: now[0],
+    )
+
+    first_claim = dispatcher.claim_next(worker_id="bounded-worker")
+    assert first_claim is not None
+    dispatcher.defer_human_public_wait(
+        event_id=event.id,
+        worker_id="bounded-worker",
+    )
+    db_session.commit()
+    db_session.refresh(event)
+    now[0] = event.next_attempt_at + timedelta(seconds=1)
+
+    for expected_failure_count in (1, 2):
+        claim = dispatcher.claim_next(worker_id="bounded-worker")
+        assert claim is not None
+        disposition = dispatcher.record_failure(
+            event_id=event.id,
+            worker_id="bounded-worker",
+            error=ValidationFailureError(
+                "YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED"
+            ),
+        )
+        db_session.commit()
+        db_session.refresh(event)
+        assert event.metadata_["technical_failure_count"] == expected_failure_count
+        if expected_failure_count == 1:
+            assert disposition.retry_scheduled is True
+            assert disposition.dead_letter_job_id is None
+            now[0] = event.next_attempt_at + timedelta(seconds=1)
+        else:
+            assert disposition.retry_scheduled is False
+            assert disposition.dead_letter_job_id is not None
+            assert event.dead_lettered_at is not None
