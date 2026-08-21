@@ -1983,11 +1983,11 @@ def _require_uploaded(session: Session, uploaded_video_id: uuid.UUID) -> Uploade
         else None
     )
     if (
-        uploaded.schema_version not in {"v2", "v3"}
+        uploaded.schema_version not in {"v2", "v3", "v4"}
         or uploaded.actual_visibility != "PUBLIC"
         or uploaded.published_at is None
         or (
-            uploaded.schema_version == "v3"
+            uploaded.schema_version in {"v3", "v4"}
             and (
                 receipt is None
                 or receipt.observed_privacy_status != "PUBLIC"

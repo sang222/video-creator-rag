@@ -31,7 +31,7 @@ from app.services.runtime_migration_guard import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HEAD = "0090_learning_reassessment"
+HEAD = "0091_youtube_publication_v2"
 RUNTIME_MINIMUM = "0079_ai_visual"
 HASH_A = "a" * 64
 HASH_B = "b" * 64

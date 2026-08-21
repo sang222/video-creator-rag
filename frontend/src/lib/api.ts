@@ -45,7 +45,8 @@ import type {
   TargetMarketProfileDraft,
   VideoPackageReview,
   UploadedVideoOpsSummary,
-  UploadedVideoLedgerList
+  UploadedVideoLedgerList,
+  YouTubePrivateStage
 } from "./types";
 
 export const apiBaseUrl = process.env.NEXT_PUBLIC_VCOS_API_BASE_URL ?? "http://localhost:8000";
@@ -232,6 +233,20 @@ export function decideFinalVideo(
         decision,
         warnings_acknowledged: warningsAcknowledged
       })
+    }
+  );
+}
+
+export function reviewYoutubePrivateStage(
+  stageId: string,
+  disposition: "REJECT" | "NEEDS_RERENDER",
+  reason: string
+) {
+  return request<YouTubePrivateStage>(
+    `/youtube-private-stages/${stageId}/review`,
+    {
+      method: "POST",
+      body: JSON.stringify({ disposition, reason })
     }
   );
 }

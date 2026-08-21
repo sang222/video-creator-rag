@@ -11,12 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { FinalReviewSurface } from "@/features/production/final-review-surface";
 import { ManualPublishSurface } from "@/features/production/manual-publish-surface";
+import { PrivatePublicationSurface } from "@/features/production/private-publication-surface";
 import { ProductionCockpitCard } from "@/features/production/production-cockpit-card";
 import {
   correctManualPublishConfirmation,
   decideFinalVideo,
   getProductionCockpit,
   queryKeys,
+  reviewYoutubePrivateStage,
   startManualUpload,
   submitManualPublishConfirmation
 } from "@/lib/api";
@@ -95,6 +97,29 @@ export function ProductionPublishingView() {
     onError: () =>
       setNotice("Chưa thể ghi nhận kết quả publish; mismatch vẫn được giữ nguyên.")
   });
+  const privateStageMutation = useMutation({
+    mutationFn: ({
+      disposition,
+      reason
+    }: {
+      disposition: "REJECT" | "NEEDS_RERENDER";
+      reason: string;
+    }) => {
+      const stage = query.data?.youtube_private_stage;
+      if (!stage) throw new Error("YOUTUBE_PRIVATE_STAGE_NOT_READY");
+      return reviewYoutubePrivateStage(stage.stage_id, disposition, reason);
+    },
+    onSuccess: async (_result, variables) => {
+      setNotice(
+        variables.disposition === "REJECT"
+          ? "Đã ghi nhận reject. Stage cũ vẫn giữ nguyên làm bằng chứng lịch sử."
+          : "Đã ghi nhận needs rerender. Hãy tạo replacement package mới theo workflow được quản lý."
+      );
+      await refresh();
+    },
+    onError: () =>
+      setNotice("Chưa thể ghi nhận disposition. Stage và lịch sử vẫn được giữ nguyên.")
+  });
 
   if (query.isLoading) {
     return (
@@ -125,6 +150,9 @@ export function ProductionPublishingView() {
   }
 
   const cockpit = query.data;
+  const privatePublicationMode = Boolean(
+    cockpit.private_publication_mode || cockpit.youtube_private_stage
+  );
   const projectId = cockpit.next_video?.project_id;
   const warningCodes = technicalStrings(
     cockpit.final_review?.technical_appendix.warning_codes
@@ -133,11 +161,19 @@ export function ProductionPublishingView() {
   return (
     <div className="space-y-8 p-4 md:p-8">
       <PageHeader
-        title="Xem video & publish thủ công"
+        title={
+          privatePublicationMode
+            ? "Xem YouTube PRIVATE & cutover PUBLIC"
+            : "Xem video & publish thủ công"
+        }
         subtitle={cockpit.safety_notice}
         breadcrumbs={[
           { label: "Trung tâm", href: "/" },
-          { label: "Publish thủ công" }
+          {
+            label: privatePublicationMode
+              ? "YouTube PRIVATE staging"
+              : "Publish thủ công"
+          }
         ]}
         primaryAction={
           projectId ? (
@@ -164,14 +200,22 @@ export function ProductionPublishingView() {
 
       {cockpit.final_review ? (
         <FinalReviewSurface
-          busyDecision={decisionMutation.variables?.decision ?? null}
-          onDecision={(decision) =>
-            decisionMutation.mutate({
-              candidateId: cockpit.final_review!.candidate_id,
-              decision,
-              warningCodes
-            })
+          busyDecision={
+            privatePublicationMode
+              ? null
+              : decisionMutation.variables?.decision ?? null
           }
+          onDecision={
+            privatePublicationMode
+              ? undefined
+              : (decision) =>
+                  decisionMutation.mutate({
+                    candidateId: cockpit.final_review!.candidate_id,
+                    decision,
+                    warningCodes
+                  })
+          }
+          privateStage={privatePublicationMode}
           review={cockpit.final_review}
         />
       ) : (
@@ -192,7 +236,25 @@ export function ProductionPublishingView() {
         />
       )}
 
-      {cockpit.manual_publish ? (
+      {cockpit.youtube_private_stage ? (
+        <PrivatePublicationSurface
+          busy={privateStageMutation.variables?.disposition ?? null}
+          onReview={(disposition, reason) =>
+            privateStageMutation.mutate({ disposition, reason })
+          }
+          stage={cockpit.youtube_private_stage}
+        />
+      ) : privatePublicationMode ? (
+        <Panel className="border-primary/35">
+          <h2 className="text-lg font-semibold">YouTube PRIVATE staging đang chờ</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            QC PASS đã chuyển package vào luồng staging tự động. Chưa có hành động
+            upload hoặc quyết định UPLOAD thủ công cần thực hiện.
+          </p>
+        </Panel>
+      ) : null}
+
+      {cockpit.manual_publish && !privatePublicationMode ? (
         <ManualPublishSurface
           busyAction={publishMutation.variables?.action ?? null}
           expectedDurationSeconds={cockpit.final_review?.media.duration_seconds}

@@ -591,13 +591,13 @@ class LongFormAnalyticsScheduler:
             else None
         )
         if (
-            uploaded.schema_version not in {"v2", "v3"}
+            uploaded.schema_version not in {"v2", "v3", "v4"}
             or uploaded.actual_visibility != "PUBLIC"
             or uploaded.production_lane != "LONG_FORM"
             or uploaded.content_mode not in {"SERIES_EPISODE", "STANDALONE"}
             or any(value is None for value in required)
             or (
-                uploaded.schema_version == "v3"
+                uploaded.schema_version in {"v3", "v4"}
                 and (
                     publication_receipt is None
                     or publication_receipt.observed_privacy_status != "PUBLIC"

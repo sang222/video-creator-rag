@@ -4,6 +4,8 @@ You are Codex acting as a Principal Production Reliability Engineer, YouTube Dat
 
 Your task is to execute the local-only closeout for VCOS PR #3 after the code PR is reviewed. This is not an architecture redesign. Repository code, runtime database state, and immutable receipts are the authority.
 
+> Historical compatibility note: this PR #3 canary predates Card C. Its `FinalVideoDecision=UPLOAD` and operator-controlled staging steps describe the legacy lane only. The active lane is candidate-bound automatic PRIVATE staging followed by human Studio PUBLIC and read-only observed-public reconciliation; do not use this document to reintroduce a pre-private UPLOAD gate or manual publication-confirmation form.
+
 ## 0. Non-negotiable boundaries
 
 1. Work only in `sang222/video-creator-rag` on the reviewed PR #3 head or its merged `main` descendant.

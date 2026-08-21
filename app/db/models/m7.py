@@ -532,7 +532,7 @@ class UploadedVideo(Base):
             name="uq_uploaded_videos_public_receipt",
         ),
         CheckConstraint(
-            "schema_version in ('v1','v2','v3')",
+            "schema_version in ('v1','v2','v3','v4')",
             name="ck_uploaded_videos_schema_version",
         ),
         CheckConstraint(
@@ -544,7 +544,42 @@ class UploadedVideo(Base):
             name="ck_uploaded_videos_v3_public_receipt",
         ),
         CheckConstraint(
-            "(schema_version = 'v1') or "
+            "(schema_version <> 'v4') or "
+            "(public_publication_receipt_id is not null "
+            "and final_video_decision_id is null "
+            "and manual_publish_confirmation_id is null "
+            "and human_upload_task_id is null "
+            "and final_review_candidate_id is not null "
+            "and video_project_id is not null "
+            "and policy_snapshot_id is not null "
+            "and final_media_ref_id is not null "
+            "and production_package_artifact_version_id is not null "
+            "and production_package_hash ~ '^[0-9a-f]{64}$' "
+            "and channel_profile_version_id is not null "
+            "and reviewed_checksum ~ '^[0-9a-f]{64}$' "
+            "and destination_binding_id is not null "
+            "and destination_binding_fingerprint ~ '^[0-9a-f]{64}$' "
+            "and production_lane = 'LONG_FORM' "
+            "and content_mode in ('SERIES_EPISODE','STANDALONE') "
+            "and target_market_lineage is not null "
+            "and archive_supplement is not null "
+            "and archive_supplement_ref is not null "
+            "and archive_supplement_hash ~ '^[0-9a-f]{64}$' "
+            "and platform_video_id is not null "
+            "and video_url is not null "
+            "and published_at is not null "
+            "and actual_publish_time is not null "
+            "and actual_visibility = 'PUBLIC' "
+            "and publish_status = 'OBSERVED_PUBLIC' "
+            "and verification_status = 'VERIFIED' "
+            "and analytics_sync_status = 'READY' "
+            "and verified_event_id is not null "
+            "and analytics_ready_event_id is not null "
+            "and analytics_ready_at is not null)",
+            name="ck_uploaded_videos_v4_public_receipt",
+        ),
+        CheckConstraint(
+            "(schema_version in ('v1','v4')) or "
             "(video_project_id is not null "
             "and policy_snapshot_id is not null "
             "and manual_publish_confirmation_id is not null "

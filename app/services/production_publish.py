@@ -675,10 +675,16 @@ class ProductionPublishService:
         self.session.flush()
         from app.services.youtube_delivery import TelegramDeliveryService
 
-        TelegramDeliveryService(self.session).prepare(
-            candidate_id=candidate.id,
-            notification_kind="FINAL_REVIEW_READY",
+        active_private_stage = (
+            candidate.target_platform == "YOUTUBE"
+            and candidate.publish_metadata_snapshot.get("delivery_mode")
+            == "YOUTUBE_PRIVATE_STAGE"
         )
+        if not active_private_stage:
+            TelegramDeliveryService(self.session).prepare(
+                candidate_id=candidate.id,
+                notification_kind="FINAL_REVIEW_READY",
+            )
         self.session.flush()
         return candidate
 
@@ -724,6 +730,12 @@ class ProductionPublishService:
             company_id=candidate.company_id,
         )
         self._assert_candidate_current(candidate)
+        if (
+            candidate.target_platform == "YOUTUBE"
+            and candidate.publish_metadata_snapshot.get("delivery_mode")
+            == "YOUTUBE_PRIVATE_STAGE"
+        ):
+            raise ConflictError("FINAL_VIDEO_DECISION_RETIRED_FOR_PRIVATE_STAGE")
         if data.decision == FinalVideoDecisionValue.UPLOAD:
             self._require_candidate_publish_enabled(candidate)
 
@@ -1198,6 +1210,222 @@ class ProductionPublishService:
     # ------------------------------------------------------------------
     # Deterministic observable verification and exactly-once effects.
     # ------------------------------------------------------------------
+    def materialize_publication_from_receipt(
+        self,
+        *,
+        candidate: FinalReviewCandidate,
+        stage: Any,
+        receipt: Any,
+    ) -> UploadedVideo:
+        """Project the active private-cutover receipt into downstream truth."""
+
+        existing = self.session.scalar(
+            select(UploadedVideo).where(
+                UploadedVideo.public_publication_receipt_id == receipt.id
+            )
+        )
+        if existing is not None:
+            if (
+                existing.final_review_candidate_id != candidate.id
+                or existing.platform_video_id != receipt.platform_video_id
+            ):
+                raise ConflictError("UPLOADED_VIDEO_PUBLIC_RECEIPT_LINEAGE_CONFLICT")
+            return existing
+        if (
+            stage.state != "PUBLICATION_VERIFIED"
+            or stage.final_review_candidate_id != candidate.id
+            or receipt.youtube_private_stage_id != stage.id
+            or receipt.final_review_candidate_id != candidate.id
+            or receipt.observed_privacy_status != "PUBLIC"
+            or receipt.platform_video_id != stage.platform_video_id
+            or receipt.platform_channel_id != candidate.destination_platform_channel_id
+        ):
+            raise ValidationFailureError("UPLOADED_VIDEO_PUBLIC_RECEIPT_LINEAGE_INVALID")
+        policy_snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, candidate.policy_snapshot_id
+        )
+        if (
+            policy_snapshot is None
+            or policy_snapshot.channel_workspace_id != candidate.channel_workspace_id
+            or policy_snapshot.channel_profile_version_id
+            != candidate.channel_profile_version_id
+        ):
+            raise ValidationFailureError("PUBLICATION_POLICY_SNAPSHOT_AUTHORITY_MISMATCH")
+
+        uploaded_id = uuid.uuid5(
+            _EVENT_NAMESPACE, f"active-publication:{receipt.id}"
+        )
+        verified_event_id = _event_id(uploaded_id, "UPLOADED_VIDEO_VERIFIED")
+        analytics_event_id = _event_id(uploaded_id, "ANALYTICS_READY")
+        observed = dict(receipt.observed_metadata or {})
+        archive_supplement = {
+            "schema_version": "vcos.publish-archive-supplement.active-v1",
+            "prior_archive_receipt": {
+                "ref": candidate.archive_receipt_ref,
+                "hash": candidate.archive_receipt_hash,
+                "state": candidate.archive_verification_state,
+                "archive_object_ref": candidate.archive_object_ref,
+            },
+            "youtube_private_stage": {
+                "id": str(stage.id),
+                "identity_hash": stage.identity_hash,
+                "final_media_checksum": stage.final_media_checksum,
+                "staging_metadata_hash": stage.staging_metadata_hash,
+                "public_release_expectation_hash": stage.public_release_expectation_hash,
+            },
+            "public_publication_receipt": {
+                "id": str(receipt.id),
+                "receipt_hash": receipt.receipt_hash,
+                "verification_evidence_ref": receipt.verification_evidence_ref,
+                "verification_evidence_hash": receipt.verification_evidence_hash,
+            },
+        }
+        archive_supplement_hash = stable_hash(archive_supplement)
+        archive_supplement_ref = (
+            f"archive-supplement://uploaded-video/{uploaded_id}/{archive_supplement_hash}"
+        )
+        strategic_lineage = self._require_uploaded_video_strategic_lineage(
+            candidate=candidate
+        )
+        event_payload = {
+            "uploaded_video_id": str(uploaded_id),
+            "video_project_id": str(candidate.video_project_id),
+            "final_review_candidate_id": str(candidate.id),
+            "public_publication_receipt_id": str(receipt.id),
+            "public_publication_receipt_hash": receipt.receipt_hash,
+            "youtube_private_stage_id": str(stage.id),
+            "platform_channel_id": receipt.platform_channel_id,
+            "platform_video_id": receipt.platform_video_id,
+            "production_package_artifact_version_id": str(
+                candidate.production_package_artifact_version_id
+            ),
+            "production_package_hash": candidate.production_package_hash,
+            "destination_binding_id": str(candidate.destination_binding_id),
+            "destination_binding_fingerprint": candidate.destination_binding_fingerprint,
+            "production_lane": candidate.production_lane,
+            "content_mode": candidate.content_mode,
+            "series_plan_id": _optional_uuid(candidate.series_plan_id),
+            "series_run_id": _optional_uuid(candidate.series_run_id),
+            "episode_number": candidate.episode_number,
+            "active_public_cutover": True,
+        }
+        if strategic_lineage is not None:
+            event_payload["strategic_lineage"] = strategic_lineage
+        self._append_event_once(
+            event_id=verified_event_id,
+            event_type="UPLOADED_VIDEO_VERIFIED",
+            aggregate_id=uploaded_id,
+            company_id=candidate.company_id,
+            correlation_id=str(receipt.id),
+            causation_id=receipt.id,
+            payload=event_payload,
+        )
+        self._append_event_once(
+            event_id=analytics_event_id,
+            event_type="ANALYTICS_READY",
+            aggregate_id=uploaded_id,
+            company_id=candidate.company_id,
+            correlation_id=str(receipt.id),
+            causation_id=verified_event_id,
+            payload=event_payload,
+        )
+        uploaded = UploadedVideo(
+            id=uploaded_id,
+            company_id=candidate.company_id,
+            channel_workspace_id=candidate.channel_workspace_id,
+            video_project_id=candidate.video_project_id,
+            policy_snapshot_id=candidate.policy_snapshot_id,
+            publish_handoff_package_id=None,
+            manual_publish_confirmation_id=None,
+            render_package_snapshot_id=None,
+            first_scripted_video_package_id=None,
+            human_upload_task_id=None,
+            destination=candidate.target_platform,
+            destination_binding_id=candidate.destination_binding_id,
+            destination_binding_fingerprint=candidate.destination_binding_fingerprint,
+            market_policy_hash=_market_hash(candidate.target_market_lineage),
+            approved_package_hash=candidate.production_package_hash,
+            source_manifest_snapshot_id=None,
+            rights_envelope_ref=_rights_ref(candidate.target_market_lineage),
+            platform=candidate.target_platform,
+            platform_video_id=receipt.platform_video_id,
+            video_url=receipt.public_url,
+            published_at=receipt.observed_published_at,
+            publish_status="OBSERVED_PUBLIC",
+            actual_metadata=observed,
+            actual_disclosures=dict(candidate.disclosure_snapshot or {}),
+            lineage_refs=event_payload,
+            monitoring_state="NOT_STARTED",
+            operator_summary={
+                "status": "PUBLICATION_VERIFIED",
+                "next_action": "ANALYTICS_SYNC",
+                "exact_remote_bytes_unavailable": True,
+            },
+            actual_title=observed.get("title"),
+            actual_visibility="PUBLIC",
+            actual_publish_time=receipt.observed_published_at,
+            actual_upload_time=stage.private_verified_at,
+            playlist_id=None,
+            thumbnail_uploaded=None,
+            subtitles_uploaded=None,
+            description_modified_from_package=(
+                observed.get("description")
+                != candidate.publish_metadata_snapshot.get("description")
+            ),
+            package_metadata_diff={},
+            verification_status="VERIFIED",
+            analytics_sync_status="READY",
+            last_verified_at=utc_now(),
+            operator_note=(
+                "Public visibility observed from the exact private stage. "
+                "No API publication or remote delete was performed by VCOS."
+            ),
+            schema_version="v4",
+            public_publication_receipt_id=receipt.id,
+            final_review_candidate_id=candidate.id,
+            final_video_decision_id=None,
+            final_media_ref_id=candidate.final_media_ref_id,
+            production_package_artifact_version_id=(
+                candidate.production_package_artifact_version_id
+            ),
+            production_package_hash=candidate.production_package_hash,
+            channel_profile_version_id=candidate.channel_profile_version_id,
+            reviewed_checksum=candidate.final_media_hash,
+            production_lane=candidate.production_lane,
+            content_mode=candidate.content_mode,
+            series_plan_id=candidate.series_plan_id,
+            series_run_id=candidate.series_run_id,
+            episode_number=candidate.episode_number,
+            standalone_reason_code=candidate.standalone_reason_code,
+            target_market_lineage=dict(candidate.target_market_lineage),
+            archive_supplement=archive_supplement,
+            archive_supplement_ref=archive_supplement_ref,
+            archive_supplement_hash=archive_supplement_hash,
+            verified_event_id=verified_event_id,
+            analytics_ready_event_id=analytics_event_id,
+            analytics_ready_at=utc_now(),
+        )
+        self.session.add(uploaded)
+        self.session.flush()
+        from app.services.remaining_debt_closeout import RemainingDebtCloseoutCoordinator
+
+        closeout_projection = RemainingDebtCloseoutCoordinator(self.session).on_publication_verified(
+            candidate=candidate,
+            public_receipt=receipt,
+            observed_at=receipt.observed_published_at,
+            compiled_policy_snapshot_hash=policy_snapshot.content_hash,
+        )
+        uploaded.lineage_refs = {
+            **dict(uploaded.lineage_refs or {}),
+            "remaining_debt_closeout": closeout_projection,
+        }
+        uploaded.operator_summary = {
+            **dict(uploaded.operator_summary or {}),
+            "closeout_projection": "RECORDED",
+        }
+        LongFormAnalyticsScheduler(self.session).schedule_uploaded_video(uploaded.id)
+        return uploaded
+
     def verify_confirmation(
         self,
         *,
@@ -1528,7 +1756,7 @@ class ProductionPublishService:
         actor: ActorContext,
     ) -> UploadedVideo:
         uploaded = self.session.get(UploadedVideo, uploaded_id)
-        if uploaded is None or uploaded.schema_version not in {"v2", "v3"}:
+        if uploaded is None or uploaded.schema_version not in {"v2", "v3", "v4"}:
             raise NotFoundError(f"canonical uploaded video not found: {uploaded_id}")
         require_company_permission(
             self.session,

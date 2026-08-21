@@ -53,7 +53,11 @@ from app.services.production_workflow import (
     semantic_hash,
 )
 from app.services.stale_workflow_recovery import STALE_WORKFLOW_RECOVERY_EVENT_TYPE
-from app.services.youtube_delivery import DELIVERY_EVENT_TYPES
+from app.services.youtube_delivery import (
+    DELIVERY_EVENT_TYPES,
+    YOUTUBE_PUBLICATION_NOT_YET_PUBLIC,
+    YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE,
+)
 
 
 DEFAULT_QUEUE_NAME = "production-workflow"
@@ -98,6 +102,13 @@ class FailureDisposition:
     dead_letter_job_id: uuid.UUID | None
     incident_id: uuid.UUID | None
     workflow_canceled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class HumanWaitDisposition:
+    event_id: uuid.UUID
+    next_attempt_at: datetime
+    wait_count: int
 
 
 class DurableOutboxDispatcher:
@@ -248,7 +259,7 @@ class DurableOutboxDispatcher:
                             summary="scheduler command identity or payload is invalid",
                         )
                     continue
-                if event.attempt_count >= event.max_attempts:
+                if self._claim_budget_exhausted(event):
                     if qualification_event:
                         qualification = self.session.get(
                             ScriptQualificationRun, event.aggregate_id
@@ -300,7 +311,7 @@ class DurableOutboxDispatcher:
                 if run.state == ProductionWorkflowState.CANCELED.value:
                     self._settle_canceled_event(event, now=now)
                     continue
-                if event.attempt_count >= event.max_attempts:
+                if self._claim_budget_exhausted(event):
                     failure = WorkflowStageError(
                         classification=(
                             WorkflowFailureClassification.AUTO_RETRY_WITHIN_POLICY
@@ -418,7 +429,7 @@ class DurableOutboxDispatcher:
             return None
         if event.command_id is None or not isinstance(event.payload, dict):
             raise ConflictError("SCOPED_EVENT_IDENTITY_INVALID")
-        if event.attempt_count >= event.max_attempts:
+        if self._claim_budget_exhausted(event):
             raise ConflictError("SCOPED_EVENT_RETRY_BUDGET_EXHAUSTED")
 
         run = (
@@ -532,13 +543,62 @@ class DurableOutboxDispatcher:
         self.session.flush()
         return event
 
+    def defer_human_public_wait(
+        self, *, event_id: uuid.UUID, worker_id: str
+    ) -> HumanWaitDisposition:
+        """Keep a staged-public observation pending without treating it as failure.
+
+        ``attempt_count`` remains the truthful number of event executions.  The
+        separate ``human_wait_count`` metadata records expected waiting cycles,
+        while ``technical_failure_count`` remains the bounded retry budget for
+        actual provider/readback failures.
+        """
+
+        now = self.now()
+        event = self._lock_owned_event(
+            event_id=event_id, worker_id=worker_id, allow_expired=True
+        )
+        if event.event_type != YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE:
+            raise ConflictError("HUMAN_PUBLIC_WAIT_EVENT_TYPE_INVALID")
+        return self._defer_human_public_wait_locked(event, now=now)
+
+    def _defer_human_public_wait_locked(
+        self, event: DomainEvent, *, now: datetime
+    ) -> HumanWaitDisposition:
+        metadata = dict(event.metadata_ or {})
+        wait_count = self._metadata_count(metadata, "human_wait_count") + 1
+        next_attempt_at = now + timedelta(
+            seconds=self.human_wait_delay_seconds(wait_count)
+        )
+        metadata.update(
+            {
+                "waiting_semantic": "WAITING_FOR_HUMAN_PUBLIC",
+                "human_wait_count": wait_count,
+                "human_wait_last_observed_at": now.isoformat(),
+                "human_wait_next_observation_at": next_attempt_at.isoformat(),
+            }
+        )
+        event.metadata_ = metadata
+        event.next_attempt_at = next_attempt_at
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        event.last_error_code = None
+        event.last_error_summary = None
+        self.session.flush()
+        return HumanWaitDisposition(
+            event_id=event.id,
+            next_attempt_at=next_attempt_at,
+            wait_count=wait_count,
+        )
+
     def record_failure(
         self,
         *,
         event_id: uuid.UUID,
         worker_id: str,
         error: WorkflowStageError | Exception,
-    ) -> FailureDisposition:
+    ) -> FailureDisposition | HumanWaitDisposition:
         """Normalize a failure into retry, block, terminal, or dead-letter state."""
 
         now = self.now()
@@ -551,6 +611,12 @@ class DurableOutboxDispatcher:
             allow_expired=True,
         )
         if event.event_type in DELIVERY_EVENT_TYPES:
+            code = (str(error).split(":", 1)[0] or type(error).__name__)[:160]
+            if (
+                event.event_type == YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE
+                and code == YOUTUBE_PUBLICATION_NOT_YET_PUBLIC
+            ):
+                return self._defer_human_public_wait_locked(event, now=now)
             return self._record_delivery_failure(
                 event=event,
                 error=error,
@@ -679,6 +745,7 @@ class DurableOutboxDispatcher:
             "YOUTUBE_PROCESSING_PENDING",
             "YOUTUBE_UPLOAD_INCOMPLETE",
             "YOUTUBE_UPLOAD_RECONCILIATION_REQUIRED",
+            "YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED",
             "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED",
         }
         event.last_error_code = code
@@ -686,9 +753,29 @@ class DurableOutboxDispatcher:
         event.lease_owner = None
         event.lease_expires_at = None
         event.heartbeat_at = None
-        if code in retryable_codes and event.attempt_count < event.max_attempts:
+        durable_observation = self._uses_durable_human_wait(event)
+        technical_failure_count = self._metadata_count(
+            event.metadata_ or {}, "technical_failure_count"
+        )
+        if code in retryable_codes and durable_observation:
+            technical_failure_count += 1
+            metadata = dict(event.metadata_ or {})
+            metadata["technical_failure_count"] = technical_failure_count
+            metadata["waiting_semantic"] = None
+            event.metadata_ = metadata
+        attempts_remain = (
+            technical_failure_count < event.max_attempts
+            if durable_observation
+            else event.attempt_count < event.max_attempts
+        )
+        if code in retryable_codes and attempts_remain:
+            delay_attempt = (
+                technical_failure_count
+                if durable_observation
+                else event.attempt_count
+            )
             event.next_attempt_at = now + timedelta(
-                seconds=self.retry_delay_seconds(event.attempt_count)
+                seconds=self.retry_delay_seconds(delay_attempt)
             )
             self.session.flush()
             return FailureDisposition(
@@ -864,6 +951,35 @@ class DurableOutboxDispatcher:
             self.backoff_base_seconds * (2 ** (attempt_number - 1)),
         )
 
+    def human_wait_delay_seconds(self, wait_count: int) -> int:
+        """Use the existing delivery backoff cap as the human-wait cadence."""
+
+        if wait_count < 1:
+            raise ValueError("wait_count must be positive")
+        return self.backoff_cap_seconds
+
+    @staticmethod
+    def _metadata_count(metadata: dict[str, Any], key: str) -> int:
+        try:
+            return max(0, int(metadata.get(key, 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _uses_durable_human_wait(cls, event: DomainEvent) -> bool:
+        if event.event_type != YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE:
+            return False
+        metadata = event.metadata_ or {}
+        return "human_wait_count" in metadata or "technical_failure_count" in metadata
+
+    @classmethod
+    def _claim_budget_exhausted(cls, event: DomainEvent) -> bool:
+        if cls._uses_durable_human_wait(event):
+            return cls._metadata_count(
+                event.metadata_ or {}, "technical_failure_count"
+            ) >= event.max_attempts
+        return event.attempt_count >= event.max_attempts
+
     def retry_dead_letter(
         self,
         *,
@@ -905,6 +1021,7 @@ class DurableOutboxDispatcher:
             in {
                 ProductionWorkflowState.CANCELED.value,
                 ProductionWorkflowState.FINAL_REVIEW_READY.value,
+                ProductionWorkflowState.PUBLICATION_VERIFIED.value,
             }
         ):
             raise ConflictError("DEAD_LETTER_NOT_RETRYABLE")
@@ -1798,6 +1915,7 @@ TERMINAL_STATES_FOR_RECLAIM = frozenset(
     {
         ProductionWorkflowState.CANCELED.value,
         ProductionWorkflowState.FINAL_REVIEW_READY.value,
+        ProductionWorkflowState.PUBLICATION_VERIFIED.value,
         ProductionWorkflowState.FAILED_TERMINAL.value,
         ProductionWorkflowState.DEAD_LETTERED.value,
     }

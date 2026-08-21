@@ -108,7 +108,7 @@ class YouTubePrivateStageRead(BaseModel):
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID
     final_review_candidate_id: uuid.UUID
-    final_video_decision_id: uuid.UUID
+    final_video_decision_id: uuid.UUID | None
     final_media_ref_id: uuid.UUID
     final_media_ref: str
     final_media_checksum: str
@@ -141,6 +141,13 @@ class YouTubeStageExecute(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class YouTubePrivateStageReview(BaseModel):
+    disposition: Literal["REJECT", "NEEDS_RERENDER"]
+    reason: str = Field(min_length=1, max_length=4000)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class YouTubePrivateReadback(BaseModel):
     platform_channel_id: str = Field(min_length=1)
     platform_video_id: str = Field(min_length=1)
@@ -152,6 +159,7 @@ class YouTubePrivateReadback(BaseModel):
     privacy_status: Literal["PRIVATE"]
     processing_status: Literal["SUCCEEDED"]
     made_for_kids: bool
+    self_declared_made_for_kids: bool | None = None
     contains_synthetic_media: bool
     thumbnail_verified: bool
     caption_verified: bool
@@ -166,8 +174,8 @@ class PublicPublicationReceiptRead(BaseModel):
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID
     final_review_candidate_id: uuid.UUID
-    final_video_decision_id: uuid.UUID
-    manual_publish_confirmation_id: uuid.UUID
+    final_video_decision_id: uuid.UUID | None
+    manual_publish_confirmation_id: uuid.UUID | None
     youtube_private_stage_id: uuid.UUID | None
     platform_channel_id: str
     platform_video_id: str

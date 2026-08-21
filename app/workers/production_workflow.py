@@ -23,6 +23,7 @@ from app.db.models.launch_cadence import LaunchRun
 from app.services.outbox_dispatcher import (
     ClaimedWorkflowEvent,
     DurableOutboxDispatcher,
+    HumanWaitDisposition,
     OutboxLeaseLostError,
 )
 from app.services.cadence_events import CADENCE_EVALUATION_EVENT_TYPE
@@ -51,10 +52,13 @@ from app.services.stale_workflow_recovery import (
 from app.services.youtube_delivery import (
     LOCAL_MEDIA_PURGE_EVENT_TYPE,
     TELEGRAM_DELIVERY_EVENT_TYPE,
+    YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE,
     YOUTUBE_PRIVATE_STAGE_EVENT_TYPE,
     LocalMediaPurgeExecutor,
     TelegramDeliveryExecutor,
     YouTubePrivateStageExecutor,
+    YouTubePublicationWaitingForHuman,
+    YouTubePublicPublicationObserver,
 )
 
 
@@ -69,6 +73,7 @@ class WorkerRunResult:
     command_id: str | None = None
     retry_scheduled: bool = False
     dead_letter_job_id: uuid.UUID | None = None
+    next_attempt_at: datetime | None = None
 
 
 class ProductionWorkflowWorker:
@@ -253,6 +258,17 @@ class ProductionWorkflowWorker:
                 YouTubePrivateStageExecutor(self.session_factory).execute(
                     stage_id=stage_id
                 )
+            elif event.event_type == YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE:
+                stage_id = uuid.UUID(
+                    str(event.payload["youtube_private_stage_id"])
+                )
+                if stage_id != event.aggregate_id:
+                    raise ValueError(
+                        "YOUTUBE_PUBLICATION_OBSERVATION_EVENT_AUTHORITY_MISMATCH"
+                    )
+                YouTubePublicPublicationObserver(self.session_factory).reconcile(
+                    stage_id=stage_id
+                )
             elif event.event_type == TELEGRAM_DELIVERY_EVENT_TYPE:
                 notice_id = uuid.UUID(
                     str(event.payload["telegram_delivery_notification_id"])
@@ -307,6 +323,9 @@ class ProductionWorkflowWorker:
                 workflow_run_id=claim.workflow_run_id,
                 command_id=claim.command_id,
             )
+        except YouTubePublicationWaitingForHuman:
+            session.rollback()
+            return self._record_human_public_wait(claim)
         except Exception as exc:
             session.rollback()
             return self._record_failure(claim, exc)
@@ -508,6 +527,14 @@ class ProductionWorkflowWorker:
                 error=error,
             )
             session.commit()
+            if isinstance(disposition, HumanWaitDisposition):
+                return WorkerRunResult(
+                    status="WAITING_FOR_HUMAN_PUBLIC",
+                    event_id=claim.event_id,
+                    workflow_run_id=claim.workflow_run_id,
+                    command_id=claim.command_id,
+                    next_attempt_at=disposition.next_attempt_at,
+                )
             return WorkerRunResult(
                 status=(
                     "CANCELED"
@@ -523,6 +550,35 @@ class ProductionWorkflowWorker:
                 command_id=claim.command_id,
                 retry_scheduled=disposition.retry_scheduled,
                 dead_letter_job_id=disposition.dead_letter_job_id,
+                next_attempt_at=disposition.next_attempt_at,
+            )
+        except OutboxLeaseLostError:
+            session.rollback()
+            return WorkerRunResult(
+                status="LEASE_LOST",
+                event_id=claim.event_id,
+                workflow_run_id=claim.workflow_run_id,
+                command_id=claim.command_id,
+            )
+        finally:
+            session.close()
+
+    def _record_human_public_wait(
+        self, claim: ClaimedWorkflowEvent
+    ) -> WorkerRunResult:
+        session = self.session_factory()
+        try:
+            disposition = self._dispatcher(session).defer_human_public_wait(
+                event_id=claim.event_id,
+                worker_id=self.worker_id,
+            )
+            session.commit()
+            return WorkerRunResult(
+                status="WAITING_FOR_HUMAN_PUBLIC",
+                event_id=claim.event_id,
+                workflow_run_id=claim.workflow_run_id,
+                command_id=claim.command_id,
+                next_attempt_at=disposition.next_attempt_at,
             )
         except OutboxLeaseLostError:
             session.rollback()

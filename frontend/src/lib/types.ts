@@ -38,6 +38,7 @@ export type OperatorAction =
   | "NONE"
   | "RESUME_PRODUCTION"
   | "FINAL_REVIEW"
+  | "REVIEW_PRIVATE_STAGE"
   | "START_MANUAL_UPLOAD"
   | "CONFIRM_MANUAL_UPLOAD"
   | "CORRECT_CONFIRMATION"
@@ -195,8 +196,27 @@ export type ProductionCockpit = {
   progress?: ProductionProgress | null;
   final_review?: FinalReview | null;
   manual_publish?: ManualPublish | null;
+  private_publication_mode?: boolean;
+  youtube_private_stage?: YouTubePrivateStage | null;
   safety_notice: string;
   technical_appendix: Record<string, unknown>;
+};
+
+export type YouTubePrivateStage = {
+  stage_id: string;
+  final_review_candidate_id: string;
+  state: string;
+  platform_video_id?: string | null;
+  studio_url?: string | null;
+  last_error_code?: string | null;
+  staged_title?: string | null;
+  thumbnail_assurance?: string | null;
+  caption_assurance?: string | null;
+  final_media_checksum: string;
+  staging_metadata_hash: string;
+  public_release_expectation_hash: string;
+  next_action: string;
+  exact_remote_bytes_unavailable: boolean;
 };
 
 export type LaunchRunState =
