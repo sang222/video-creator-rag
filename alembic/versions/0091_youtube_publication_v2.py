@@ -178,17 +178,29 @@ def upgrade() -> None:
     )
 
     workflow_constraint = "ck_production_workflow_runs_production_workflow_runs_state"
-    op.drop_constraint(workflow_constraint, "production_workflow_runs", type_="check")
-    op.create_check_constraint(
-        workflow_constraint,
-        "production_workflow_runs",
-        "state in ('PLANNING_PENDING','PLANNING_RUNNING','ASSIGNMENT_READY',"
+    workflow_states = (
+        "'PLANNING_PENDING','PLANNING_RUNNING','ASSIGNMENT_READY',"
         "'RESEARCH_PENDING','RESEARCH_RUNNING','PACKAGE_PENDING','PACKAGE_RUNNING',"
         "'READY_FOR_PRODUCTION','MEDIA_PENDING','MEDIA_RUNNING','VISUAL_PENDING',"
         "'VISUAL_RUNNING','RENDER_PENDING','RENDER_RUNNING','QC_PENDING','QC_RUNNING',"
         "'ARCHIVE_PENDING','ARCHIVE_RUNNING','PAUSED_AFTER_NATIVE_RENDER','FINAL_REVIEW_READY',"
         "'PRIVATE_STAGING_PENDING','PRIVATE_VERIFIED_AWAITING_PUBLIC','PUBLICATION_VERIFIED',"
-        "'BLOCKED','RETRY_SCHEDULED','CANCELED','FAILED_TERMINAL','DEAD_LETTERED','SUPERSEDED')",
+        "'BLOCKED','RETRY_SCHEDULED','CANCELED','FAILED_TERMINAL','DEAD_LETTERED','SUPERSEDED'"
+    )
+    # Use literal DDL here.  The repository naming convention rewrites named
+    # CheckConstraint objects passed through op.drop/create_check_constraint,
+    # while the deployed 0044/0054/0079 lineage uses this concrete name.
+    op.execute(
+        "ALTER TABLE production_workflow_runs DROP CONSTRAINT IF EXISTS "
+        "ck_production_workflow_runs_production_workflow_runs_state"
+    )
+    op.execute(
+        "ALTER TABLE production_workflow_runs DROP CONSTRAINT IF EXISTS "
+        "ck_production_workflow_runs_ck_production_workflow_runs_e3c1"
+    )
+    op.execute(
+        "ALTER TABLE production_workflow_runs ADD CONSTRAINT "
+        f"{workflow_constraint} CHECK (state in ({workflow_states}))"
     )
 
 
