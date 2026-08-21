@@ -31,6 +31,7 @@ from app.contracts.semantic import (
     SemanticProjectionFamily,
     TemporalSemanticBinding,
     VisualReuseCompatibility,
+    VisualReuseSemanticFact,
     VisualSemanticProjection,
     WriterSemanticProjection,
     visual_reuse_compatible,

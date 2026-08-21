@@ -126,8 +126,6 @@ class SemanticAtomKind(StrEnum):
     TEMPORAL_RELATION = "TEMPORAL_RELATION"
     CONTEXT = "CONTEXT"
     CLAIM = "CLAIM"
-    EVIDENCE_REQUIREMENT = "EVIDENCE_REQUIREMENT"
-    FACTUALITY = "FACTUALITY"
     EDITORIAL_FUNCTION = "EDITORIAL_FUNCTION"
     PREMISE = "PREMISE"
     AUDIENCE_PROBLEM = "AUDIENCE_PROBLEM"
@@ -182,8 +180,6 @@ class OverlayRole(StrEnum):
 _WRITER_ATOMS = frozenset(
     {
         SemanticAtomKind.CLAIM,
-        SemanticAtomKind.EVIDENCE_REQUIREMENT,
-        SemanticAtomKind.FACTUALITY,
         SemanticAtomKind.EDITORIAL_FUNCTION,
         SemanticAtomKind.PREMISE,
         SemanticAtomKind.AUDIENCE_PROBLEM,
@@ -207,8 +203,6 @@ _VISUAL_ATOMS = frozenset(
         SemanticAtomKind.COMPARISON,
         SemanticAtomKind.TEMPORAL_RELATION,
         SemanticAtomKind.CONTEXT,
-        SemanticAtomKind.FACTUALITY,
-        SemanticAtomKind.EVIDENCE_REQUIREMENT,
         SemanticAtomKind.VIEWER_INFERENCE,
         SemanticAtomKind.MUST_PRESERVE,
         SemanticAtomKind.MAY_ABSTRACT,
@@ -228,8 +222,6 @@ _PACKAGING_ATOMS = frozenset(
 _QC_ATOMS = frozenset(
     {
         SemanticAtomKind.CLAIM,
-        SemanticAtomKind.EVIDENCE_REQUIREMENT,
-        SemanticAtomKind.FACTUALITY,
         SemanticAtomKind.MUST_PRESERVE,
         SemanticAtomKind.MUST_NOT_INVENT,
     }
@@ -237,6 +229,12 @@ _QC_ATOMS = frozenset(
 
 
 class SemanticAtom(_StrictFrozen):
+    """A typed semantic primitive with exact snapshot-authority provenance.
+
+    ``source_refs`` are exact ``SemanticAuthorityRef.authority_ref`` values,
+    not generic evidence locators or an alternative claim-verification graph.
+    """
+
     atom_id: str = Field(min_length=1, max_length=160)
     kind: SemanticAtomKind
     value: str = Field(min_length=1, max_length=8_000)
@@ -268,6 +266,9 @@ class SemanticMeaningUnit(_StrictFrozen):
         return self
 
 
+_CANONICAL_MEANING_FIELD_KEYS = frozenset({"factuality", "evidence_requirement"})
+
+
 class SemanticExtensionDefinition(_StrictFrozen):
     """A versioned profile/format extension without widening the kernel."""
 
@@ -286,6 +287,8 @@ class SemanticExtensionDefinition(_StrictFrozen):
             or len(self.projection_families) != len(set(self.projection_families))
         ):
             raise ValueError("SEMANTIC_EXTENSION_DEFINITION_INVALID")
+        if set(self.field_keys).intersection(_CANONICAL_MEANING_FIELD_KEYS):
+            raise ValueError("SEMANTIC_EXTENSION_CANONICAL_FIELD_RESERVED")
         self.verify_integrity()
         return self
 
@@ -553,7 +556,11 @@ class PresentationSemanticIntent(_StrictFrozen):
 
 
 class TemporalSemanticBinding(_StrictFrozen):
-    """Keep semantic boundaries, viewer beats, and technical segments distinct."""
+    """Keep semantic boundaries, viewer beats, and technical segments distinct.
+
+    The authored trigger is an exact ``meaning_id#atom_id`` reference checked
+    by the sealed snapshot; it cannot fall back to a position or segment.
+    """
 
     semantic_owner_ref: str = Field(min_length=1, max_length=200)
     authored_semantic_trigger_ref: str = Field(min_length=1, max_length=300)
@@ -589,7 +596,11 @@ class TemporalSemanticBinding(_StrictFrozen):
 
 
 class OverlaySemanticIntent(_StrictFrozen):
-    """Semantic overlay purpose only; display copy, geometry, and time are out of scope."""
+    """Semantic overlay purpose only; display copy, geometry, and time are out of scope.
+
+    Overlay targets are exact meaning or ``meaning_id#atom_id`` refs checked
+    by the sealed snapshot.
+    """
 
     overlay_state: OverlayState
     semantic_owner_ref: str = Field(min_length=1, max_length=200)
@@ -652,6 +663,14 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
             raise ValueError("SEMANTIC_MEANING_ID_DUPLICATE")
         if len(authority_refs) != len(set(authority_refs)):
             raise ValueError("SEMANTIC_SOURCE_AUTHORITY_REF_DUPLICATE")
+        atom_source_refs = {
+            source_ref
+            for meaning in self.meaning_units
+            for atom in meaning.atoms
+            for source_ref in atom.source_refs
+        }
+        if not atom_source_refs.issubset(set(authority_refs)):
+            raise ValueError("SEMANTIC_ATOM_SOURCE_REF_UNDECLARED")
         authored_presentation_refs = {
             item.authority_ref
             for item in self.source_authorities
@@ -686,6 +705,24 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
         }
         if not owner_refs.issubset(set(meaning_ids)):
             raise ValueError("SEMANTIC_OWNER_REF_UNKNOWN_OR_POSITIONAL")
+        atom_refs = {
+            f"{meaning.meaning_id}#{atom.atom_id}"
+            for meaning in self.meaning_units
+            for atom in meaning.atoms
+        }
+        trigger_refs = {
+            binding.authored_semantic_trigger_ref for binding in self.temporal_bindings
+        }
+        if not trigger_refs.issubset(atom_refs):
+            raise ValueError("AUTHORED_SEMANTIC_TRIGGER_REF_UNKNOWN")
+        target_refs = {
+            target_ref
+            for intent in self.overlay_intents
+            for target_ref in intent.target_refs
+        }
+        semantic_targets = set(meaning_ids).union(atom_refs)
+        if not target_refs.issubset(semantic_targets):
+            raise ValueError("SEMANTIC_OVERLAY_TARGET_REF_UNKNOWN")
         authored_refs = {
             binding.presentation_intent.editorial_authority_ref
             for binding in self.temporal_bindings
@@ -727,7 +764,35 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
 class ProjectedSemanticUnit(_StrictFrozen):
     semantic_owner_ref: str = Field(min_length=1)
     statement: str = Field(min_length=1)
+    factuality: Factuality
+    evidence_requirement: EvidenceRequirement
     atoms: list[SemanticAtom] = Field(default_factory=list)
+
+
+_VISUAL_REUSE_SIGNATURE_KINDS = frozenset(
+    {
+        SemanticAtomKind.STATE,
+        SemanticAtomKind.ACTION,
+        SemanticAtomKind.RELATIONSHIP,
+        SemanticAtomKind.CHANGE,
+        SemanticAtomKind.CAUSAL_RELATION,
+        SemanticAtomKind.COMPARISON,
+        SemanticAtomKind.TEMPORAL_RELATION,
+    }
+)
+
+
+class VisualReuseSemanticFact(_StrictFrozen):
+    """One typed meaning-changing fact in a visual-reuse signature."""
+
+    kind: SemanticAtomKind
+    value: str = Field(min_length=1, max_length=8_000)
+
+    @model_validator(mode="after")
+    def valid_signature_kind(self) -> Self:
+        if self.kind not in _VISUAL_REUSE_SIGNATURE_KINDS:
+            raise ValueError("VISUAL_REUSE_SIGNATURE_KIND_INVALID")
+        return self
 
 
 class VisualReuseCompatibility(_StrictFrozen):
@@ -741,7 +806,9 @@ class VisualReuseCompatibility(_StrictFrozen):
     semantic_owner_ref: str = Field(min_length=1)
     subject_refs: list[str] = Field(default_factory=list)
     proposition: str = Field(min_length=1)
-    action_or_relationships: list[str] = Field(default_factory=list)
+    semantic_signature_facts: list[VisualReuseSemanticFact] = Field(
+        default_factory=list
+    )
     context_refs: list[str] = Field(default_factory=list)
     factuality: Factuality
     reuse_eligible: bool
@@ -749,8 +816,15 @@ class VisualReuseCompatibility(_StrictFrozen):
 
     @model_validator(mode="after")
     def valid_compatibility(self) -> Self:
+        if (
+            len(self.subject_refs) != len(set(self.subject_refs))
+            or len(self.context_refs) != len(set(self.context_refs))
+            or len({(fact.kind, fact.value) for fact in self.semantic_signature_facts})
+            != len(self.semantic_signature_facts)
+        ):
+            raise ValueError("VISUAL_REUSE_SIGNATURE_DUPLICATE")
         expected = bool(
-            self.subject_refs and self.action_or_relationships and self.context_refs
+            self.subject_refs and self.context_refs and self.semantic_signature_facts
         )
         if self.reuse_eligible != expected:
             raise ValueError("VISUAL_REUSE_COMPATIBILITY_INCOMPLETE")
@@ -768,13 +842,22 @@ def visual_reuse_compatible(
 ) -> bool:
     """Strict semantic gate for a future grouping/reuse implementation."""
 
+    def normalized_refs(values: Iterable[str]) -> tuple[str, ...]:
+        return tuple(sorted(values))
+
+    def normalized_signature(
+        facts: Iterable[VisualReuseSemanticFact],
+    ) -> tuple[tuple[str, str], ...]:
+        return tuple(sorted((fact.kind.value, fact.value) for fact in facts))
+
     return bool(
         left.reuse_eligible
         and right.reuse_eligible
-        and left.subject_refs == right.subject_refs
+        and normalized_refs(left.subject_refs) == normalized_refs(right.subject_refs)
         and left.proposition == right.proposition
-        and left.action_or_relationships == right.action_or_relationships
-        and left.context_refs == right.context_refs
+        and normalized_signature(left.semantic_signature_facts)
+        == normalized_signature(right.semantic_signature_facts)
+        and normalized_refs(left.context_refs) == normalized_refs(right.context_refs)
         and left.factuality == right.factuality
     )
 
@@ -813,11 +896,34 @@ class _Projection(_StrictFrozen):
         return self
 
 
+def _validate_projection_extension_owners(
+    *,
+    units: Iterable[ProjectedSemanticUnit],
+    extensions: Iterable[SemanticExtensionPayload],
+) -> set[str]:
+    owner_refs = [unit.semantic_owner_ref for unit in units]
+    if len(owner_refs) != len(set(owner_refs)):
+        raise ValueError("SEMANTIC_PROJECTION_OWNER_DUPLICATE")
+    if not {extension.semantic_owner_ref for extension in extensions}.issubset(
+        set(owner_refs)
+    ):
+        raise ValueError("SEMANTIC_PROJECTION_EXTENSION_OWNER_UNKNOWN")
+    return set(owner_refs)
+
+
 class WriterSemanticProjection(_Projection):
     projection_family: Literal[SemanticProjectionFamily.WRITER] = (
         SemanticProjectionFamily.WRITER
     )
     writer_units: list[ProjectedSemanticUnit] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_writer_owners(self) -> Self:
+        _validate_projection_extension_owners(
+            units=self.writer_units,
+            extensions=self.extensions,
+        )
+        return self
 
     @classmethod
     def build(cls, **values: Any) -> "WriterSemanticProjection":
@@ -833,6 +939,23 @@ class VisualSemanticProjection(_Projection):
     temporal_bindings: list[TemporalSemanticBinding] = Field(default_factory=list)
     overlay_intents: list[OverlaySemanticIntent] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def valid_visual_owners(self) -> Self:
+        owner_refs = _validate_projection_extension_owners(
+            units=self.visual_units,
+            extensions=self.extensions,
+        )
+        for compatibility in self.reuse_compatibility:
+            compatibility.verify_integrity()
+        referenced_owners = {
+            *(item.semantic_owner_ref for item in self.reuse_compatibility),
+            *(item.semantic_owner_ref for item in self.temporal_bindings),
+            *(item.semantic_owner_ref for item in self.overlay_intents),
+        }
+        if not referenced_owners.issubset(owner_refs):
+            raise ValueError("SEMANTIC_VISUAL_PROJECTION_OWNER_UNKNOWN")
+        return self
+
     @classmethod
     def build(cls, **values: Any) -> "VisualSemanticProjection":
         return cls._seal(**values)
@@ -844,6 +967,14 @@ class PackagingSemanticProjection(_Projection):
     )
     packaging_units: list[ProjectedSemanticUnit] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def valid_packaging_owners(self) -> Self:
+        _validate_projection_extension_owners(
+            units=self.packaging_units,
+            extensions=self.extensions,
+        )
+        return self
+
     @classmethod
     def build(cls, **values: Any) -> "PackagingSemanticProjection":
         return cls._seal(**values)
@@ -854,6 +985,14 @@ class QCSemanticProjection(_Projection):
         SemanticProjectionFamily.QC
     )
     qc_units: list[ProjectedSemanticUnit] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_qc_owners(self) -> Self:
+        _validate_projection_extension_owners(
+            units=self.qc_units,
+            extensions=self.extensions,
+        )
+        return self
 
     @classmethod
     def build(cls, **values: Any) -> "QCSemanticProjection":
@@ -1127,6 +1266,8 @@ class SemanticProjectionCompiler:
             ProjectedSemanticUnit(
                 semantic_owner_ref=unit.meaning_id,
                 statement=unit.statement,
+                factuality=unit.factuality,
+                evidence_requirement=unit.evidence_requirement,
                 atoms=[atom for atom in unit.atoms if atom.kind in kinds],
             )
             for unit in snapshot.meaning_units
@@ -1153,10 +1294,18 @@ class SemanticProjectionCompiler:
         snapshot: ProjectRichSemanticSnapshot,
     ) -> list[VisualReuseCompatibility]:
         def values_for(
-            unit: SemanticMeaningUnit,
-            kinds: frozenset[SemanticAtomKind],
+            unit: SemanticMeaningUnit, kinds: frozenset[SemanticAtomKind]
         ) -> list[str]:
             return [atom.value for atom in unit.atoms if atom.kind in kinds]
+
+        def signature_facts_for(
+            unit: SemanticMeaningUnit,
+        ) -> list[VisualReuseSemanticFact]:
+            return [
+                VisualReuseSemanticFact(kind=atom.kind, value=atom.value)
+                for atom in unit.atoms
+                if atom.kind in _VISUAL_REUSE_SIGNATURE_KINDS
+            ]
 
         return [
             VisualReuseCompatibility.build(
@@ -1166,10 +1315,7 @@ class SemanticProjectionCompiler:
                     frozenset({SemanticAtomKind.SUBJECT, SemanticAtomKind.ENTITY}),
                 ),
                 proposition=unit.statement,
-                action_or_relationships=values_for(
-                    unit,
-                    frozenset({SemanticAtomKind.ACTION, SemanticAtomKind.RELATIONSHIP}),
-                ),
+                semantic_signature_facts=signature_facts_for(unit),
                 context_refs=values_for(unit, frozenset({SemanticAtomKind.CONTEXT})),
                 factuality=unit.factuality,
                 reuse_eligible=bool(
@@ -1177,13 +1323,8 @@ class SemanticProjectionCompiler:
                         unit,
                         frozenset({SemanticAtomKind.SUBJECT, SemanticAtomKind.ENTITY}),
                     )
-                    and values_for(
-                        unit,
-                        frozenset(
-                            {SemanticAtomKind.ACTION, SemanticAtomKind.RELATIONSHIP}
-                        ),
-                    )
                     and values_for(unit, frozenset({SemanticAtomKind.CONTEXT}))
+                    and signature_facts_for(unit)
                 ),
             )
             for unit in snapshot.meaning_units

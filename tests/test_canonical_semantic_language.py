@@ -37,6 +37,7 @@ from app.contracts.semantic import (
     SemanticProjectionFamily,
     TemporalSemanticBinding,
     VisualReuseCompatibility,
+    VisualReuseSemanticFact,
     VisualSemanticProjection,
     WriterSemanticProjection,
     visual_reuse_compatible,
@@ -287,6 +288,7 @@ def _meaning(statement: str = "A bounded recovery crosses an approval boundary."
                 atom_id="relation",
                 kind=SemanticAtomKind.CAUSAL_RELATION,
                 value="an unowned exception delays the recovery",
+                source_refs=["evidence://approved/recovery"],
             ),
             SemanticAtom(
                 atom_id="context",
@@ -297,11 +299,7 @@ def _meaning(statement: str = "A bounded recovery crosses an approval boundary."
                 atom_id="claim",
                 kind=SemanticAtomKind.CLAIM,
                 value="A recovery needs an explicit approval boundary.",
-            ),
-            SemanticAtom(
-                atom_id="evidence",
-                kind=SemanticAtomKind.EVIDENCE_REQUIREMENT,
-                value="Trace the recovery to approved evidence.",
+                source_refs=["evidence://approved/recovery"],
             ),
             SemanticAtom(
                 atom_id="premise",
@@ -385,17 +383,22 @@ def _snapshot(
         semantic_profile=compilation,
         source_authorities=[
             SemanticAuthorityRef(
+                authority_type="RESEARCH_EVIDENCE",
+                authority_ref="evidence://approved/recovery",
+                content_hash="2" * 64,
+            ),
+            SemanticAuthorityRef(
                 authority_type="QUALIFIED_SCRIPT",
                 authority_ref="script://qualified/001",
                 content_hash="1" * 64,
-            )
+            ),
         ],
         meaning_units=[_meaning(statement)],
         extensions=[extension],
         temporal_bindings=[
             TemporalSemanticBinding(
                 semantic_owner_ref="meaning-approval-recovery",
-                authored_semantic_trigger_ref="authored-trigger://approval-recognition",
+                authored_semantic_trigger_ref="meaning-approval-recovery#relation",
                 presentation_intent=PresentationSemanticIntent(
                     outcome=PresentationOutcome.HOLD,
                     semantic_role=SemanticPresentationRole.HOLD,
@@ -419,6 +422,43 @@ def _snapshot(
                 continuity_or_change_reason="No overlay preserves the authored hold.",
             )
         ],
+    )
+
+
+def _snapshot_variant(
+    snapshot: ProjectRichSemanticSnapshot,
+    **updates,
+) -> ProjectRichSemanticSnapshot:
+    values = {
+        "snapshot_id": snapshot.snapshot_id,
+        "project_ref": snapshot.project_ref,
+        "revision_ref": snapshot.revision_ref,
+        "semantic_profile": snapshot.semantic_profile,
+        "source_authorities": snapshot.source_authorities,
+        "meaning_units": snapshot.meaning_units,
+        "extensions": snapshot.extensions,
+        "temporal_bindings": snapshot.temporal_bindings,
+        "overlay_intents": snapshot.overlay_intents,
+    }
+    values.update(updates)
+    return ProjectRichSemanticSnapshot.build(**values)
+
+
+def _reuse_compatibility(
+    *facts: tuple[SemanticAtomKind, str],
+    subject_refs: list[str] | None = None,
+    context_refs: list[str] | None = None,
+) -> VisualReuseCompatibility:
+    return VisualReuseCompatibility.build(
+        semantic_owner_ref="meaning-approval-recovery",
+        subject_refs=subject_refs or ["approval recovery"],
+        proposition="The same proposition is being considered.",
+        semantic_signature_facts=[
+            VisualReuseSemanticFact(kind=kind, value=value) for kind, value in facts
+        ],
+        context_refs=context_refs or ["operational workflow"],
+        factuality=Factuality.FACTUAL,
+        reuse_eligible=bool(facts),
     )
 
 
@@ -579,11 +619,18 @@ def test_semantic_owner_requires_explicit_identity_never_a_position():
             project_ref="video-project://001",
             revision_ref="revision://001",
             semantic_profile=compiled,
+            source_authorities=[
+                SemanticAuthorityRef(
+                    authority_type="RESEARCH_EVIDENCE",
+                    authority_ref="evidence://approved/recovery",
+                    content_hash="2" * 64,
+                )
+            ],
             meaning_units=[_meaning()],
             temporal_bindings=[
                 TemporalSemanticBinding(
                     semantic_owner_ref="position-1",
-                    authored_semantic_trigger_ref="authored-trigger://meaning-1",
+                    authored_semantic_trigger_ref="meaning-approval-recovery#relation",
                     presentation_intent=PresentationSemanticIntent(
                         outcome=PresentationOutcome.HOLD,
                         semantic_role=SemanticPresentationRole.HOLD,
@@ -649,7 +696,7 @@ def test_visual_reuse_requires_subject_proposition_action_context_and_factuality
         semantic_owner_ref="meaning-different",
         subject_refs=compatibility.subject_refs,
         proposition="A different proposition is not equivalent merely because it is adjacent.",
-        action_or_relationships=compatibility.action_or_relationships,
+        semantic_signature_facts=compatibility.semantic_signature_facts,
         context_refs=compatibility.context_refs,
         factuality=compatibility.factuality,
         reuse_eligible=True,
@@ -878,11 +925,6 @@ def test_nested_authority_and_definition_hash_drift_fail_closed():
 def test_only_card_d_authorship_contract_can_author_presentation_intent():
     snapshot = _snapshot()
     evidence_ref = "evidence://approved/recovery"
-    evidence = SemanticAuthorityRef(
-        authority_type="RESEARCH_EVIDENCE",
-        authority_ref=evidence_ref,
-        content_hash="9" * 64,
-    )
     evidence_bound_intent = snapshot.temporal_bindings[
         0
     ].presentation_intent.model_copy(update={"editorial_authority_ref": evidence_ref})
@@ -898,7 +940,7 @@ def test_only_card_d_authorship_contract_can_author_presentation_intent():
             project_ref=snapshot.project_ref,
             revision_ref=snapshot.revision_ref,
             semantic_profile=snapshot.semantic_profile,
-            source_authorities=[*snapshot.source_authorities, evidence],
+            source_authorities=snapshot.source_authorities,
             meaning_units=snapshot.meaning_units,
             extensions=snapshot.extensions,
             temporal_bindings=[evidence_bound_binding],
@@ -1070,7 +1112,7 @@ def test_viewer_beat_or_technical_segment_can_exist_without_a_semantic_boundary(
     snapshot = _snapshot()
     binding = TemporalSemanticBinding(
         semantic_owner_ref="meaning-approval-recovery",
-        authored_semantic_trigger_ref="authored-trigger://same-meaning/focus-b",
+        authored_semantic_trigger_ref="meaning-approval-recovery#state",
         presentation_intent=snapshot.temporal_bindings[0].presentation_intent,
         viewer_beat_ref="viewer-beat://focus-b",
         technical_segment_ref="provider-segment://part-2",
@@ -1106,4 +1148,314 @@ def test_viewer_beat_or_technical_segment_can_exist_without_a_semantic_boundary(
             semantic_owner_ref="meaning-approval-recovery",
             authored_semantic_trigger_ref="position-3",
             presentation_intent=snapshot.temporal_bindings[0].presentation_intent,
+        )
+
+
+def test_factuality_and_evidence_requirement_have_one_typed_owner_and_survive_projections():
+    snapshot = _snapshot()
+    writer = SemanticProjectionCompiler.writer(snapshot)
+    visual = SemanticProjectionCompiler.visual(snapshot)
+    qc = SemanticProjectionCompiler.qc(snapshot)
+
+    for projection, units in (
+        (writer, writer.writer_units),
+        (visual, visual.visual_units),
+        (qc, qc.qc_units),
+    ):
+        assert projection.applicability == Applicability.APPLICABLE
+        assert units[0].factuality == Factuality.FACTUAL
+        assert units[0].evidence_requirement == EvidenceRequirement.REQUIRED
+        assert all(
+            atom.kind not in {"FACTUALITY", "EVIDENCE_REQUIREMENT"}
+            for atom in units[0].atoms
+        )
+
+    assert "FACTUALITY" not in SemanticAtomKind
+    assert "EVIDENCE_REQUIREMENT" not in SemanticAtomKind
+    for forbidden_kind in ("FACTUALITY", "EVIDENCE_REQUIREMENT"):
+        with pytest.raises(ValidationError):
+            SemanticAtom(
+                atom_id=f"forbidden-{forbidden_kind.lower()}",
+                kind=forbidden_kind,
+                value="A free-text duplicate typed fact is forbidden.",
+            )
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_EXTENSION_CANONICAL_FIELD_RESERVED"
+    ):
+        SemanticExtensionDefinition.build(
+            extension_definition_id="channel-extension://invalid/factuality",
+            scope=SemanticDefinitionScope.CHANNEL,
+            definition_version="v1",
+            field_keys=["factuality"],
+        )
+    prose_snapshot = _snapshot(
+        statement="This prose says hypothetical, but prose cannot own factuality."
+    )
+    prose_writer = SemanticProjectionCompiler.writer(prose_snapshot)
+    assert isinstance(prose_writer, WriterSemanticProjection)
+    assert prose_writer.writer_units[0].factuality == Factuality.FACTUAL
+
+
+def test_atom_provenance_resolves_exact_snapshot_authorities_without_authoring_effects():
+    snapshot = _snapshot()
+    declared_refs = {item.authority_ref for item in snapshot.source_authorities}
+    atom_refs = {
+        ref
+        for unit in snapshot.meaning_units
+        for atom in unit.atoms
+        for ref in atom.source_refs
+    }
+
+    assert atom_refs == {"evidence://approved/recovery"}
+    assert atom_refs.issubset(declared_refs)
+    assert "evidence://approved/recovery" in {
+        item.authority_ref
+        for item in snapshot.source_authorities
+        if item.authority_type == "RESEARCH_EVIDENCE"
+    }
+    assert (
+        snapshot.temporal_bindings[0].presentation_intent.editorial_authority_ref
+        != "evidence://approved/recovery"
+    )
+
+    unknown_atom = (
+        snapshot.meaning_units[0]
+        .atoms[0]
+        .model_copy(update={"source_refs": ["evidence://invented"]})
+    )
+    dangling_meaning = snapshot.meaning_units[0].model_copy(
+        update={"atoms": [unknown_atom, *snapshot.meaning_units[0].atoms[1:]]}
+    )
+    with pytest.raises(ValidationError, match="SEMANTIC_ATOM_SOURCE_REF_UNDECLARED"):
+        _snapshot_variant(
+            snapshot,
+            snapshot_id="semantic-snapshot-dangling-atom-provenance",
+            meaning_units=[dangling_meaning],
+        )
+    with pytest.raises(ValidationError, match="SEMANTIC_ATOM_SOURCE_REF_INVALID"):
+        SemanticAtom(
+            atom_id="duplicate-source",
+            kind=SemanticAtomKind.CLAIM,
+            value="Duplicate provenance is not an independent source.",
+            source_refs=["evidence://approved/recovery"] * 2,
+        )
+    with pytest.raises(ValidationError, match="SEMANTIC_ATOM_SOURCE_REF_INVALID"):
+        SemanticAtom(
+            atom_id="empty-source",
+            kind=SemanticAtomKind.CLAIM,
+            value="An empty provenance ref is not a declared authority.",
+            source_refs=[""],
+        )
+
+    source_free_meaning = SemanticMeaningUnit(
+        meaning_id="meaning-approval-recovery",
+        statement=snapshot.meaning_units[0].statement,
+        factuality=Factuality.FACTUAL,
+        evidence_requirement=EvidenceRequirement.NOT_REQUIRED,
+        atoms=[
+            atom.model_copy(update={"source_refs": []})
+            for atom in snapshot.meaning_units[0].atoms
+        ],
+    )
+    source_free_snapshot = _snapshot_variant(
+        snapshot,
+        snapshot_id="semantic-snapshot-source-free",
+        meaning_units=[source_free_meaning],
+    )
+    assert all(
+        not atom.source_refs for atom in source_free_snapshot.meaning_units[0].atoms
+    )
+
+
+def test_visual_reuse_signature_covers_material_relations_and_normalizes_set_order():
+    baseline = _reuse_compatibility(
+        (SemanticAtomKind.STATE, "fallback is bounded"),
+        (SemanticAtomKind.CAUSAL_RELATION, "unowned exception causes delay"),
+        (SemanticAtomKind.COMPARISON, "bounded fallback is safer than silent retry"),
+        (SemanticAtomKind.TEMPORAL_RELATION, "after accountable approval"),
+    )
+    same_different_order = _reuse_compatibility(
+        (SemanticAtomKind.TEMPORAL_RELATION, "after accountable approval"),
+        (SemanticAtomKind.COMPARISON, "bounded fallback is safer than silent retry"),
+        (SemanticAtomKind.CAUSAL_RELATION, "unowned exception causes delay"),
+        (SemanticAtomKind.STATE, "fallback is bounded"),
+        subject_refs=["approval recovery"],
+        context_refs=["operational workflow"],
+    )
+
+    assert visual_reuse_compatible(baseline, same_different_order) is True
+    assert (
+        visual_reuse_compatible(
+            baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.STATE, "fallback is bounded"),
+                (SemanticAtomKind.CAUSAL_RELATION, "delay causes unowned exception"),
+                (
+                    SemanticAtomKind.COMPARISON,
+                    "bounded fallback is safer than silent retry",
+                ),
+                (SemanticAtomKind.TEMPORAL_RELATION, "after accountable approval"),
+            ),
+        )
+        is False
+    )
+    assert (
+        visual_reuse_compatible(
+            baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.STATE, "fallback is unbounded"),
+                (SemanticAtomKind.CAUSAL_RELATION, "unowned exception causes delay"),
+                (
+                    SemanticAtomKind.COMPARISON,
+                    "bounded fallback is safer than silent retry",
+                ),
+                (SemanticAtomKind.TEMPORAL_RELATION, "after accountable approval"),
+            ),
+        )
+        is False
+    )
+    change_baseline = _reuse_compatibility(
+        (SemanticAtomKind.CHANGE, "fallback becomes bounded"),
+    )
+    assert (
+        visual_reuse_compatible(
+            change_baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.CHANGE, "fallback becomes unbounded"),
+            ),
+        )
+        is False
+    )
+    assert (
+        visual_reuse_compatible(
+            baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.STATE, "fallback is bounded"),
+                (SemanticAtomKind.CAUSAL_RELATION, "unowned exception causes delay"),
+                (
+                    SemanticAtomKind.COMPARISON,
+                    "silent retry is safer than bounded fallback",
+                ),
+                (SemanticAtomKind.TEMPORAL_RELATION, "after accountable approval"),
+            ),
+        )
+        is False
+    )
+    assert (
+        visual_reuse_compatible(
+            baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.STATE, "fallback is bounded"),
+                (SemanticAtomKind.CAUSAL_RELATION, "unowned exception causes delay"),
+                (
+                    SemanticAtomKind.COMPARISON,
+                    "bounded fallback is safer than silent retry",
+                ),
+                (SemanticAtomKind.TEMPORAL_RELATION, "before accountable approval"),
+            ),
+        )
+        is False
+    )
+
+    state_and_comparison_only = _reuse_compatibility(
+        (SemanticAtomKind.STATE, "fallback is bounded"),
+        (SemanticAtomKind.COMPARISON, "fallback is safer than retry"),
+    )
+    assert state_and_comparison_only.reuse_eligible is True
+    assert "visual_function" not in VisualReuseCompatibility.model_fields
+    assert "adjacent" not in VisualReuseCompatibility.model_fields
+
+
+def test_snapshot_reference_and_nested_signature_drift_fail_closed():
+    snapshot = _snapshot()
+    invalid_trigger = snapshot.temporal_bindings[0].model_copy(
+        update={"authored_semantic_trigger_ref": "meaning-approval-recovery#missing"}
+    )
+    with pytest.raises(ValidationError, match="AUTHORED_SEMANTIC_TRIGGER_REF_UNKNOWN"):
+        _snapshot_variant(
+            snapshot,
+            snapshot_id="semantic-snapshot-invalid-trigger",
+            temporal_bindings=[invalid_trigger],
+        )
+
+    authored_ref = snapshot.temporal_bindings[
+        0
+    ].presentation_intent.editorial_authority_ref
+    invalid_overlay = OverlaySemanticIntent(
+        overlay_state=OverlayState.OVERLAY,
+        semantic_owner_ref="meaning-approval-recovery",
+        presentation_intent=PresentationSemanticIntent(
+            outcome=PresentationOutcome.PRESENTATION_CHANGE,
+            semantic_role=SemanticPresentationRole.LABEL,
+            editorial_reason="Label the authored approval boundary.",
+            editorial_authority_ref=authored_ref,
+        ),
+        overlay_role="LABEL",
+        information_purpose="Identify the boundary that requires approval.",
+        target_refs=["meaning-approval-recovery#missing"],
+        continuity_or_change_reason="The label clarifies the authored boundary.",
+    )
+    with pytest.raises(ValidationError, match="SEMANTIC_OVERLAY_TARGET_REF_UNKNOWN"):
+        _snapshot_variant(
+            snapshot,
+            snapshot_id="semantic-snapshot-invalid-overlay-target",
+            overlay_intents=[invalid_overlay],
+        )
+
+    atom_drift = _snapshot()
+    atom_drift.meaning_units[0].atoms[0].source_refs.append("evidence://invented")
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        atom_drift.verify_integrity()
+
+    factuality_drift = _snapshot()
+    factuality_drift.meaning_units[0] = factuality_drift.meaning_units[0].model_copy(
+        update={"factuality": Factuality.HYPOTHETICAL}
+    )
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        factuality_drift.verify_integrity()
+
+    evidence_drift = _snapshot()
+    evidence_drift.meaning_units[0] = evidence_drift.meaning_units[0].model_copy(
+        update={"evidence_requirement": EvidenceRequirement.NOT_REQUIRED}
+    )
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        evidence_drift.verify_integrity()
+
+    authority_drift = _snapshot()
+    authority_drift.source_authorities[0] = authority_drift.source_authorities[
+        0
+    ].model_copy(update={"content_hash": "f" * 64})
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        authority_drift.verify_integrity()
+
+    reuse = SemanticProjectionCompiler.visual(_snapshot()).reuse_compatibility[0]
+    signature_drift = reuse.model_copy(
+        update={
+            "semantic_signature_facts": [
+                VisualReuseSemanticFact(
+                    kind=SemanticAtomKind.STATE,
+                    value="a changed state",
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        signature_drift.verify_integrity()
+
+    writer = SemanticProjectionCompiler.writer(_snapshot())
+    assert isinstance(writer, WriterSemanticProjection)
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_PROJECTION_EXTENSION_OWNER_UNKNOWN"
+    ):
+        WriterSemanticProjection.build(
+            semantic_snapshot_ref=writer.semantic_snapshot_ref,
+            semantic_snapshot_hash=writer.semantic_snapshot_hash,
+            writer_units=writer.writer_units,
+            extensions=[
+                SemanticExtensionPayload(
+                    extension_definition_id="channel-extension://operator-notes/decision",
+                    semantic_owner_ref="meaning-unknown",
+                    values={"central_question": "Unknown semantic owner."},
+                )
+            ],
         )
