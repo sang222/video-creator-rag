@@ -536,6 +536,16 @@ from app.contracts.profile import (
     ProfileCompilerPolicy,
 )
 from app.contracts.snapshots import LLMRunSnapshotCreate
+from app.contracts.editorial_authorship import (
+    AuthoredPresentationLaw,
+    EditorialAuthorshipContract,
+    GlobalEditorialAuthorshipLaw,
+    HOLD,
+    NO_EFFECT_WITHOUT_EDITORIAL_REASON,
+    NO_VISUAL_CHANGE,
+    ViewerFacingAuthorshipLaw,
+    validate_viewer_facing_presentation,
+)
 from app.contracts.vcos_v2 import (
     AssignmentCandidate,
     AssignmentMode,
@@ -652,6 +662,14 @@ __all__ = [
     "SeriesRunTransitionRequest",
     "StrategicIntent",
     "StrategicLineageV2",
+    "AuthoredPresentationLaw",
+    "EditorialAuthorshipContract",
+    "GlobalEditorialAuthorshipLaw",
+    "HOLD",
+    "NO_EFFECT_WITHOUT_EDITORIAL_REASON",
+    "NO_VISUAL_CHANGE",
+    "ViewerFacingAuthorshipLaw",
+    "validate_viewer_facing_presentation",
     "ExactContentRefV2",
     "GateRunBindingV2",
     "ProductionPackageContentV2",

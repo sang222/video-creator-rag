@@ -11,6 +11,7 @@ from typing import Any, Protocol, runtime_checkable
 from sqlalchemy import select
 
 from app.contracts.channel_policy import ChannelScopedPolicy
+from app.contracts.editorial_authorship import EditorialAuthorshipContract
 from app.contracts.production_package import (
     ExactContentRefV2,
     ProductionDurationContractV2,
@@ -35,11 +36,13 @@ from app.db.models.channel import (
 )
 from app.db.models.m5 import (
     AudienceTargetPack,
+    EditorialIdeaCandidate,
     EditorialCalendarSlot,
     IdeaMarketPreflight,
     ProjectAdmissionDecision,
     SearchIntentMap,
 )
+from app.db.models.script_qualification import EditorialTopicDefinition
 from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
 from app.db.models.r3d7 import (
     AgentMemoryApplicationRecord,
@@ -188,6 +191,7 @@ class CanonicalV2SupportCompiler:
         script = versions["script"].content
         claims = list(script.get("supported_claims") or [])
         sections = list(script.get("sections") or [])
+        authorship = _build_editorial_authorship_contract(context, authority)
         return ProductionPackageCreateV2(
             content=ProductionPackageContentV2(
                 company_id=authority.project.company_id,
@@ -216,6 +220,7 @@ class CanonicalV2SupportCompiler:
                 episode_role=admission.episode_role,
                 standalone_reason_code=admission.standalone_reason_code,
                 duration_contract=authority.duration,
+                editorial_authorship=authorship,
                 support_envelope_ref=(
                     _exact_ref(
                         "frozen_support_envelope",
@@ -304,6 +309,7 @@ class CanonicalV2SupportCompiler:
                     rights_disclosure_gates_pass=True,
                     provider_plan_valid=True,
                     budget_scope_valid=True,
+                    authorship_contract_hash=authorship.content_hash,
                     package_integrity_inputs_complete=True,
                     unresolved_exception_types=[],
                     new_planning_cycle=False,
@@ -607,6 +613,116 @@ def _support_authority(
         support_envelope_artifact=support_envelope_artifact,
         support_envelope_version=support_envelope_version,
         support_envelope=support_envelope,
+    )
+
+
+def _build_editorial_authorship_contract(
+    context: WorkflowStageContext,
+    authority: _SupportAuthority,
+) -> EditorialAuthorshipContract:
+    """Compile existing topic/coverage authority into Card D's global law."""
+
+    candidate = (
+        context.session.get(
+            EditorialIdeaCandidate, authority.admission.editorial_idea_candidate_id
+        )
+        if authority.admission.editorial_idea_candidate_id is not None
+        else None
+    )
+    topic = (
+        context.session.scalars(
+            select(EditorialTopicDefinition)
+            .where(
+                EditorialTopicDefinition.editorial_idea_candidate_id == candidate.id
+            )
+            .order_by(EditorialTopicDefinition.topic_definition_version.desc())
+        ).first()
+        if candidate is not None
+        else None
+    )
+    proposal = (
+        candidate.editorial_idea_proposal
+        if candidate is not None
+        and isinstance(candidate.editorial_idea_proposal, dict)
+        else {}
+    )
+    if topic is None or not proposal:
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_AUTHORITY_REQUIRED")
+
+    lineage = (
+        authority.support_envelope.cross_modal_script_lineage
+        if authority.support_envelope is not None
+        else None
+    )
+    if lineage is not None:
+        ordered_sections = sorted(
+            lineage.section_coverage_plan.sections, key=lambda item: item.ordinal
+        )
+        section_deltas = [item.section_delta.strip() for item in ordered_sections]
+    else:
+        section_deltas = [
+            section.heading.strip()
+            for section in authority.support_envelope.approved_script.sections
+        ] if authority.support_envelope is not None else []
+    if len(section_deltas) < 3 or any(not delta for delta in section_deltas):
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_SPINE_REQUIRED")
+
+    series_binding = (
+        topic.series_binding if isinstance(topic.series_binding, dict) else {}
+    )
+    channel_promise = str(
+        authority.project.audience_promise
+        or authority.admission.audience_promise
+        or ""
+    ).strip()
+    episode_reasoning = str(
+        series_binding.get("episode_delta")
+        or proposal.get("editorial_delta")
+        or ""
+    ).strip()
+    if not channel_promise or not episode_reasoning:
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_PROMISE_REQUIRED")
+
+    return EditorialAuthorshipContract.build(
+        source_evidence_refs=[
+            str(item.get("ref") or item.get("id") or "").strip()
+            for item in authority.source_refs
+            if str(item.get("ref") or item.get("id") or "").strip()
+        ],
+        content_mode=str(authority.admission.content_mode),
+        format_key=str(authority.project.project_type or "UNSPECIFIED"),
+        channel_promise=channel_promise,
+        episode_reasoning=episode_reasoning,
+        central_question=str(
+            proposal.get("central_question_or_thesis")
+            or topic.central_question_or_thesis
+            or ""
+        ).strip(),
+        early_stakes_or_payoff=str(
+            proposal.get("specific_audience_problem")
+            or topic.audience_problem
+            or ""
+        ).strip(),
+        original_thesis_or_position=str(
+            proposal.get("proposed_angle") or ""
+        ).strip(),
+        editorial_delta=str(
+            proposal.get("editorial_delta") or ""
+        ).strip(),
+        reasoning_or_narrative_spine=" -> ".join(section_deltas),
+        progression=" -> ".join(
+            f"{index + 1}: {delta}" for index, delta in enumerate(section_deltas)
+        ),
+        tension_applicability="NOT_APPLICABLE",
+        visible_editorial_judgment=str(
+            proposal.get("decision_value") or topic.viewer_value or ""
+        ).strip(),
+        memorable_payoff_framework_or_conclusion=str(
+            proposal.get("viewer_value")
+            or proposal.get("learning_outcome")
+            or topic.learning_outcome
+            or ""
+        ).strip(),
     )
 
 

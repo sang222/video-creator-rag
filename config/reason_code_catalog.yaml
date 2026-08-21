@@ -51,6 +51,12 @@ items:
     description: Reused content transformation is insufficient.
   - code: HUMAN_VALUE_CONTRIBUTION_WEAK
     description: Human value contribution is weak.
+  - code: EDITORIAL_AUTHORSHIP_PASS
+    description: Global editorial authorship law is satisfied.
+  - code: EDITORIAL_AUTHORSHIP_CONTRACT_REQUIRED
+    description: Publishable content is missing the global editorial authorship contract.
+  - code: EDITORIAL_AUTHORSHIP_CONTRACT_INVALID
+    description: Global editorial authorship contract is invalid or not hash-bound.
   - code: ENTITY_RESTRICTED
     description: Restricted entity is referenced.
   - code: AFFILIATE_CONFLICT_WITH_CLAIM
