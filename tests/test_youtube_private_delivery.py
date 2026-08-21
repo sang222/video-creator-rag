@@ -106,7 +106,7 @@ def _insert_public_observation_event(
         aggregate_type="youtube_private_stage",
         aggregate_id=stage.id,
         company_id=stage.company_id,
-        channel_workspace_id=stage.channel_workspace_id,
+        channel_workspace_id=None,
         correlation_id=f"youtube-public-observation:{stage.id}",
         causation_id=stage.id,
         command_id=f"youtube-public-observation:{label}",
