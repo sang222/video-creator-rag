@@ -11,10 +11,13 @@ from app.contracts.semantic import (
 
 
 class SemanticProfileCompiler:
-    """Compile channel identity and format grammar without coupling either one.
+    """Pure Card E subcompiler for channel and format semantic authority.
 
-    The compiler has no database side effects.  Callers persist the resulting
-    sealed payload through the existing immutable ArtifactVersion mechanism.
+    This is not a second top-level channel-profile authority and has no
+    database side effects.  A later owning integration must make the canonical
+    ``ChannelProfileCompiler`` consume or delegate to this subcompiler.  The
+    resulting payload is compatible with the artifact system, but Card E does
+    not itself persist semantic snapshots through ``ArtifactVersion``.
     """
 
     version = "semantic-profile-compiler.v1"

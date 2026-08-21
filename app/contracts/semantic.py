@@ -24,6 +24,7 @@ from app.contracts.editorial_authorship import (
     EditorialAuthorshipContract,
     validate_viewer_facing_presentation,
 )
+from app.contracts.channel_policy import FormatIdentityBinding, PolicyRef
 
 
 SEMANTIC_KERNEL_VERSION = "vcos.semantic-kernel.v1"
@@ -303,12 +304,9 @@ class ComparisonFeatureDefinition(_StrictFrozen):
 
     @model_validator(mode="after")
     def valid_feature_definition(self) -> Self:
-        if (
-            len(self.allowed_values) != len(set(self.allowed_values))
-            or any(
-                re.fullmatch(_CONTROLLED_VALUE_PATTERN, item) is None
-                for item in self.allowed_values
-            )
+        if len(self.allowed_values) != len(set(self.allowed_values)) or any(
+            re.fullmatch(_CONTROLLED_VALUE_PATTERN, item) is None
+            for item in self.allowed_values
         ):
             raise ValueError("COMPARISON_FEATURE_CARDINALITY_INVALID")
         self.verify_integrity()
@@ -339,6 +337,8 @@ class SemanticKernelDefinition(_StrictFrozen):
         keys = [item.feature_key for item in self.global_feature_definitions]
         if len(keys) != len(set(keys)):
             raise ValueError("SEMANTIC_KERNEL_FEATURE_KEY_DUPLICATE")
+        for definition in self.global_feature_definitions:
+            definition.verify_integrity()
         self.verify_integrity()
         return self
 
@@ -353,9 +353,13 @@ class ChannelSemanticProfile(_StrictFrozen):
     schema_version: Literal["vcos.channel-semantic-profile.v1"] = (
         "vcos.channel-semantic-profile.v1"
     )
-    channel_profile_ref: str = Field(min_length=1, max_length=300)
+    # Reuse the canonical immutable authority-reference shape.  A mutable
+    # channel-profile locator alone is insufficient semantic authority.
+    channel_authority: PolicyRef
     semantic_definition_version: str = Field(min_length=1, max_length=120)
-    extension_definitions: list[SemanticExtensionDefinition] = Field(default_factory=list)
+    extension_definitions: list[SemanticExtensionDefinition] = Field(
+        default_factory=list
+    )
     comparison_feature_definitions: list[ComparisonFeatureDefinition] = Field(
         default_factory=list
     )
@@ -375,8 +379,18 @@ class ChannelSemanticProfile(_StrictFrozen):
         keys = [item.feature_key for item in self.comparison_feature_definitions]
         if len(ids) != len(set(ids)) or len(keys) != len(set(keys)):
             raise ValueError("CHANNEL_SEMANTIC_PROFILE_IDENTITY_DUPLICATE")
+        for definition in (
+            self.extension_definitions + self.comparison_feature_definitions
+        ):
+            definition.verify_integrity()
         self.verify_integrity()
         return self
+
+    @property
+    def channel_profile_ref(self) -> str:
+        """Compatibility accessor; identity is the complete authority binding."""
+
+        return self.channel_authority.ref
 
     @classmethod
     def build(cls, **values: Any) -> "ChannelSemanticProfile":
@@ -389,10 +403,14 @@ class FormatSemanticProfile(_StrictFrozen):
     schema_version: Literal["vcos.format-semantic-profile.v1"] = (
         "vcos.format-semantic-profile.v1"
     )
-    format_profile_ref: str = Field(min_length=1, max_length=300)
+    # This is the repository's approved FormatIdentityBinding, not a bare
+    # format locator.  It binds ref, version, content hash, and approval.
+    format_authority: FormatIdentityBinding
     semantic_definition_version: str = Field(min_length=1, max_length=120)
     required_projection_families: list[SemanticProjectionFamily] = Field(min_length=1)
-    extension_definitions: list[SemanticExtensionDefinition] = Field(default_factory=list)
+    extension_definitions: list[SemanticExtensionDefinition] = Field(
+        default_factory=list
+    )
     comparison_feature_definitions: list[ComparisonFeatureDefinition] = Field(
         default_factory=list
     )
@@ -417,8 +435,18 @@ class FormatSemanticProfile(_StrictFrozen):
             or len(keys) != len(set(keys))
         ):
             raise ValueError("FORMAT_SEMANTIC_PROFILE_IDENTITY_DUPLICATE")
+        for definition in (
+            self.extension_definitions + self.comparison_feature_definitions
+        ):
+            definition.verify_integrity()
         self.verify_integrity()
         return self
+
+    @property
+    def format_profile_ref(self) -> str:
+        """Compatibility accessor; identity is the complete authority binding."""
+
+        return self.format_authority.ref
 
     @classmethod
     def build(cls, **values: Any) -> "FormatSemanticProfile":
@@ -453,8 +481,13 @@ class SemanticProfileCompilation(_StrictFrozen):
 
     @model_validator(mode="after")
     def valid_compilation(self) -> Self:
+        self.kernel.verify_integrity()
+        self.channel_profile.verify_integrity()
+        self.format_profile.verify_integrity()
         feature_keys = [item.feature_key for item in self.feature_definitions]
-        extension_ids = [item.extension_definition_id for item in self.extension_definitions]
+        extension_ids = [
+            item.extension_definition_id for item in self.extension_definitions
+        ]
         if len(feature_keys) != len(set(feature_keys)):
             raise ValueError("SEMANTIC_COMPILATION_FEATURE_KEY_COLLISION")
         if len(extension_ids) != len(set(extension_ids)):
@@ -471,6 +504,17 @@ class SemanticAuthorityRef(_StrictFrozen):
     authority_type: str = Field(min_length=1, max_length=120)
     authority_ref: str = Field(min_length=1, max_length=500)
     content_hash: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def valid_authority_ref(self) -> Self:
+        # Card D contracts have a canonical immutable ref.  This check does
+        # not turn evidence into authorship; snapshot validation below decides
+        # which source types can authorize presentation intent.
+        if self.authority_type == "EDITORIAL_AUTHORSHIP_CONTRACT" and (
+            self.authority_ref != f"editorial-authorship://{self.content_hash}"
+        ):
+            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_BINDING_INVALID")
+        return self
 
 
 class SemanticExtensionPayload(_StrictFrozen):
@@ -511,13 +555,37 @@ class PresentationSemanticIntent(_StrictFrozen):
 class TemporalSemanticBinding(_StrictFrozen):
     """Keep semantic boundaries, viewer beats, and technical segments distinct."""
 
-    semantic_boundary_id: str = Field(min_length=1, max_length=200)
     semantic_owner_ref: str = Field(min_length=1, max_length=200)
+    authored_semantic_trigger_ref: str = Field(min_length=1, max_length=300)
     presentation_intent: PresentationSemanticIntent
+    semantic_boundary_ref: str | None = Field(
+        default=None, min_length=1, max_length=300
+    )
     viewer_beat_ref: str | None = Field(default=None, min_length=1, max_length=300)
     technical_segment_ref: str | None = Field(
         default=None, min_length=1, max_length=300
     )
+
+    @model_validator(mode="after")
+    def valid_temporal_binding(self) -> Self:
+        if re.fullmatch(
+            r"(?:(?:position|index|ordinal|slot)[-_:/]?)?\d+",
+            self.authored_semantic_trigger_ref.strip(),
+            flags=re.IGNORECASE,
+        ):
+            raise ValueError("AUTHORED_SEMANTIC_TRIGGER_POSITIONAL_FORBIDDEN")
+        if self.semantic_boundary_ref and self.semantic_boundary_ref in {
+            self.viewer_beat_ref,
+            self.technical_segment_ref,
+        }:
+            raise ValueError("SEMANTIC_BOUNDARY_PRESENTATION_OR_TECHNICAL_COLLISION")
+        return self
+
+    @property
+    def semantic_boundary_id(self) -> str | None:
+        """Compatibility accessor; a boundary is intentionally optional."""
+
+        return self.semantic_boundary_ref
 
 
 class OverlaySemanticIntent(_StrictFrozen):
@@ -527,7 +595,9 @@ class OverlaySemanticIntent(_StrictFrozen):
     semantic_owner_ref: str = Field(min_length=1, max_length=200)
     presentation_intent: PresentationSemanticIntent
     overlay_role: OverlayRole | None = None
-    information_purpose: str | None = Field(default=None, min_length=1, max_length=4_000)
+    information_purpose: str | None = Field(
+        default=None, min_length=1, max_length=4_000
+    )
     target_refs: list[str] = Field(default_factory=list)
     continuity_or_change_reason: str = Field(min_length=1, max_length=4_000)
 
@@ -575,16 +645,19 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
 
     @model_validator(mode="after")
     def valid_snapshot(self) -> Self:
+        self.semantic_profile.verify_integrity()
         meaning_ids = [item.meaning_id for item in self.meaning_units]
         authority_refs = [item.authority_ref for item in self.source_authorities]
         if len(meaning_ids) != len(set(meaning_ids)):
             raise ValueError("SEMANTIC_MEANING_ID_DUPLICATE")
         if len(authority_refs) != len(set(authority_refs)):
             raise ValueError("SEMANTIC_SOURCE_AUTHORITY_REF_DUPLICATE")
-        if not any(
-            item.authority_type == "EDITORIAL_AUTHORSHIP_CONTRACT"
+        authored_presentation_refs = {
+            item.authority_ref
             for item in self.source_authorities
-        ):
+            if item.authority_type == "EDITORIAL_AUTHORSHIP_CONTRACT"
+        }
+        if not authored_presentation_refs:
             raise ValueError("SEMANTIC_AUTHORSHIP_AUTHORITY_REQUIRED")
 
         allowed_extension_defs = {
@@ -607,9 +680,7 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
             extension_identity.add(identity)
 
         owner_refs = {
-            *(
-                binding.semantic_owner_ref for binding in self.temporal_bindings
-            ),
+            *(binding.semantic_owner_ref for binding in self.temporal_bindings),
             *(intent.semantic_owner_ref for intent in self.overlay_intents),
             *(extension.semantic_owner_ref for extension in self.extensions),
         }
@@ -622,8 +693,8 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
             intent.presentation_intent.editorial_authority_ref
             for intent in self.overlay_intents
         }
-        if not authored_refs.issubset(set(authority_refs)):
-            raise ValueError("SEMANTIC_PRESENTATION_AUTHORITY_UNKNOWN")
+        if not authored_refs.issubset(authored_presentation_refs):
+            raise ValueError("SEMANTIC_PRESENTATION_AUTHORITY_NOT_AUTHORED")
         self.verify_integrity()
         return self
 
@@ -639,7 +710,9 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
         source_authorities: Iterable[SemanticAuthorityRef] = (),
         **values: Any,
     ) -> "ProjectRichSemanticSnapshot":
-        authorship_ref = f"editorial-authorship://{editorial_authorship_contract.content_hash}"
+        authorship_ref = (
+            f"editorial-authorship://{editorial_authorship_contract.content_hash}"
+        )
         authorities = list(source_authorities)
         authorities.append(
             SemanticAuthorityRef(
@@ -677,9 +750,7 @@ class VisualReuseCompatibility(_StrictFrozen):
     @model_validator(mode="after")
     def valid_compatibility(self) -> Self:
         expected = bool(
-            self.subject_refs
-            and self.action_or_relationships
-            and self.context_refs
+            self.subject_refs and self.action_or_relationships and self.context_refs
         )
         if self.reuse_eligible != expected:
             raise ValueError("VISUAL_REUSE_COMPATIBILITY_INCOMPLETE")
@@ -743,7 +814,9 @@ class _Projection(_StrictFrozen):
 
 
 class WriterSemanticProjection(_Projection):
-    projection_family: Literal[SemanticProjectionFamily.WRITER] = SemanticProjectionFamily.WRITER
+    projection_family: Literal[SemanticProjectionFamily.WRITER] = (
+        SemanticProjectionFamily.WRITER
+    )
     writer_units: list[ProjectedSemanticUnit] = Field(default_factory=list)
 
     @classmethod
@@ -752,7 +825,9 @@ class WriterSemanticProjection(_Projection):
 
 
 class VisualSemanticProjection(_Projection):
-    projection_family: Literal[SemanticProjectionFamily.VISUAL] = SemanticProjectionFamily.VISUAL
+    projection_family: Literal[SemanticProjectionFamily.VISUAL] = (
+        SemanticProjectionFamily.VISUAL
+    )
     visual_units: list[ProjectedSemanticUnit] = Field(default_factory=list)
     reuse_compatibility: list[VisualReuseCompatibility] = Field(default_factory=list)
     temporal_bindings: list[TemporalSemanticBinding] = Field(default_factory=list)
@@ -775,7 +850,9 @@ class PackagingSemanticProjection(_Projection):
 
 
 class QCSemanticProjection(_Projection):
-    projection_family: Literal[SemanticProjectionFamily.QC] = SemanticProjectionFamily.QC
+    projection_family: Literal[SemanticProjectionFamily.QC] = (
+        SemanticProjectionFamily.QC
+    )
     qc_units: list[ProjectedSemanticUnit] = Field(default_factory=list)
 
     @classmethod
@@ -796,12 +873,53 @@ class ComparisonFeatureValue(_StrictFrozen):
         return self
 
 
-def _fingerprint(features: Iterable[ComparisonFeatureValue], scope: ComparisonFeatureScope) -> str:
+def _fingerprint(
+    *,
+    features: Iterable[ComparisonFeatureValue],
+    definitions: Iterable[ComparisonFeatureDefinition],
+    scope: ComparisonFeatureScope,
+    definition_identity: str,
+) -> str:
+    """Fingerprint values with their controlling semantic definition identity.
+
+    The explicit empty-scope state prevents an all-NOT_APPLICABLE definition
+    set from being silently equivalent to a scope with no definitions at all.
+    """
+
+    scoped_definitions = sorted(
+        (
+            {
+                "feature_key": definition.feature_key,
+                "content_hash": definition.content_hash,
+            }
+            for definition in definitions
+            if definition.scope == scope
+        ),
+        key=lambda item: item["feature_key"],
+    )
+    scoped_features = sorted(
+        (item for item in features if item.scope == scope),
+        key=lambda item: item.feature_key,
+    )
+    applicable_features = {
+        item.feature_key: item.value
+        for item in scoped_features
+        if item.applicability == Applicability.APPLICABLE
+    }
+    scope_state = (
+        "NO_FEATURE_DEFINITIONS"
+        if not scoped_definitions
+        else "APPLICABLE"
+        if applicable_features
+        else "ALL_NOT_APPLICABLE"
+    )
     return semantic_hash(
         {
-            item.feature_key: item.value
-            for item in sorted(features, key=lambda value: value.feature_key)
-            if item.scope == scope and item.applicability == Applicability.APPLICABLE
+            "scope": scope.value,
+            "definition_identity": definition_identity,
+            "feature_definition_hashes": scoped_definitions,
+            "scope_state": scope_state,
+            "applicable_feature_values": applicable_features,
         }
     )
 
@@ -812,7 +930,14 @@ class ComparisonFeatureView(_StrictFrozen):
     schema_version: Literal[COMPARISON_FEATURE_VIEW_VERSION] = (
         COMPARISON_FEATURE_VIEW_VERSION
     )
+    projection_family: Literal[SemanticProjectionFamily.LEARNING] = (
+        SemanticProjectionFamily.LEARNING
+    )
+    applicability: Literal[Applicability.APPLICABLE] = Applicability.APPLICABLE
     semantic_profile_hash: str = Field(pattern=SHA256_PATTERN)
+    kernel_definition_hash: str = Field(pattern=SHA256_PATTERN)
+    channel_definition_hash: str = Field(pattern=SHA256_PATTERN)
+    format_definition_hash: str = Field(pattern=SHA256_PATTERN)
     source_semantic_snapshot_ref: str = Field(min_length=1)
     source_semantic_snapshot_hash: str = Field(pattern=SHA256_PATTERN)
     feature_definitions: list[ComparisonFeatureDefinition] = Field(min_length=1)
@@ -825,9 +950,13 @@ class ComparisonFeatureView(_StrictFrozen):
 
     @model_validator(mode="after")
     def valid_comparison_view(self) -> Self:
+        for definition in self.feature_definitions:
+            definition.verify_integrity()
         definitions = {item.feature_key: item for item in self.feature_definitions}
         values = {item.feature_key: item for item in self.features}
-        if len(definitions) != len(self.feature_definitions) or len(values) != len(self.features):
+        if len(definitions) != len(self.feature_definitions) or len(values) != len(
+            self.features
+        ):
             raise ValueError("COMPARISON_FEATURE_ID_DUPLICATE")
         if set(definitions) != set(values):
             raise ValueError("COMPARISON_FEATURE_DEFINITION_SET_MISMATCH")
@@ -837,9 +966,24 @@ class ComparisonFeatureView(_StrictFrozen):
                 value.value is not None and value.value not in definition.allowed_values
             ):
                 raise ValueError("COMPARISON_FEATURE_VALUE_UNCONTROLLED")
-        expected_global = _fingerprint(self.features, ComparisonFeatureScope.GLOBAL)
-        expected_profile = _fingerprint(self.features, ComparisonFeatureScope.PROFILE)
-        expected_format = _fingerprint(self.features, ComparisonFeatureScope.FORMAT)
+        expected_global = _fingerprint(
+            features=self.features,
+            definitions=self.feature_definitions,
+            scope=ComparisonFeatureScope.GLOBAL,
+            definition_identity=self.kernel_definition_hash,
+        )
+        expected_profile = _fingerprint(
+            features=self.features,
+            definitions=self.feature_definitions,
+            scope=ComparisonFeatureScope.PROFILE,
+            definition_identity=self.channel_definition_hash,
+        )
+        expected_format = _fingerprint(
+            features=self.features,
+            definitions=self.feature_definitions,
+            scope=ComparisonFeatureScope.FORMAT,
+            definition_identity=self.format_definition_hash,
+        )
         expected_comparison = semantic_hash(
             {
                 "global": expected_global,
@@ -864,10 +1008,32 @@ class ComparisonFeatureView(_StrictFrozen):
         snapshot: ProjectRichSemanticSnapshot,
         features: Iterable[ComparisonFeatureValue],
     ) -> "ComparisonFeatureView":
+        snapshot.verify_integrity()
+        if (
+            SemanticProjectionFamily.LEARNING
+            not in snapshot.semantic_profile.format_profile.required_projection_families
+        ):
+            raise ValueError("LEARNING_PROJECTION_FORMAT_NOT_APPLICABLE")
         values = list(features)
-        global_fingerprint = _fingerprint(values, ComparisonFeatureScope.GLOBAL)
-        profile_fingerprint = _fingerprint(values, ComparisonFeatureScope.PROFILE)
-        format_fingerprint = _fingerprint(values, ComparisonFeatureScope.FORMAT)
+        definitions = list(snapshot.semantic_profile.feature_definitions)
+        global_fingerprint = _fingerprint(
+            features=values,
+            definitions=definitions,
+            scope=ComparisonFeatureScope.GLOBAL,
+            definition_identity=snapshot.semantic_profile.kernel.content_hash,
+        )
+        profile_fingerprint = _fingerprint(
+            features=values,
+            definitions=definitions,
+            scope=ComparisonFeatureScope.PROFILE,
+            definition_identity=snapshot.semantic_profile.channel_profile.content_hash,
+        )
+        format_fingerprint = _fingerprint(
+            features=values,
+            definitions=definitions,
+            scope=ComparisonFeatureScope.FORMAT,
+            definition_identity=snapshot.semantic_profile.format_profile.content_hash,
+        )
         comparison_fingerprint = semantic_hash(
             {
                 "global": global_fingerprint,
@@ -877,11 +1043,14 @@ class ComparisonFeatureView(_StrictFrozen):
         )
         return cls._seal(
             semantic_profile_hash=snapshot.semantic_profile.content_hash,
+            kernel_definition_hash=snapshot.semantic_profile.kernel.content_hash,
+            channel_definition_hash=snapshot.semantic_profile.channel_profile.content_hash,
+            format_definition_hash=snapshot.semantic_profile.format_profile.content_hash,
             source_semantic_snapshot_ref=(
                 f"semantic-snapshot://{snapshot.snapshot_id}"
             ),
             source_semantic_snapshot_hash=snapshot.content_hash,
-            feature_definitions=list(snapshot.semantic_profile.feature_definitions),
+            feature_definitions=definitions,
             features=values,
             shared_feature_fingerprint=global_fingerprint,
             profile_feature_fingerprint=profile_fingerprint,
@@ -903,9 +1072,7 @@ class ComparisonFeatureView(_StrictFrozen):
         """
 
         selected_scope = (
-            ComparisonFeatureScope.GLOBAL
-            if comparison_scope == "GLOBAL"
-            else None
+            ComparisonFeatureScope.GLOBAL if comparison_scope == "GLOBAL" else None
         )
         return {
             "normalized_features": {
@@ -934,7 +1101,10 @@ class SemanticProjectionCompiler:
         snapshot: ProjectRichSemanticSnapshot,
         family: SemanticProjectionFamily,
     ) -> bool:
-        return family in snapshot.semantic_profile.format_profile.required_projection_families
+        return (
+            family
+            in snapshot.semantic_profile.format_profile.required_projection_families
+        )
 
     @classmethod
     def _not_applicable(
@@ -998,20 +1168,14 @@ class SemanticProjectionCompiler:
                 proposition=unit.statement,
                 action_or_relationships=values_for(
                     unit,
-                    frozenset(
-                        {SemanticAtomKind.ACTION, SemanticAtomKind.RELATIONSHIP}
-                    ),
+                    frozenset({SemanticAtomKind.ACTION, SemanticAtomKind.RELATIONSHIP}),
                 ),
-                context_refs=values_for(
-                    unit, frozenset({SemanticAtomKind.CONTEXT})
-                ),
+                context_refs=values_for(unit, frozenset({SemanticAtomKind.CONTEXT})),
                 factuality=unit.factuality,
                 reuse_eligible=bool(
                     values_for(
                         unit,
-                        frozenset(
-                            {SemanticAtomKind.SUBJECT, SemanticAtomKind.ENTITY}
-                        ),
+                        frozenset({SemanticAtomKind.SUBJECT, SemanticAtomKind.ENTITY}),
                     )
                     and values_for(
                         unit,
@@ -1029,6 +1193,7 @@ class SemanticProjectionCompiler:
     def writer(
         cls, snapshot: ProjectRichSemanticSnapshot
     ) -> WriterSemanticProjection | ProjectionNotApplicable:
+        snapshot.verify_integrity()
         family = SemanticProjectionFamily.WRITER
         if not cls._applicable(snapshot, family):
             return cls._not_applicable(snapshot, family)
@@ -1043,6 +1208,7 @@ class SemanticProjectionCompiler:
     def visual(
         cls, snapshot: ProjectRichSemanticSnapshot
     ) -> VisualSemanticProjection | ProjectionNotApplicable:
+        snapshot.verify_integrity()
         family = SemanticProjectionFamily.VISUAL
         if not cls._applicable(snapshot, family):
             return cls._not_applicable(snapshot, family)
@@ -1060,6 +1226,7 @@ class SemanticProjectionCompiler:
     def packaging(
         cls, snapshot: ProjectRichSemanticSnapshot
     ) -> PackagingSemanticProjection | ProjectionNotApplicable:
+        snapshot.verify_integrity()
         family = SemanticProjectionFamily.PACKAGING
         if not cls._applicable(snapshot, family):
             return cls._not_applicable(snapshot, family)
@@ -1074,6 +1241,7 @@ class SemanticProjectionCompiler:
     def qc(
         cls, snapshot: ProjectRichSemanticSnapshot
     ) -> QCSemanticProjection | ProjectionNotApplicable:
+        snapshot.verify_integrity()
         family = SemanticProjectionFamily.QC
         if not cls._applicable(snapshot, family):
             return cls._not_applicable(snapshot, family)
@@ -1083,3 +1251,23 @@ class SemanticProjectionCompiler:
             qc_units=cls._units(snapshot, _QC_ATOMS),
             extensions=cls._extensions(snapshot, family),
         )
+
+    @classmethod
+    def learning(
+        cls,
+        snapshot: ProjectRichSemanticSnapshot,
+        *,
+        features: Iterable[ComparisonFeatureValue],
+    ) -> ComparisonFeatureView | ProjectionNotApplicable:
+        """Return Card E's canonical controlled learning view when applicable.
+
+        Values are an explicit controlled input.  This compiler never derives
+        learning categories from a rich meaning statement, nor does it make a
+        learning decision or persist a learning record.
+        """
+
+        snapshot.verify_integrity()
+        family = SemanticProjectionFamily.LEARNING
+        if not cls._applicable(snapshot, family):
+            return cls._not_applicable(snapshot, family)
+        return ComparisonFeatureView.build(snapshot=snapshot, features=features)

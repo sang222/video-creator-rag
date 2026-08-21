@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from app.contracts.ai_visual_production import AIVisualNarrationUnit
 from app.contracts.editorial_authorship import EditorialAuthorshipContract
+from app.contracts.channel_policy import FormatIdentityBinding, PolicyRef
 from app.contracts.semantic import (
     Applicability,
     ChannelSemanticProfile,
@@ -68,7 +71,11 @@ def _kernel() -> SemanticKernelDefinition:
 
 def _small_team_channel() -> ChannelSemanticProfile:
     return ChannelSemanticProfile.build(
-        channel_profile_ref="channel-profile://operator-notes/v3",
+        channel_authority=PolicyRef(
+            ref="channel-profile://operator-notes/v3",
+            version="3",
+            content_hash="a" * 64,
+        ),
         semantic_definition_version="operator-notes-semantic/v1",
         extension_definitions=[
             SemanticExtensionDefinition.build(
@@ -91,7 +98,12 @@ def _small_team_channel() -> ChannelSemanticProfile:
 
 def _explainer_format() -> FormatSemanticProfile:
     return FormatSemanticProfile.build(
-        format_profile_ref="format-profile://editorial-explainer/v2",
+        format_authority=FormatIdentityBinding(
+            ref="format-profile://editorial-explainer/v2",
+            version="2",
+            content_hash="b" * 64,
+            status="APPROVED",
+        ),
         semantic_definition_version="editorial-explainer-semantic/v2",
         required_projection_families=[
             SemanticProjectionFamily.WRITER,
@@ -112,7 +124,12 @@ def _explainer_format() -> FormatSemanticProfile:
 
 def _audio_commentary_format() -> FormatSemanticProfile:
     return FormatSemanticProfile.build(
-        format_profile_ref="format-profile://solo-commentary/v1",
+        format_authority=FormatIdentityBinding(
+            ref="format-profile://solo-commentary/v1",
+            version="1",
+            content_hash="c" * 64,
+            status="APPROVED",
+        ),
         semantic_definition_version="solo-commentary-semantic/v1",
         required_projection_families=[
             SemanticProjectionFamily.WRITER,
@@ -132,7 +149,11 @@ def _audio_commentary_format() -> FormatSemanticProfile:
 
 def _podcast_channel() -> ChannelSemanticProfile:
     return ChannelSemanticProfile.build(
-        channel_profile_ref="channel-profile://future-conversations/v1",
+        channel_authority=PolicyRef(
+            ref="channel-profile://future-conversations/v1",
+            version="1",
+            content_hash="d" * 64,
+        ),
         semantic_definition_version="future-conversations-semantic/v1",
         extension_definitions=[
             SemanticExtensionDefinition.build(
@@ -155,7 +176,12 @@ def _podcast_channel() -> ChannelSemanticProfile:
 
 def _podcast_format() -> FormatSemanticProfile:
     return FormatSemanticProfile.build(
-        format_profile_ref="format-profile://interview-podcast/v1",
+        format_authority=FormatIdentityBinding(
+            ref="format-profile://interview-podcast/v1",
+            version="1",
+            content_hash="e" * 64,
+            status="APPROVED",
+        ),
         semantic_definition_version="interview-podcast-semantic/v1",
         required_projection_families=[
             SemanticProjectionFamily.WRITER,
@@ -170,6 +196,43 @@ def _podcast_format() -> FormatSemanticProfile:
                 ["INTERVIEW", "ROUND_TABLE"],
             )
         ],
+    )
+
+
+def _small_team_channel_variant(
+    *,
+    authority: PolicyRef | None = None,
+    comparison_feature_definitions: list[ComparisonFeatureDefinition] | None = None,
+) -> ChannelSemanticProfile:
+    base = _small_team_channel()
+    return ChannelSemanticProfile.build(
+        channel_authority=authority or base.channel_authority,
+        semantic_definition_version=base.semantic_definition_version,
+        extension_definitions=base.extension_definitions,
+        comparison_feature_definitions=(
+            comparison_feature_definitions
+            if comparison_feature_definitions is not None
+            else base.comparison_feature_definitions
+        ),
+    )
+
+
+def _explainer_format_variant(
+    *,
+    authority: FormatIdentityBinding | None = None,
+    required_projection_families: list[SemanticProjectionFamily] | None = None,
+) -> FormatSemanticProfile:
+    base = _explainer_format()
+    return FormatSemanticProfile.build(
+        format_authority=authority or base.format_authority,
+        semantic_definition_version=base.semantic_definition_version,
+        required_projection_families=(
+            required_projection_families
+            if required_projection_families is not None
+            else base.required_projection_families
+        ),
+        extension_definitions=base.extension_definitions,
+        comparison_feature_definitions=base.comparison_feature_definitions,
     )
 
 
@@ -331,14 +394,15 @@ def _snapshot(
         extensions=[extension],
         temporal_bindings=[
             TemporalSemanticBinding(
-                semantic_boundary_id="boundary-approval-001",
                 semantic_owner_ref="meaning-approval-recovery",
+                authored_semantic_trigger_ref="authored-trigger://approval-recognition",
                 presentation_intent=PresentationSemanticIntent(
                     outcome=PresentationOutcome.HOLD,
                     semantic_role=SemanticPresentationRole.HOLD,
                     editorial_reason="Hold while the viewer resolves the approval boundary.",
                     editorial_authority_ref=authorship_ref,
                 ),
+                semantic_boundary_ref="semantic-boundary://approval-001",
                 viewer_beat_ref="viewer-beat://approval-recognition",
                 technical_segment_ref="provider-segment://unrelated-boundary",
             )
@@ -382,7 +446,10 @@ def _feature_values(snapshot, *, mechanism: str = "ASYNC_APPROVAL"):
 def test_small_team_like_profile_compiles_without_global_hard_code():
     compiled = _compilation()
 
-    assert compiled.channel_profile.channel_profile_ref == "channel-profile://operator-notes/v3"
+    assert (
+        compiled.channel_profile.channel_profile_ref
+        == "channel-profile://operator-notes/v3"
+    )
     assert "SMALL_TEAM_AI" not in compiled.model_dump_json()
     assert compiled.format_profile.format_profile_ref.endswith("editorial-explainer/v2")
 
@@ -405,10 +472,21 @@ def test_channel_is_not_format_same_channel_can_compile_distinct_format_projecti
     explainer = _compilation(channel, _explainer_format())
     commentary = _compilation(channel, _audio_commentary_format())
 
-    assert explainer.channel_profile.content_hash == commentary.channel_profile.content_hash
-    assert explainer.format_profile.content_hash != commentary.format_profile.content_hash
-    assert SemanticProjectionFamily.VISUAL in explainer.format_profile.required_projection_families
-    assert SemanticProjectionFamily.VISUAL not in commentary.format_profile.required_projection_families
+    assert (
+        explainer.channel_profile.content_hash
+        == commentary.channel_profile.content_hash
+    )
+    assert (
+        explainer.format_profile.content_hash != commentary.format_profile.content_hash
+    )
+    assert (
+        SemanticProjectionFamily.VISUAL
+        in explainer.format_profile.required_projection_families
+    )
+    assert (
+        SemanticProjectionFamily.VISUAL
+        not in commentary.format_profile.required_projection_families
+    )
 
 
 def test_stage_projections_share_language_but_not_a_shared_payload():
@@ -429,8 +507,12 @@ def test_stage_projections_share_language_but_not_a_shared_payload():
 
 
 def test_rich_snapshots_with_different_mechanisms_can_share_a_coarse_feature_family():
-    first = _snapshot(statement="A three-stage async approval recovery preserves a bounded fallback.")
-    second = _snapshot(statement="A delegated exception queue preserves an accountable recovery boundary.")
+    first = _snapshot(
+        statement="A three-stage async approval recovery preserves a bounded fallback."
+    )
+    second = _snapshot(
+        statement="A delegated exception queue preserves an accountable recovery boundary."
+    )
 
     first_view = ComparisonFeatureView.build(
         snapshot=first, features=_feature_values(first)
@@ -440,7 +522,9 @@ def test_rich_snapshots_with_different_mechanisms_can_share_a_coarse_feature_fam
     )
 
     assert first.content_hash != second.content_hash
-    assert first_view.shared_feature_fingerprint == second_view.shared_feature_fingerprint
+    assert (
+        first_view.shared_feature_fingerprint == second_view.shared_feature_fingerprint
+    )
     assert first_view.comparison_fingerprint == second_view.comparison_fingerprint
 
 
@@ -472,7 +556,9 @@ def test_not_applicable_is_explicit_and_cannot_be_unknown_or_zero():
         applicability=Applicability.NOT_APPLICABLE,
     )
     assert value.value is None
-    with pytest.raises(ValidationError, match="COMPARISON_FEATURE_APPLICABILITY_VALUE_INVALID"):
+    with pytest.raises(
+        ValidationError, match="COMPARISON_FEATURE_APPLICABILITY_VALUE_INVALID"
+    ):
         ComparisonFeatureValue(
             feature_key="visual_grammar_family",
             scope=ComparisonFeatureScope.FORMAT,
@@ -484,7 +570,9 @@ def test_not_applicable_is_explicit_and_cannot_be_unknown_or_zero():
 def test_semantic_owner_requires_explicit_identity_never_a_position():
     compiled = _compilation()
     authorship = _authorship()
-    with pytest.raises(ValidationError, match="SEMANTIC_OWNER_REF_UNKNOWN_OR_POSITIONAL"):
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_OWNER_REF_UNKNOWN_OR_POSITIONAL"
+    ):
         ProjectRichSemanticSnapshot.build_from_authorship_contract(
             editorial_authorship_contract=authorship,
             snapshot_id="semantic-snapshot-invalid",
@@ -494,8 +582,8 @@ def test_semantic_owner_requires_explicit_identity_never_a_position():
             meaning_units=[_meaning()],
             temporal_bindings=[
                 TemporalSemanticBinding(
-                    semantic_boundary_id="boundary-1",
                     semantic_owner_ref="position-1",
+                    authored_semantic_trigger_ref="authored-trigger://meaning-1",
                     presentation_intent=PresentationSemanticIntent(
                         outcome=PresentationOutcome.HOLD,
                         semantic_role=SemanticPresentationRole.HOLD,
@@ -531,7 +619,7 @@ def test_effect_role_is_semantic_why_not_a_renderer_primitive():
 def test_semantic_boundary_viewer_beat_and_technical_segment_are_distinct():
     binding = _snapshot().temporal_bindings[0]
 
-    assert binding.semantic_boundary_id == "boundary-approval-001"
+    assert binding.semantic_boundary_ref == "semantic-boundary://approval-001"
     assert binding.viewer_beat_ref == "viewer-beat://approval-recognition"
     assert binding.technical_segment_ref == "provider-segment://unrelated-boundary"
     assert "ms" not in binding.model_dump_json().lower()
@@ -540,9 +628,15 @@ def test_semantic_boundary_viewer_beat_and_technical_segment_are_distinct():
 def test_hold_and_no_overlay_remain_valid_under_card_d_law():
     snapshot = _snapshot()
 
-    assert snapshot.temporal_bindings[0].presentation_intent.outcome == PresentationOutcome.HOLD
+    assert (
+        snapshot.temporal_bindings[0].presentation_intent.outcome
+        == PresentationOutcome.HOLD
+    )
     assert snapshot.overlay_intents[0].overlay_state == OverlayState.NO_OVERLAY
-    assert snapshot.overlay_intents[0].presentation_intent.outcome == PresentationOutcome.NO_VISUAL_CHANGE
+    assert (
+        snapshot.overlay_intents[0].presentation_intent.outcome
+        == PresentationOutcome.NO_VISUAL_CHANGE
+    )
 
 
 def test_visual_reuse_requires_subject_proposition_action_context_and_factuality():
@@ -591,14 +685,30 @@ def test_profile_extension_rejects_undeclared_fields_without_global_schema_chang
 
 
 def test_rich_snapshot_hash_never_becomes_learning_equivalence_identity():
-    first = _snapshot(statement="A three-stage async approval recovery preserves a bounded fallback.")
-    second = _snapshot(statement="A delegated exception queue preserves an accountable recovery boundary.")
-    first_view = ComparisonFeatureView.build(snapshot=first, features=_feature_values(first))
-    second_view = ComparisonFeatureView.build(snapshot=second, features=_feature_values(second))
+    first = _snapshot(
+        statement="A three-stage async approval recovery preserves a bounded fallback."
+    )
+    second = _snapshot(
+        statement="A delegated exception queue preserves an accountable recovery boundary."
+    )
+    first_view = ComparisonFeatureView.build(
+        snapshot=first, features=_feature_values(first)
+    )
+    second_view = ComparisonFeatureView.build(
+        snapshot=second, features=_feature_values(second)
+    )
 
-    assert first_view.source_semantic_snapshot_hash != second_view.source_semantic_snapshot_hash
-    assert first_view.learning_equivalence_payload() == second_view.learning_equivalence_payload()
-    assert "source_semantic_snapshot_hash" not in first_view.learning_equivalence_payload()
+    assert (
+        first_view.source_semantic_snapshot_hash
+        != second_view.source_semantic_snapshot_hash
+    )
+    assert (
+        first_view.learning_equivalence_payload()
+        == second_view.learning_equivalence_payload()
+    )
+    assert (
+        "source_semantic_snapshot_hash" not in first_view.learning_equivalence_payload()
+    )
 
 
 def test_cross_profile_learning_can_compare_only_global_applicable_features():
@@ -616,15 +726,17 @@ def test_cross_profile_learning_can_compare_only_global_applicable_features():
         features=_feature_values(podcast_snapshot),
     )
 
-    assert small_view.shared_feature_fingerprint == podcast_view.shared_feature_fingerprint
+    assert (
+        small_view.shared_feature_fingerprint == podcast_view.shared_feature_fingerprint
+    )
     assert small_view.comparison_fingerprint != podcast_view.comparison_fingerprint
     assert small_view.learning_equivalence_payload(
         comparison_scope="GLOBAL"
     ) == podcast_view.learning_equivalence_payload(comparison_scope="GLOBAL")
     assert set(
-        small_view.learning_equivalence_payload(
-            comparison_scope="GLOBAL"
-        )["normalized_features"]
+        small_view.learning_equivalence_payload(comparison_scope="GLOBAL")[
+            "normalized_features"
+        ]
     ) == {"angle_family", "mechanism_family"}
 
 
@@ -648,3 +760,350 @@ def test_existing_card_d_and_ai_visual_inputs_remain_readable_without_card_e_fie
 
     assert unit.information_unit_ids == ["information-1"]
     assert _authorship().viewer_facing_presentation.no_effect_without_editorial_reason
+
+
+def test_pr_workflow_explicitly_gates_card_e_source_tests_and_lint():
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github/workflows/canonical-semantic-language.yml"
+    ).read_text()
+
+    assert "pull_request:" in workflow
+    assert "pytest -q tests/test_canonical_semantic_language.py" in workflow
+    assert "app/contracts/semantic.py" in workflow
+    assert "app/services/semantic.py" in workflow
+    assert "tests/test_canonical_semantic_language.py" in workflow
+
+
+def test_exact_channel_and_format_authority_bindings_change_compilation_identity():
+    baseline = _compilation()
+    same = _compilation()
+    changed_channel = _small_team_channel().model_copy(
+        update={
+            "channel_authority": PolicyRef(
+                ref="channel-profile://operator-notes/v3",
+                version="3",
+                content_hash="f" * 64,
+            )
+        }
+    )
+    changed_format = _explainer_format().model_copy(
+        update={
+            "format_authority": FormatIdentityBinding(
+                ref="format-profile://editorial-explainer/v2",
+                version="3",
+                content_hash="b" * 64,
+                status="APPROVED",
+            )
+        }
+    )
+
+    assert baseline.content_hash == same.content_hash
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        SemanticProfileCompiler.compile(
+            kernel=_kernel(),
+            channel_profile=changed_channel,
+            format_profile=_explainer_format(),
+        )
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        SemanticProfileCompiler.compile(
+            kernel=_kernel(),
+            channel_profile=_small_team_channel(),
+            format_profile=changed_format,
+        )
+
+    rebounded_channel = _small_team_channel_variant(
+        authority=PolicyRef(
+            ref="channel-profile://operator-notes/v3",
+            version="3",
+            content_hash="f" * 64,
+        )
+    )
+    rebound_format = _explainer_format_variant(
+        authority=FormatIdentityBinding(
+            ref="format-profile://editorial-explainer/v2",
+            version="3",
+            content_hash="b" * 64,
+            status="APPROVED",
+        )
+    )
+    assert (
+        SemanticProfileCompiler.compile(
+            kernel=_kernel(),
+            channel_profile=rebounded_channel,
+            format_profile=_explainer_format(),
+        ).content_hash
+        != baseline.content_hash
+    )
+    assert (
+        SemanticProfileCompiler.compile(
+            kernel=_kernel(),
+            channel_profile=_small_team_channel(),
+            format_profile=rebound_format,
+        ).content_hash
+        != baseline.content_hash
+    )
+
+
+def test_nested_authority_and_definition_hash_drift_fail_closed():
+    channel = _small_team_channel()
+    channel.channel_authority.content_hash = "f" * 64
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        channel.verify_integrity()
+
+    format_profile = _explainer_format()
+    format_profile.format_authority.content_hash = "0" * 64
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        format_profile.verify_integrity()
+
+    kernel = _kernel()
+    definition = kernel.global_feature_definitions[0].model_copy(
+        update={"allowed_values": ["FAILURE_MECHANISM"]}
+    )
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        definition.verify_integrity()
+    kernel.global_feature_definitions[0] = definition
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        kernel.verify_integrity()
+
+    projection = SemanticProjectionCompiler.writer(_snapshot())
+    assert isinstance(projection, WriterSemanticProjection)
+    tampered_projection = projection.model_copy(
+        update={"semantic_snapshot_ref": "semantic-snapshot://tampered"}
+    )
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        tampered_projection.verify_integrity()
+
+
+def test_only_card_d_authorship_contract_can_author_presentation_intent():
+    snapshot = _snapshot()
+    evidence_ref = "evidence://approved/recovery"
+    evidence = SemanticAuthorityRef(
+        authority_type="RESEARCH_EVIDENCE",
+        authority_ref=evidence_ref,
+        content_hash="9" * 64,
+    )
+    evidence_bound_intent = snapshot.temporal_bindings[
+        0
+    ].presentation_intent.model_copy(update={"editorial_authority_ref": evidence_ref})
+    evidence_bound_binding = snapshot.temporal_bindings[0].model_copy(
+        update={"presentation_intent": evidence_bound_intent}
+    )
+
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_PRESENTATION_AUTHORITY_NOT_AUTHORED"
+    ):
+        ProjectRichSemanticSnapshot.build(
+            snapshot_id="semantic-snapshot-evidence-bound",
+            project_ref=snapshot.project_ref,
+            revision_ref=snapshot.revision_ref,
+            semantic_profile=snapshot.semantic_profile,
+            source_authorities=[*snapshot.source_authorities, evidence],
+            meaning_units=snapshot.meaning_units,
+            extensions=snapshot.extensions,
+            temporal_bindings=[evidence_bound_binding],
+            overlay_intents=snapshot.overlay_intents,
+        )
+
+    unknown_bound_intent = snapshot.temporal_bindings[0].presentation_intent.model_copy(
+        update={"editorial_authority_ref": "authorship://unknown"}
+    )
+    unknown_bound_binding = snapshot.temporal_bindings[0].model_copy(
+        update={"presentation_intent": unknown_bound_intent}
+    )
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_PRESENTATION_AUTHORITY_NOT_AUTHORED"
+    ):
+        ProjectRichSemanticSnapshot.build(
+            snapshot_id="semantic-snapshot-unknown-bound",
+            project_ref=snapshot.project_ref,
+            revision_ref=snapshot.revision_ref,
+            semantic_profile=snapshot.semantic_profile,
+            source_authorities=snapshot.source_authorities,
+            meaning_units=snapshot.meaning_units,
+            extensions=snapshot.extensions,
+            temporal_bindings=[unknown_bound_binding],
+            overlay_intents=snapshot.overlay_intents,
+        )
+
+
+def test_learning_projection_is_canonical_and_respects_format_applicability():
+    snapshot = _snapshot()
+    learning = SemanticProjectionCompiler.learning(
+        snapshot, features=_feature_values(snapshot)
+    )
+
+    assert isinstance(learning, ComparisonFeatureView)
+    assert learning.projection_family == SemanticProjectionFamily.LEARNING
+    assert learning.applicability == Applicability.APPLICABLE
+
+    format_without_learning = _explainer_format_variant(
+        required_projection_families=[SemanticProjectionFamily.WRITER]
+    )
+    not_applicable_snapshot = _snapshot(
+        compilation=_compilation(format=format_without_learning)
+    )
+    result = SemanticProjectionCompiler.learning(
+        not_applicable_snapshot,
+        features=_feature_values(not_applicable_snapshot),
+    )
+
+    assert isinstance(result, ProjectionNotApplicable)
+    assert result.projection_family == SemanticProjectionFamily.LEARNING
+    with pytest.raises(ValueError, match="LEARNING_PROJECTION_FORMAT_NOT_APPLICABLE"):
+        ComparisonFeatureView.build(
+            snapshot=not_applicable_snapshot,
+            features=_feature_values(not_applicable_snapshot),
+        )
+
+
+def test_definition_aware_fingerprints_distinguish_definition_drift_only_when_scoped():
+    baseline_snapshot = _snapshot()
+    baseline_view = ComparisonFeatureView.build(
+        snapshot=baseline_snapshot,
+        features=_feature_values(baseline_snapshot),
+    )
+    changed_kernel = SemanticKernelDefinition.build(
+        global_feature_definitions=[
+            _feature(
+                "angle_family",
+                ComparisonFeatureScope.GLOBAL,
+                ["FAILURE_MECHANISM", "DECISION_GUIDE"],
+            ),
+            _feature(
+                "mechanism_family",
+                ComparisonFeatureScope.GLOBAL,
+                ["ASYNC_APPROVAL", "WORKFLOW_HANDOFF", "ESCALATION_PATH"],
+            ),
+        ]
+    )
+    kernel_changed_snapshot = _snapshot(
+        compilation=SemanticProfileCompiler.compile(
+            kernel=changed_kernel,
+            channel_profile=_small_team_channel(),
+            format_profile=_explainer_format(),
+        )
+    )
+    kernel_changed_view = ComparisonFeatureView.build(
+        snapshot=kernel_changed_snapshot,
+        features=_feature_values(kernel_changed_snapshot),
+    )
+
+    assert (
+        baseline_view.shared_feature_fingerprint
+        != kernel_changed_view.shared_feature_fingerprint
+    )
+
+    profile_definition = _feature(
+        "narrative_structure",
+        ComparisonFeatureScope.PROFILE,
+        [
+            "PROBLEM_TO_DECISION",
+            "FAILURE_TO_RECOVERY",
+            "DIRECT_TO_DECISION",
+        ],
+    )
+    profile_changed_snapshot = _snapshot(
+        compilation=_compilation(
+            channel=_small_team_channel_variant(
+                comparison_feature_definitions=[profile_definition]
+            )
+        )
+    )
+    profile_changed_view = ComparisonFeatureView.build(
+        snapshot=profile_changed_snapshot,
+        features=_feature_values(profile_changed_snapshot),
+    )
+
+    assert (
+        baseline_view.shared_feature_fingerprint
+        == profile_changed_view.shared_feature_fingerprint
+    )
+    assert (
+        baseline_view.comparison_fingerprint
+        != profile_changed_view.comparison_fingerprint
+    )
+
+
+def test_empty_scope_state_is_not_equivalent_to_all_not_applicable():
+    baseline = _snapshot()
+    all_not_applicable_values = [
+        ComparisonFeatureValue(
+            feature_key=definition.feature_key,
+            scope=definition.scope,
+            applicability=(
+                Applicability.NOT_APPLICABLE
+                if definition.scope == ComparisonFeatureScope.PROFILE
+                else Applicability.APPLICABLE
+            ),
+            value=(
+                None
+                if definition.scope == ComparisonFeatureScope.PROFILE
+                else _feature_values(baseline)[index].value
+            ),
+        )
+        for index, definition in enumerate(
+            baseline.semantic_profile.feature_definitions
+        )
+    ]
+    all_not_applicable = ComparisonFeatureView.build(
+        snapshot=baseline,
+        features=all_not_applicable_values,
+    )
+    no_profile_snapshot = _snapshot(
+        compilation=_compilation(
+            channel=_small_team_channel_variant(comparison_feature_definitions=[])
+        )
+    )
+    no_profile = ComparisonFeatureView.build(
+        snapshot=no_profile_snapshot,
+        features=_feature_values(no_profile_snapshot),
+    )
+
+    assert (
+        all_not_applicable.profile_feature_fingerprint
+        != no_profile.profile_feature_fingerprint
+    )
+
+
+def test_viewer_beat_or_technical_segment_can_exist_without_a_semantic_boundary():
+    snapshot = _snapshot()
+    binding = TemporalSemanticBinding(
+        semantic_owner_ref="meaning-approval-recovery",
+        authored_semantic_trigger_ref="authored-trigger://same-meaning/focus-b",
+        presentation_intent=snapshot.temporal_bindings[0].presentation_intent,
+        viewer_beat_ref="viewer-beat://focus-b",
+        technical_segment_ref="provider-segment://part-2",
+    )
+    no_boundary_snapshot = ProjectRichSemanticSnapshot.build(
+        snapshot_id="semantic-snapshot-no-boundary",
+        project_ref=snapshot.project_ref,
+        revision_ref=snapshot.revision_ref,
+        semantic_profile=snapshot.semantic_profile,
+        source_authorities=snapshot.source_authorities,
+        meaning_units=snapshot.meaning_units,
+        extensions=snapshot.extensions,
+        temporal_bindings=[binding],
+        overlay_intents=snapshot.overlay_intents,
+    )
+
+    assert no_boundary_snapshot.temporal_bindings[0].semantic_boundary_ref is None
+    assert (
+        no_boundary_snapshot.temporal_bindings[0].viewer_beat_ref
+        == "viewer-beat://focus-b"
+    )
+    assert (
+        no_boundary_snapshot.temporal_bindings[0].technical_segment_ref
+        == "provider-segment://part-2"
+    )
+    assert (
+        "ms" not in no_boundary_snapshot.temporal_bindings[0].model_dump_json().lower()
+    )
+    with pytest.raises(
+        ValidationError, match="AUTHORED_SEMANTIC_TRIGGER_POSITIONAL_FORBIDDEN"
+    ):
+        TemporalSemanticBinding(
+            semantic_owner_ref="meaning-approval-recovery",
+            authored_semantic_trigger_ref="position-3",
+            presentation_intent=snapshot.temporal_bindings[0].presentation_intent,
+        )
