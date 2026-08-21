@@ -1178,6 +1178,18 @@ def _production_editorial_authorship_gate(
             snapshot,
             "EDITORIAL_AUTHORSHIP_CONTRACT_INVALID",
         )
+    if not contract.has_transitive_authority_binding:
+        return _production_block(
+            snapshot,
+            "EDITORIAL_AUTHORSHIP_TRANSITIVE_AUTHORITY_REQUIRED",
+        )
+    try:
+        contract.verify_integrity()
+    except ValueError:
+        return _production_block(
+            snapshot,
+            "EDITORIAL_AUTHORSHIP_CONTRACT_INVALID",
+        )
     readiness_hash = (_evidence or {}).get("authorship_contract_hash")
     if readiness_hash != contract.content_hash:
         return _production_block(

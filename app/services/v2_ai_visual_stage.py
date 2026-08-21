@@ -853,10 +853,9 @@ def compile_ai_visual_stage_planning(
         raise ValidationFailureError("V2_AI_VISUAL_ROUTE_AUTHORITY_INVALID")
     style_bible = build_video_visual_style_bible(visual_run=visual_run)
     motion_policy = _active_motion_policy()
-    # The active motion policy permits a meaning-stable AI image to remain on
-    # screen for at most 14 seconds when a valid motion intent is compiled.
-    # The active policy uses a bounded semantic extension (13.25s) for
-    # comparison/concept/example blocks and retains the 12s process ceiling.
+    # The active planning policy bounds a single AI-image presentation window
+    # for asset/runtime reasons.  It does not turn duration into authority for
+    # motion or make an otherwise authored stable hold semantically invalid.
     policy = AIVisualPlanningPolicy.production_default(
         maximum_ai_image_presentation_ms=int(
             motion_policy["maximum_static_presentation_ms"]

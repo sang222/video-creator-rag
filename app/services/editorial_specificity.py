@@ -25,7 +25,7 @@ from app.services.config_registry import content_hash
 
 
 EDITORIAL_IDEA_PROPOSAL_SCHEMA = "vcos.editorial-idea-proposal.v1"
-EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v4"
+EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v5"
 EDITORIAL_EVIDENCE_TEXT_NORMALIZATION_VERSION = (
     "editorial-evidence-text-normalization.v1"
 )
@@ -38,7 +38,7 @@ MAX_FROZEN_EVIDENCE_SPANS_PER_SOURCE = 12
 # These fields are viewer-facing material statements.  A source quote need not
 # repeat generated editorial framing verbatim (for example, a video title),
 # but every such field must trace to a frozen source fact through a binding.
-REQUIRED_EVIDENCE_BINDING_FIELDS = frozenset(
+LEGACY_REQUIRED_EVIDENCE_BINDING_FIELDS = frozenset(
     {
         "proposed_title",
         "proposed_angle",
@@ -49,6 +49,20 @@ REQUIRED_EVIDENCE_BINDING_FIELDS = frozenset(
         "specific_mechanism_or_use_case",
         "decision_value",
     }
+)
+CARD_D_AUTHORSHIP_EVIDENCE_BINDING_FIELDS = frozenset(
+    {
+        "episode_reasoning",
+        "central_question",
+        "early_stakes_or_payoff",
+        "original_thesis_or_position",
+        "visible_editorial_judgment",
+        "memorable_payoff_framework_or_conclusion",
+    }
+)
+REQUIRED_EVIDENCE_BINDING_FIELDS = (
+    LEGACY_REQUIRED_EVIDENCE_BINDING_FIELDS
+    | CARD_D_AUTHORSHIP_EVIDENCE_BINDING_FIELDS
 )
 
 _SOURCE_CLASSES = {
@@ -223,6 +237,23 @@ class EditorialIdeaProposal(BaseModel):
     editorial_delta: str = Field(min_length=1, max_length=2_000)
     specific_mechanism_or_use_case: str = Field(min_length=1, max_length=2_000)
     decision_value: str = Field(min_length=1, max_length=2_000)
+    # Historical proposals remain readable.  New production proposals must
+    # carry all six exact Card D values; the production compiler fails closed
+    # rather than relabeling weaker proposal fields into these roles.
+    episode_reasoning: str | None = Field(default=None, min_length=1, max_length=2_000)
+    central_question: str | None = Field(default=None, min_length=1, max_length=2_000)
+    early_stakes_or_payoff: str | None = Field(
+        default=None, min_length=1, max_length=2_000
+    )
+    original_thesis_or_position: str | None = Field(
+        default=None, min_length=1, max_length=2_000
+    )
+    visible_editorial_judgment: str | None = Field(
+        default=None, min_length=1, max_length=2_000
+    )
+    memorable_payoff_framework_or_conclusion: str | None = Field(
+        default=None, min_length=1, max_length=2_000
+    )
     scope_inclusions: list[str] = Field(min_length=1, max_length=12)
     scope_exclusions: list[str] = Field(min_length=1, max_length=12)
     primary_evidence_refs: list[dict[str, Any]] = Field(min_length=1, max_length=4)
@@ -260,6 +291,18 @@ class EditorialIdeaProposal(BaseModel):
             self.tension_failure_contradiction_or_tradeoff is not None
         ):
             raise ValueError("EDITORIAL_IDEA_TENSION_NOT_APPLICABLE")
+        card_d_values = self.card_d_authorship_values
+        if any(card_d_values.values()) and not all(card_d_values.values()):
+            raise ValueError("EDITORIAL_IDEA_CARD_D_AUTHORSHIP_INCOMPLETE")
+        if all(card_d_values.values()):
+            distinct_roles = {
+                _normalized(str(self.central_question)),
+                _normalized(str(self.original_thesis_or_position)),
+                _normalized(str(self.visible_editorial_judgment)),
+                _normalized(str(self.memorable_payoff_framework_or_conclusion)),
+            }
+            if len(distinct_roles) != 4:
+                raise ValueError("EDITORIAL_IDEA_CARD_D_AUTHORSHIP_NOT_DISTINCT")
         body = self.model_dump(mode="json", exclude={"proposal_hash"})
         # Preserve hashes of historical proposals that predate Card D's
         # explicit tension decision fields.
@@ -267,11 +310,31 @@ class EditorialIdeaProposal(BaseModel):
             body.pop("tension_applicability", None)
         if self.tension_failure_contradiction_or_tradeoff is None:
             body.pop("tension_failure_contradiction_or_tradeoff", None)
+        for field_name, field_value in card_d_values.items():
+            if field_value is None:
+                body.pop(field_name, None)
         digest = content_hash(_proposal_hash_payload(body))
         if self.proposal_hash is not None and self.proposal_hash != digest:
             raise ValueError("EDITORIAL_IDEA_PROPOSAL_HASH_MISMATCH")
         self.proposal_hash = digest
         return self
+
+    @property
+    def card_d_authorship_values(self) -> dict[str, str | None]:
+        return {
+            field_name: getattr(self, field_name)
+            for field_name in CARD_D_AUTHORSHIP_EVIDENCE_BINDING_FIELDS
+        }
+
+    @property
+    def has_exact_card_d_authorship(self) -> bool:
+        return all(self.card_d_authorship_values.values())
+
+    @property
+    def required_evidence_binding_fields(self) -> frozenset[str]:
+        if self.has_exact_card_d_authorship:
+            return REQUIRED_EVIDENCE_BINDING_FIELDS
+        return LEGACY_REQUIRED_EVIDENCE_BINDING_FIELDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -523,7 +586,9 @@ class EditorialIdeaSynthesisService:
             "proposal_schema_version='vcos.editorial-idea-proposal.v1', proposed_title, "
             "proposed_angle, specific_audience_problem, central_question_or_thesis, "
             "learning_outcome, viewer_value, editorial_delta, specific_mechanism_or_use_case, "
-            "decision_value, scope_inclusions, scope_exclusions, primary_evidence_refs, "
+            "decision_value, episode_reasoning, central_question, early_stakes_or_payoff, "
+            "original_thesis_or_position, visible_editorial_judgment, "
+            "memorable_payoff_framework_or_conclusion, scope_inclusions, scope_exclusions, primary_evidence_refs, "
             "supporting_evidence_refs, evidence_bindings, source_specificity_class, content_mode, "
             "series_binding, tension_applicability, and tension_failure_contradiction_or_tradeoff. "
             "tension_applicability must be APPLICABLE or NOT_APPLICABLE, and the latter must not include a fabricated conflict. "
@@ -533,7 +598,10 @@ class EditorialIdeaSynthesisService:
             "Every proposal must include at least one "
             "binding for each of: proposed_title, proposed_angle, "
             "central_question_or_thesis, learning_outcome, viewer_value, "
-            "editorial_delta, specific_mechanism_or_use_case, and decision_value. "
+            "editorial_delta, specific_mechanism_or_use_case, decision_value, "
+            "episode_reasoning, central_question, early_stakes_or_payoff, "
+            "original_thesis_or_position, visible_editorial_judgment, and "
+            "memorable_payoff_framework_or_conclusion. "
             "If no supporting span ID exists "
             "for a required field, do not emit that proposal. "
             "A generated editorial framing field need not literally occur in a source, "
@@ -848,7 +916,7 @@ class EditorialSpecificityService:
         if not proposal_ids or not proposal_ids.issubset(by_id):
             reasons.append("EDITORIAL_PROPOSAL_EVIDENCE_INSUFFICIENT")
             return
-        required_fields = REQUIRED_EVIDENCE_BINDING_FIELDS
+        required_fields = proposal.required_evidence_binding_fields
         bound_fields: set[str] = set()
         for binding in proposal.evidence_bindings:
             if not isinstance(binding, dict):

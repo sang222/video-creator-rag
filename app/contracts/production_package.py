@@ -177,7 +177,9 @@ class ProductionPackageContentV2(BaseModel):
                 raise ValueError("PRODUCTION_PACKAGE_AI_VISUAL_POLICY_INVALID")
         elif self.active_primary_visual_routes:
             raise ValueError("PRODUCTION_PACKAGE_AI_VISUAL_POLICY_PARTIAL")
-        if (
+        if (self.editorial_authorship is None) != (
+            self.readiness_evidence.authorship_contract_hash is None
+        ) or (
             self.editorial_authorship is not None
             and self.readiness_evidence.authorship_contract_hash
             != self.editorial_authorship.content_hash

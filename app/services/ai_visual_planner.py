@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from app.contracts.editorial_authorship import validate_viewer_facing_presentation
 from app.contracts.ai_visual_production import (
     AIVisualCapabilityProjection,
     AIVisualNarrationUnit,
@@ -82,18 +80,6 @@ def _scene_function_key(value: str) -> str:
     return value.strip().upper().replace("-", "_").replace(" ", "_")
 
 
-def _authored_scene_semantic_key(scene: AIVisualScenePlan) -> str:
-    """Return only authored scene bindings used for deterministic presentation."""
-
-    return ai_visual_stable_hash(
-        {
-            "narration_unit_ids": scene.narration_unit_ids,
-            "information_unit_ids": scene.information_unit_ids,
-            "visual_function": scene.visual_function,
-        }
-    )
-
-
 def _maximum_scene_duration_ms(
     unit: AIVisualNarrationUnit,
     policy: AIVisualPlanningPolicy,
@@ -111,8 +97,6 @@ def _maximum_scene_duration_ms(
 def _transition_for_reason(
     reason: str,
     grammar: VideoMotionGrammar,
-    *,
-    semantic_key: str | None = None,
 ) -> TransitionPreset:
     semantic_candidates: dict[str, tuple[TransitionPreset, ...]] = {
         "CONTINUATION": ("cut", "dissolve", "fade_soft"),
@@ -136,24 +120,18 @@ def _transition_for_reason(
     candidates = semantic_candidates.get(reason, ("cut",))
     compatible = [candidate for candidate in candidates if candidate in allowed]
     if compatible:
-        # Ordinal is retained as a compatibility argument, but never creates
-        # variation.  Variation may only come from the authored semantic
-        # identity of the scene, which keeps repeated semantic transitions
-        # from becoming a mechanical preset loop.
-        if semantic_key:
-            digest = hashlib.sha256(semantic_key.encode("utf-8")).digest()
-            return compatible[int.from_bytes(digest[:4], "big") % len(compatible)]
+        # A semantic family may be preserved here, but an ID/hash cannot
+        # manufacture variation inside it.  Card N owns choreography.
         return compatible[0]
     if "cut" in allowed:
         return "cut"
-    if semantic_key:
-        digest = hashlib.sha256(semantic_key.encode("utf-8")).digest()
-        return allowed[int.from_bytes(digest[:4], "big") % len(allowed)]
     return allowed[0]
 
 
 def _motion_function(scene: AIVisualScenePlan) -> MotionFunction:
     function = _scene_function_key(scene.visual_function)
+    if "HOLD" in function or "NO_VISUAL_CHANGE" in function:
+        return "HOLD"
     if "COMPARE" in function or "CONTRAST" in function:
         return "COMPARE"
     if any(
@@ -196,58 +174,10 @@ def _image_motion_choice(
     scene: AIVisualScenePlan,
 ) -> tuple[CameraMotion, str, float, float, MotionFunction]:
     function = _motion_function(scene)
-    anchor, _ = _subject_anchor(scene)
-    duration_ms = scene.presentation_end_ms - scene.presentation_start_ms
-    if duration_ms <= 2_500 and scene.motion_need == "STATIC_SUFFICIENT":
-        candidates: list[tuple[CameraMotion, str, float, float]] = [
-            ("STATIC", "hold_intentional", 1.0, 1.0)
-        ]
-    elif function == "COMPARE":
-        candidates = [
-            ("PAN_RIGHT", "pan_right_slow", 1.04, 1.04),
-            ("PAN_LEFT", "pan_left_slow", 1.04, 1.04),
-        ]
-    elif function in {"FOCUS", "EMPHASIZE", "REVEAL"}:
-        candidates = [
-            ("PUSH_IN", "focus_push", 1.0, 1.055),
-            ("PUSH_IN", "pushin_slow", 1.0, 1.045),
-            ("PULL_OUT", "pullout_slow", 1.055, 1.0),
-        ]
-    elif function in {"FOLLOW", "PROGRESS"}:
-        if anchor == "LEFT":
-            candidates = [
-                ("PAN_RIGHT", "pan_right_slow", 1.04, 1.04),
-                ("PUSH_IN", "kenburns_subject_left", 1.0, 1.05),
-            ]
-        elif anchor == "RIGHT":
-            candidates = [
-                ("PAN_LEFT", "pan_left_slow", 1.04, 1.04),
-                ("PUSH_IN", "kenburns_subject_right", 1.0, 1.05),
-            ]
-        else:
-            candidates = [
-                ("PAN_RIGHT", "pan_right_slow", 1.04, 1.04),
-                ("DRIFT_UP", "drift_up_soft", 1.035, 1.045),
-                ("PUSH_IN", "pushin_medium", 1.0, 1.065),
-            ]
-    elif function == "ESTABLISH":
-        candidates = [
-            ("PULL_OUT", "pullout_slow", 1.055, 1.0),
-            ("DRIFT_DOWN", "drift_down_soft", 1.04, 1.04),
-            ("PUSH_IN", "kenburns_center_soft", 1.0, 1.045),
-        ]
-    else:
-        candidates = [
-            ("PUSH_IN", "kenburns_center_soft", 1.0, 1.04),
-            ("DRIFT_UP", "drift_up_soft", 1.035, 1.04),
-            ("PULL_OUT", "pullout_slow", 1.05, 1.0),
-        ]
-    # A scene ordinal or anti-repeat heuristic cannot authorize a visual
-    # change.  Deterministic variation is derived only from authored scene
-    # bindings; repeated presets remain valid when those bindings repeat.
-    semantic_key = _authored_scene_semantic_key(scene)
-    selected = candidates[int(semantic_key[:8], 16) % len(candidates)]
-    return (*selected, function)
+    # No upstream choreography authority exists at this boundary.  Preserve a
+    # safe static realization instead of using duration, identity, or a
+    # planner-generated explanation to authorize motion.
+    return "STATIC", "hold_intentional", 1.0, 1.0, function
 
 
 class UnifiedAIVisualPlanner:
@@ -793,7 +723,6 @@ class MotionIntentPlanner:
         transition_in = _transition_for_reason(
             scene_plan.transition_semantic_reason,
             motion_grammar,
-            semantic_key=_authored_scene_semantic_key(scene_plan),
         )
         if previous_projection is None:
             transition_in = "cut"
@@ -801,13 +730,11 @@ class MotionIntentPlanner:
             _transition_for_reason(
                 next_scene_plan.transition_semantic_reason,
                 motion_grammar,
-                semantic_key=_authored_scene_semantic_key(next_scene_plan),
             )
             if next_scene_plan is not None
             else _transition_for_reason(
                 scene_plan.transition_semantic_reason,
                 motion_grammar,
-                semantic_key=_authored_scene_semantic_key(scene_plan),
             )
         )
         if scene_plan.production_route == "AI_VIDEO":
@@ -815,26 +742,22 @@ class MotionIntentPlanner:
             motion_preset = "video_intrinsic_preserve"
             start_scale = end_scale = 1.0
             function = _motion_function(scene_plan)
-            semantic_reason = f"Preserve provider-generated temporal action for {function.lower()} while normalizing only presentation bounds."
+            if function == "HOLD":
+                raise ValueError("HOLD_INTRINSIC_VIDEO_CHANGE_FORBIDDEN")
+            semantic_reason = (
+                "Non-authorizing realization note: preserve provider-generated "
+                "temporal action while normalizing only presentation bounds."
+            )
         else:
             camera_motion, motion_preset, start_scale, end_scale, function = (
                 _image_motion_choice(
                     scene_plan,
                 )
             )
-            semantic_reason = f"Use {motion_preset} to {function.lower()} the narrated meaning without generating primary visual content."
-        validate_viewer_facing_presentation(
-            [
-                {
-                    "outcome": "HOLD" if function == "HOLD" else "CHANGE",
-                    "editorial_reason": semantic_reason,
-                    "editorial_authority_ref": (
-                        "scene-plan-semantic://"
-                        + _authored_scene_semantic_key(scene_plan)
-                    ),
-                }
-            ]
-        )
+            semantic_reason = (
+                "Non-authorizing realization note: preserve the stable image "
+                "until a later choreography authority supplies intentional motion."
+            )
         safe_crop = NormalizedRegion(x=0.04, y=0.04, width=0.92, height=0.92)
         body: dict[str, Any] = {
             "schema_version": "vcos.motion-intent-projection.v1",
@@ -879,12 +802,6 @@ class MotionIntentPlanner:
             raise ValueError("MOTION_STYLE_BIBLE_BINDING_MISMATCH")
         if motion_grammar.style_bible_hash != style_bible.content_hash:
             raise ValueError("MOTION_GRAMMAR_STYLE_BIBLE_BINDING_MISMATCH")
-        if (
-            scene_plan.production_route == "AI_IMAGE"
-            and scene_plan.presentation_end_ms - scene_plan.presentation_start_ms
-            > motion_grammar.maximum_static_presentation_ms
-        ):
-            raise ValueError("STATIC_DURATION_EXCESSIVE")
 
 
 class AIImagePromptCompiler:
@@ -1003,7 +920,7 @@ class AIImagePromptCompiler:
             "PULL_OUT": "include complete surrounding context for a restrained pull-out",
             "DRIFT_UP": "protect vertical context for a gentle upward drift",
             "DRIFT_DOWN": "protect vertical context for a gentle downward drift",
-            "STATIC": "composition suitable for a short intentional hold",
+            "STATIC": "composition suitable for an intentional stable hold",
             "CONTROLLED_CUSTOM": "protect the explicitly bounded camera path",
         }[motion]
         return f"{anchor_language}; {motion_language}; keep all critical content inside a 92% crop-safe region"

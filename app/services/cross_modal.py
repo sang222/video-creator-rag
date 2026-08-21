@@ -123,7 +123,10 @@ class SectionCoverageCompiler:
                     requirement.get("requirement_type") or "ASSIGNMENT_FULFILLMENT"
                 ),
                 "proposition": proposition,
-                "new_information_delta": f"Fulfill {requirement_id} without restating an earlier unit.",
+                "new_information_delta": (
+                    f"{str(requirement.get('requirement_type') or 'ASSIGNMENT_FULFILLMENT')}: "
+                    f"{proposition}"
+                ),
                 "importance": "CORE",
                 "factual_risk": "HIGH"
                 if "scope" in requirement_id

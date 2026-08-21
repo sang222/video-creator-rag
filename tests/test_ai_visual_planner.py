@@ -173,7 +173,7 @@ def test_group_first_split_preserves_ordered_source_partition_and_unit_bindings(
     )
 
 
-def test_repeated_contrast_uses_grammar_safe_transition_diversity():
+def test_repeated_semantics_do_not_gain_hash_or_id_based_variation():
     style, _, compilation = _plan(
         *(
             _unit(
@@ -210,15 +210,27 @@ def test_repeated_contrast_uses_grammar_safe_transition_diversity():
             )
         )
 
+    assert {item.camera_motion for item in projections} == {"STATIC"}
+    assert {item.motion_preset for item in projections} == {"hold_intentional"}
+    assert len({item.transition_in for item in projections[1:]}) == 1
+    assert len({item.transition_out for item in projections[:-1]}) == 1
+    assert all(
+        "non-authorizing realization note"
+        in item.motion_semantic_reason.casefold()
+        for item in projections
+    )
+    assert "scene-plan-semantic://" not in "".join(
+        item.model_dump_json() for item in projections
+    )
     effect_plan = NativeMotionCompiler().compile_effect_plan(
         projections,
         motion_grammar=grammar,
     )
-    assert effect_plan.production_eligible is True
-    assert effect_plan.diversity_report.gate == "PASS"
-    assert (
-        effect_plan.diversity_report.maximum_consecutive_same_transition
-        <= grammar.maximum_consecutive_same_transition
+    assert "MOTION_REPETITION_EXCESSIVE" not in (
+        effect_plan.diversity_report.reason_codes
+    )
+    assert "CAMERA_DIRECTION_REPETITION_EXCESSIVE" not in (
+        effect_plan.diversity_report.reason_codes
     )
 
 
@@ -240,6 +252,91 @@ def test_route_selection_is_semantic_and_motion_required_never_downgrades():
     ]
     assert compilation.unique_ai_image_asset_slot_count == 1
     assert compilation.unique_ai_video_asset_slot_count == 1
+
+
+def test_hold_realization_is_static_even_when_long() -> None:
+    style, _, compilation = _plan(
+        _unit("long-hold", 0, 12_000, visual_function="HOLD")
+    )
+    grammar = VideoMotionGrammar.production_default(
+        grammar_id="long-hold-grammar",
+        style_bible_hash=style.content_hash,
+        maximum_static_presentation_ms=2_000,
+    )
+
+    projection = MotionIntentPlanner().project(
+        scene_plan=compilation.scenes[0],
+        style_bible=style,
+        motion_grammar=grammar,
+        primary_asset_ref="artifact://ai-image/long-hold",
+        primary_asset_hash="a" * 64,
+    )
+
+    assert projection.motion_function == "HOLD"
+    assert projection.camera_motion == "STATIC"
+    assert projection.motion_preset == "hold_intentional"
+    assert projection.start_scale == projection.end_scale == 1.0
+
+
+def test_hold_cannot_be_realized_as_intrinsic_video_change() -> None:
+    style, _, compilation = _plan(
+        _unit(
+            "invalid-video-hold",
+            0,
+            8_000,
+            visual_function="HOLD",
+            motion_need="MOTION_REQUIRED",
+        )
+    )
+    grammar = VideoMotionGrammar.production_default(
+        grammar_id="video-hold-grammar",
+        style_bible_hash=style.content_hash,
+    )
+
+    with pytest.raises(ValueError, match="HOLD_INTRINSIC_VIDEO_CHANGE_FORBIDDEN"):
+        MotionIntentPlanner().project(
+            scene_plan=compilation.scenes[0],
+            style_bible=style,
+            motion_grammar=grammar,
+            primary_asset_ref="artifact://ai-video/invalid-hold",
+            primary_asset_hash="b" * 64,
+        )
+
+
+def test_conclusion_keeps_explicit_semantic_transition() -> None:
+    style, _, compilation = _plan(
+        _unit("setup", 0, 4_000),
+        _unit(
+            "conclusion",
+            4_000,
+            8_000,
+            visual_function="CONCLUSION",
+            transition_semantic_reason="CONCLUSION",
+        ),
+    )
+    grammar = VideoMotionGrammar.production_default(
+        grammar_id="conclusion-grammar",
+        style_bible_hash=style.content_hash,
+    )
+    first = MotionIntentPlanner().project(
+        scene_plan=compilation.scenes[0],
+        style_bible=style,
+        motion_grammar=grammar,
+        primary_asset_ref="artifact://ai-image/setup",
+        primary_asset_hash="c" * 64,
+        next_scene_plan=compilation.scenes[1],
+    )
+    conclusion = MotionIntentPlanner().project(
+        scene_plan=compilation.scenes[1],
+        style_bible=style,
+        motion_grammar=grammar,
+        primary_asset_ref="artifact://ai-image/conclusion",
+        primary_asset_hash="d" * 64,
+        previous_projection=first,
+    )
+
+    assert first.transition_out == "fade_black"
+    assert conclusion.transition_in == "fade_black"
 
 
 def test_motion_required_blocks_when_video_authority_is_unavailable():
@@ -322,10 +419,7 @@ def test_prompt_compilers_are_deterministic_negative_bound_and_motion_codesigned
     )
     assert prompt_a == prompt_b
     assert "left third" in prompt_a.motion_safe_composition
-    assert (
-        "slow rightward camera pan" in prompt_a.motion_safe_composition
-        or "push-in" in prompt_a.motion_safe_composition
-    )
+    assert "intentional stable hold" in prompt_a.motion_safe_composition
     assert "no PowerPoint" in prompt_a.negative_constraints
     assert prompt_a.provider_call_made is False
 

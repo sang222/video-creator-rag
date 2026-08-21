@@ -427,6 +427,22 @@ class ProductionPackageService:
     def _validate_live_authority(self, content: ProductionPackageContentV2) -> None:
         if content.production_lane != ProductionLane.LONG_FORM:
             raise ValidationFailureError("PRODUCTION_PACKAGE_LONG_FORM_REQUIRED")
+        if content.editorial_authorship is None:
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_REQUIRED"
+            )
+        content.editorial_authorship.verify_integrity()
+        if not content.editorial_authorship.has_transitive_authority_binding:
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_TRANSITIVE_AUTHORSHIP_REQUIRED"
+            )
+        if (
+            content.readiness_evidence.authorship_contract_hash
+            != content.editorial_authorship.content_hash
+        ):
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_AUTHORSHIP_HASH_MISMATCH"
+            )
         project = self.session.get(VideoProject, content.video_project_id)
         if project is None:
             raise NotFoundError(f"video project not found: {content.video_project_id}")
@@ -801,6 +817,9 @@ class ProductionPackageService:
             != package_content.compiled_policy_snapshot_hash
             or payload.duration_contract_hash
             != package_content.duration_contract.duration_contract_hash
+            or package_content.editorial_authorship is None
+            or payload.editorial_authorship_hash
+            != package_content.editorial_authorship.content_hash
             or payload.provider_execution_plan_hash
             != package_content.provider_execution_plan_ref.content_hash
             or payload.budget_scope_hash

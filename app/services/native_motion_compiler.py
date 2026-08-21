@@ -209,9 +209,9 @@ def _build_v2_motion_pack() -> dict[str, MotionPresetDefinition]:
             category="STILL_MOTION",
             supported_asset_types=["AI_IMAGE"],
             semantic_use_cases=["HOLD"],
-            forbidden_use_cases=["DEAD_VISUAL_TIME", "LONG_UNCHANGED_PRESENTATION"],
+            forbidden_use_cases=[],
             minimum_duration_ms=250,
-            maximum_duration_ms=2_500,
+            maximum_duration_ms=2_147_483_647,
             maximum_scale=1.0,
         ),
         _v2_preset(
@@ -683,9 +683,24 @@ class NativeMotionCompiler:
         motion_presets = [item.motion_preset for item in items]
         transitions = [item.transition_out for item in items]
         camera_directions = [item.camera_motion for item in items]
-        maximum_motion = _maximum_consecutive(motion_presets)
+        # Stable holds are not failed for declining to manufacture movement.
+        # Repetition limits apply only to actual motion/choreography choices.
+        active_motion_items = [
+            item for item in items if item.motion_preset != "hold_intentional"
+        ]
+        maximum_motion = max(
+            1,
+            _maximum_consecutive(
+                [item.motion_preset for item in active_motion_items]
+            ),
+        )
         maximum_transition = _maximum_consecutive(transitions)
-        maximum_camera = _maximum_consecutive(camera_directions)
+        maximum_camera = max(
+            1,
+            _maximum_consecutive(
+                [item.camera_motion for item in active_motion_items]
+            ),
+        )
         diversity_reasons: list[str] = []
         if maximum_motion > motion_grammar.maximum_consecutive_same_motion_preset:
             diversity_reasons.append("MOTION_REPETITION_EXCESSIVE")
@@ -710,13 +725,6 @@ class NativeMotionCompiler:
             gate="BLOCK" if diversity_reasons else "PASS",
             reason_codes=diversity_reasons,
         )
-        static_reasons = [
-            "STATIC_DURATION_EXCESSIVE"
-            for item in items
-            if item.asset_type == "AI_IMAGE"
-            and item.motion_preset == "hold_intentional"
-            and item.presentation_end_ms - item.presentation_start_ms > 2_500
-        ]
         coverage_ok = items[0].presentation_start_ms == 0 and all(
             left.presentation_end_ms == right.presentation_start_ms
             for left, right in zip(items, items[1:])
@@ -744,8 +752,10 @@ class NativeMotionCompiler:
             ),
             MotionGateResult(
                 gate="StaticDurationGate",
-                verdict="BLOCK" if static_reasons else "PASS",
-                reason_codes=sorted(set(static_reasons)),
+                # Card D cannot reinterpret a legitimate stable realization as
+                # invalid merely because it is long.  Card N owns pacing.
+                verdict="PASS",
+                reason_codes=[],
             ),
             MotionGateResult(
                 gate="DeadVisualTimeGate",

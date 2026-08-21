@@ -1101,6 +1101,24 @@ def _bind_current_topic_authority(session, candidate) -> None:
             "decision_value": (
                 "Teams can decide which automation action requires human approval."
             ),
+            "episode_reasoning": (
+                "Test one hidden exception handoff against the external-action boundary."
+            ),
+            "central_question": (
+                "Where does the documented exception handoff lose accountable review?"
+            ),
+            "early_stakes_or_payoff": (
+                "A hidden handoff can commit an external change without review."
+            ),
+            "original_thesis_or_position": (
+                "Keep human review at the external-action boundary."
+            ),
+            "visible_editorial_judgment": (
+                "The external action, not task duration, is the decisive boundary."
+            ),
+            "memorable_payoff_framework_or_conclusion": (
+                "Apply the external-action test before enabling any recovery path."
+            ),
             "scope_inclusions": ["The documented automation-audit workflow and its review checkpoint"],
             "scope_exclusions": ["Undocumented performance, ROI, and product-family claims"],
             "primary_evidence_refs": [{"id": str(evidence.id), "ref": evidence.source_ref}],
@@ -1111,10 +1129,18 @@ def _bind_current_topic_authority(session, candidate) -> None:
                     "proposed_title", "proposed_angle", "central_question_or_thesis",
                     "learning_outcome", "viewer_value", "editorial_delta",
                     "specific_mechanism_or_use_case", "decision_value",
+                    "episode_reasoning", "central_question",
+                    "early_stakes_or_payoff", "original_thesis_or_position",
+                    "visible_editorial_judgment",
+                    "memorable_payoff_framework_or_conclusion",
                 )
             ],
             "source_specificity_class": classify_source_specificity(evidence),
             "content_mode": "STANDALONE",
+            "tension_applicability": "APPLICABLE",
+            "tension_failure_contradiction_or_tradeoff": (
+                "Faster recovery trades off against accountable external action."
+            ),
         }
     )
     candidate.editorial_idea_proposal = proposal.model_dump(mode="json")
@@ -1199,6 +1225,22 @@ def _bind_series_topic_authority(session, candidate, *, plan, run) -> None:
             "decision_value": (
                 "Teams can decide whether this series workflow needs human review."
             ),
+            "episode_reasoning": topic.series_binding["episode_delta"],
+            "central_question": (
+                "Where does this episode's workflow cross an external-action boundary?"
+            ),
+            "early_stakes_or_payoff": (
+                "An unreviewed series workflow can commit an external action."
+            ),
+            "original_thesis_or_position": (
+                "This workflow needs review at its external-action boundary."
+            ),
+            "visible_editorial_judgment": (
+                "The external action is this episode's decisive review boundary."
+            ),
+            "memorable_payoff_framework_or_conclusion": (
+                "Carry the external-action test into the next series workflow."
+            ),
             "scope_inclusions": list(topic.scope_inclusions),
             "scope_exclusions": list(topic.exclusions),
             "primary_evidence_refs": [{"id": str(evidence.id), "ref": evidence.source_ref}],
@@ -1209,11 +1251,19 @@ def _bind_series_topic_authority(session, candidate, *, plan, run) -> None:
                     "proposed_title", "proposed_angle", "central_question_or_thesis",
                     "learning_outcome", "viewer_value", "editorial_delta",
                     "specific_mechanism_or_use_case", "decision_value",
+                    "episode_reasoning", "central_question",
+                    "early_stakes_or_payoff", "original_thesis_or_position",
+                    "visible_editorial_judgment",
+                    "memorable_payoff_framework_or_conclusion",
                 )
             ],
             "source_specificity_class": classify_source_specificity(evidence),
             "content_mode": "SERIES_EPISODE",
             "series_binding": topic.series_binding,
+            "tension_applicability": "APPLICABLE",
+            "tension_failure_contradiction_or_tradeoff": (
+                "Faster workflow completion trades off against accountable review."
+            ),
         }
     )
     candidate.editorial_idea_proposal = proposal.model_dump(mode="json")

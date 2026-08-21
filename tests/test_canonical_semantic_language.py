@@ -6,7 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.contracts.ai_visual_production import AIVisualNarrationUnit
-from app.contracts.editorial_authorship import EditorialAuthorshipContract
+from app.contracts.editorial_authorship import (
+    EditorialAuthorityBinding,
+    EditorialAuthorityType,
+    EditorialAuthorshipContract,
+)
 from app.contracts.channel_policy import FormatIdentityBinding, PolicyRef
 from app.contracts.semantic import (
     Applicability,
@@ -240,11 +244,29 @@ def _explainer_format_variant(
 
 def _authorship() -> EditorialAuthorshipContract:
     return EditorialAuthorshipContract.build(
-        source_evidence_refs=["evidence://approved/recovery"],
-        authored_authority_refs=[
-            "brief://episode",
-            "outline://episode",
-            "review://episode",
+        source_evidence_authorities=[
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.SOURCE_EVIDENCE,
+                authority_ref="evidence://approved/recovery",
+                content_hash="a" * 64,
+            )
+        ],
+        authored_authorities=[
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.EDITORIAL_PROPOSAL,
+                authority_ref=f"editorial-proposal://{'b' * 64}",
+                content_hash="b" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT,
+                authority_ref=f"editorial-specificity://{'c' * 64}",
+                content_hash="c" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.TOPIC_DEFINITION,
+                authority_ref=f"topic-definition://{'d' * 64}",
+                content_hash="d" * 64,
+            ),
         ],
         content_mode="STANDALONE",
         format_key="editorial-explainer",
@@ -658,11 +680,12 @@ def test_semantic_owner_requires_explicit_identity_never_a_position():
 
 
 def test_effect_role_is_semantic_why_not_a_renderer_primitive():
+    authority_ref = f"editorial-authorship://{'a' * 64}"
     intent = PresentationSemanticIntent(
         outcome=PresentationOutcome.PRESENTATION_CHANGE,
         semantic_role=SemanticPresentationRole.REVEAL,
         editorial_reason="Reveal the causal boundary when it becomes relevant.",
-        editorial_authority_ref="editorial-authorship://authority",
+        editorial_authority_ref=authority_ref,
     )
 
     assert intent.semantic_role == SemanticPresentationRole.REVEAL
@@ -672,7 +695,7 @@ def test_effect_role_is_semantic_why_not_a_renderer_primitive():
             outcome=PresentationOutcome.PRESENTATION_CHANGE,
             semantic_role="TEXT_SWIPE_IN",
             editorial_reason="Renderer primitive is not a semantic role.",
-            editorial_authority_ref="editorial-authorship://authority",
+            editorial_authority_ref=authority_ref,
         )
 
 
@@ -1496,7 +1519,7 @@ def test_presentation_outcome_role_matrix_blocks_contradictions(
             outcome=outcome,
             semantic_role=semantic_role,
             editorial_reason="Exercise the canonical outcome-role matrix.",
-            editorial_authority_ref="editorial-authorship://authority",
+            editorial_authority_ref=f"editorial-authorship://{'a' * 64}",
         )
 
 
@@ -1518,7 +1541,7 @@ def test_presentation_outcome_role_matrix_accepts_canonical_combinations(
         outcome=outcome,
         semantic_role=semantic_role,
         editorial_reason="Exercise the canonical outcome-role matrix.",
-        editorial_authority_ref="editorial-authorship://authority",
+        editorial_authority_ref=f"editorial-authorship://{'a' * 64}",
     )
 
     assert intent.semantic_role == semantic_role

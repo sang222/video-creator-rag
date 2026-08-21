@@ -1,0 +1,101 @@
+name: Editorial Authorship Closeout
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  card-d-authority:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vcos
+          POSTGRES_PASSWORD: vcos
+          POSTGRES_DB: vcos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vcos -d vcos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      VCOS_DATABASE_URL: postgresql+psycopg://vcos:vcos@localhost:5432/vcos
+      VCOS_ENVIRONMENT: test
+      VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
+      VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]" ruff==0.15.12
+      - name: Migrate to the single schema head
+        run: |
+          alembic upgrade head
+          test "$(alembic heads | wc -l | tr -d ' ')" = "1"
+          test "$(alembic heads | awk '{print $1}')" = "0091_youtube_publication_v2"
+      - name: Card D hostile authority tests
+        run: pytest -q tests/test_editorial_authorship.py
+      - name: Card D focused integration regressions
+        run: >-
+          pytest -q
+          tests/test_canonical_semantic_language.py
+          tests/test_ai_visual_planner.py
+          tests/test_native_motion_compiler_v2.py
+          tests/test_cross_modal_lineage.py
+      - name: Card D active package readiness regressions
+        run: >-
+          pytest -q
+          tests/test_long_form_launch_cadence.py::test_standalone_qualification_to_production_readiness_uses_only_two_llm_calls
+          tests/test_long_form_launch_cadence.py::test_series_qualification_to_production_readiness_preserves_reserved_lineage
+      - name: Card D lint
+        run: >-
+          ruff check --isolated
+          app/contracts/editorial_authorship.py
+          app/contracts/production_package.py
+          app/contracts/semantic.py
+          app/contracts/ai_visual_production.py
+          app/services/ai_visual_planner.py
+          app/services/cross_modal.py
+          app/services/editorial_specificity.py
+          app/services/gates.py
+          app/services/native_motion_compiler.py
+          app/services/production_package.py
+          app/services/v2_ai_visual_stage.py
+          app/services/v2_package_readiness.py
+          tests/test_editorial_authorship.py
+          tests/test_canonical_semantic_language.py
+          tests/test_ai_visual_planner.py
+          tests/test_native_motion_compiler_v2.py
+          tests/test_cross_modal_lineage.py
+          tests/test_long_form_launch_cadence.py
+      - name: Card D compile check
+        run: >-
+          python -m compileall -q
+          app/contracts/editorial_authorship.py
+          app/contracts/production_package.py
+          app/contracts/semantic.py
+          app/contracts/ai_visual_production.py
+          app/services/ai_visual_planner.py
+          app/services/cross_modal.py
+          app/services/editorial_specificity.py
+          app/services/gates.py
+          app/services/native_motion_compiler.py
+          app/services/production_package.py
+          app/services/v2_ai_visual_stage.py
+          app/services/v2_package_readiness.py
+          tests/test_editorial_authorship.py
+          tests/test_canonical_semantic_language.py
+          tests/test_ai_visual_planner.py
+          tests/test_native_motion_compiler_v2.py
+          tests/test_cross_modal_lineage.py
+          tests/test_long_form_launch_cadence.py
