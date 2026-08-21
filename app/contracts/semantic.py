@@ -889,20 +889,36 @@ class ComparisonFeatureView(_StrictFrozen):
             comparison_fingerprint=comparison_fingerprint,
         )
 
-    def learning_equivalence_payload(self) -> dict[str, Any]:
+    def learning_equivalence_payload(
+        self,
+        *,
+        comparison_scope: Literal["SCOPED", "GLOBAL"] = "SCOPED",
+    ) -> dict[str, Any]:
         """Safe adapter for the existing learning fingerprint authority.
 
         The snapshot ref/hash are intentionally absent: they are provenance,
-        never equivalence identity.  R owns persistence and learning decisions.
+        never equivalence identity.  ``GLOBAL`` is the only cross-profile
+        payload: it excludes profile/format features that are not shared by
+        definition.  R owns persistence and learning decisions.
         """
 
+        selected_scope = (
+            ComparisonFeatureScope.GLOBAL
+            if comparison_scope == "GLOBAL"
+            else None
+        )
         return {
             "normalized_features": {
                 item.feature_key: item.value
                 for item in self.features
                 if item.applicability == Applicability.APPLICABLE
+                and (selected_scope is None or item.scope == selected_scope)
             },
-            "fingerprint": self.comparison_fingerprint,
+            "fingerprint": (
+                self.shared_feature_fingerprint
+                if comparison_scope == "GLOBAL"
+                else self.comparison_fingerprint
+            ),
         }
 
 

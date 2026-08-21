@@ -601,6 +601,33 @@ def test_rich_snapshot_hash_never_becomes_learning_equivalence_identity():
     assert "source_semantic_snapshot_hash" not in first_view.learning_equivalence_payload()
 
 
+def test_cross_profile_learning_can_compare_only_global_applicable_features():
+    small_snapshot = _snapshot()
+    podcast_snapshot = _snapshot(
+        compilation=_compilation(_podcast_channel(), _podcast_format()),
+        podcast=True,
+    )
+    small_view = ComparisonFeatureView.build(
+        snapshot=small_snapshot,
+        features=_feature_values(small_snapshot),
+    )
+    podcast_view = ComparisonFeatureView.build(
+        snapshot=podcast_snapshot,
+        features=_feature_values(podcast_snapshot),
+    )
+
+    assert small_view.shared_feature_fingerprint == podcast_view.shared_feature_fingerprint
+    assert small_view.comparison_fingerprint != podcast_view.comparison_fingerprint
+    assert small_view.learning_equivalence_payload(
+        comparison_scope="GLOBAL"
+    ) == podcast_view.learning_equivalence_payload(comparison_scope="GLOBAL")
+    assert set(
+        small_view.learning_equivalence_payload(
+            comparison_scope="GLOBAL"
+        )["normalized_features"]
+    ) == {"angle_family", "mechanism_family"}
+
+
 def test_existing_card_d_and_ai_visual_inputs_remain_readable_without_card_e_fields():
     unit = AIVisualNarrationUnit(
         narration_unit_id="existing-unit-1",
