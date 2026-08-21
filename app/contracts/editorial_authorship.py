@@ -133,6 +133,8 @@ class EditorialAuthorshipContract(_StrictFrozen):
             raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_EVIDENCE_REF_INVALID")
         if any(not ref.strip() for ref in self.authored_authority_refs):
             raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORED_AUTHORITY_REF_INVALID")
+        if len(set(self.authored_authority_refs)) != len(self.authored_authority_refs):
+            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_REF_DUPLICATE")
         if set(self.source_evidence_refs).intersection(self.authored_authority_refs):
             raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_AUTHORITY_OVERLAP")
         if _normalized_text(self.channel_promise) == _normalized_text(

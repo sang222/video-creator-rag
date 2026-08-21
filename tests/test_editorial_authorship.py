@@ -137,6 +137,20 @@ def test_source_and_authored_authority_refs_cannot_overlap() -> None:
         EditorialAuthorshipContract.build(**values)
 
 
+def test_authored_authority_refs_cannot_be_padded_with_duplicates() -> None:
+    values = _contract().model_dump(mode="json")
+    values["viewer_facing_presentation"] = ViewerFacingAuthorshipLaw.build()
+    values["authored_authority_refs"] = [
+        "editorial-proposal://proposal-1",
+        "editorial-specificity://receipt-1",
+        "editorial-specificity://receipt-1",
+    ]
+    with pytest.raises(
+        ValueError, match="EDITORIAL_AUTHORSHIP_AUTHORITY_REF_DUPLICATE"
+    ):
+        EditorialAuthorshipContract.build(**values)
+
+
 def test_same_channel_promise_and_episode_reasoning_are_blocked() -> None:
     values = _contract().model_dump(mode="json")
     values["viewer_facing_presentation"] = ViewerFacingAuthorshipLaw.build()
