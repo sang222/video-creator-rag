@@ -533,8 +533,8 @@ class UploadedVideoReadV2(BaseModel):
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
-    manual_publish_confirmation_id: uuid.UUID
-    human_upload_task_id: uuid.UUID
+    manual_publish_confirmation_id: uuid.UUID | None
+    human_upload_task_id: uuid.UUID | None
     destination: str
     destination_binding_id: uuid.UUID
     destination_binding_fingerprint: str
@@ -548,9 +548,9 @@ class UploadedVideoReadV2(BaseModel):
     lineage_refs: dict[str, Any]
     verification_status: Literal["VERIFIED"]
     analytics_sync_status: Literal["READY"]
-    schema_version: Literal["v2", "v3"]
+    schema_version: Literal["v2", "v3", "v4"]
     final_review_candidate_id: uuid.UUID
-    final_video_decision_id: uuid.UUID
+    final_video_decision_id: uuid.UUID | None
     final_media_ref_id: uuid.UUID
     production_package_artifact_version_id: uuid.UUID
     production_package_hash: str

@@ -58,6 +58,7 @@ from app.db.models.production_workflow import (
 from app.db.models.production_publish import FinalReviewCandidate
 from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
+from app.db.models.youtube_delivery import YouTubePrivateStage
 from app.services.company_access import require_company_permission
 from app.services.production_package import (
     PRODUCTION_PACKAGE_ARTIFACT_TYPE,
@@ -90,6 +91,7 @@ _AI_VISUAL_AUTHORITY_REQUIRED_STAGES = frozenset(
 TERMINAL_WORKFLOW_STATES = frozenset(
     {
         ProductionWorkflowState.FINAL_REVIEW_READY.value,
+        ProductionWorkflowState.PUBLICATION_VERIFIED.value,
         ProductionWorkflowState.CANCELED.value,
         ProductionWorkflowState.FAILED_TERMINAL.value,
         ProductionWorkflowState.DEAD_LETTERED.value,
@@ -161,6 +163,43 @@ PENDING_STATE_BY_NEXT_STAGE: Mapping[
 }
 
 AUTHORITY_FIELD_NAMES = tuple(WorkflowAuthorityRefs.model_fields)
+
+
+def _final_publication_state(
+    session: Session,
+    run: ProductionWorkflowRun,
+) -> str:
+    """Project the final workflow state without reviving FINAL_REVIEW_READY."""
+
+    candidate = (
+        session.get(FinalReviewCandidate, run.final_review_candidate_id)
+        if run.final_review_candidate_id is not None
+        else None
+    )
+    if (
+        candidate is None
+        or candidate.target_platform != "YOUTUBE"
+        or candidate.publish_metadata_snapshot.get("delivery_mode")
+        != "YOUTUBE_PRIVATE_STAGE"
+    ):
+        return ProductionWorkflowState.FINAL_REVIEW_READY.value
+    stage = session.scalar(
+        select(YouTubePrivateStage)
+        .where(YouTubePrivateStage.final_review_candidate_id == candidate.id)
+        .order_by(YouTubePrivateStage.created_at.desc())
+    )
+    if stage is None or stage.state not in {
+        "PRIVATE_VERIFIED",
+        "PUBLICATION_VERIFIED",
+        "REJECTED",
+        "NEEDS_RERENDER",
+    }:
+        return ProductionWorkflowState.PRIVATE_STAGING_PENDING.value
+    if stage.state == "PUBLICATION_VERIFIED":
+        return ProductionWorkflowState.PUBLICATION_VERIFIED.value
+    if stage.state in {"REJECTED", "NEEDS_RERENDER"}:
+        return ProductionWorkflowState.BLOCKED.value
+    return ProductionWorkflowState.PRIVATE_VERIFIED_AWAITING_PUBLIC.value
 _STAGE_OUTPUT_AUTHORITY_FIELDS: Mapping[
     ProductionWorkflowStage,
     frozenset[str],
@@ -684,6 +723,16 @@ class GatewayBackedPostReadinessStageHandler:
         candidate = ProductionPublishService(
             context.session
         ).create_final_review_candidate(data)
+        if (
+            candidate.target_platform == "YOUTUBE"
+            and candidate.publish_metadata_snapshot.get("delivery_mode")
+            == "YOUTUBE_PRIVATE_STAGE"
+        ):
+            from app.services.youtube_delivery import YouTubeDeliveryService
+
+            YouTubeDeliveryService(context.session).prepare_private_stage_from_candidate(
+                candidate_id=candidate.id
+            )
         _settle_ai_visual_final_review_projection(
             context=context,
             candidate=candidate,
@@ -3027,8 +3076,12 @@ class ProductionWorkflowCoordinator:
             latest_stage = ProductionWorkflowStage(latest.stage)
             if latest_stage == ProductionWorkflowStage.FINALIZE:
                 self._require_final_review_authorities(run)
-                run.state = ProductionWorkflowState.FINAL_REVIEW_READY.value
-                run.completed_at = latest.completed_at
+                run.state = _final_publication_state(self.session, run)
+                run.completed_at = (
+                    latest.completed_at
+                    if run.state == ProductionWorkflowState.PUBLICATION_VERIFIED.value
+                    else None
+                )
             elif run.state not in TERMINAL_WORKFLOW_STATES:
                 next_stage = _next_stage_after_receipt_authority(
                     self.session,
@@ -3368,9 +3421,10 @@ class ProductionWorkflowCoordinator:
         now = self.now()
         if next_stage is None:
             self._require_final_review_authorities(run)
-            run.state = ProductionWorkflowState.FINAL_REVIEW_READY.value
-            run.state_reason_codes = reason_codes or ["FINAL_REVIEW_READY"]
-            run.completed_at = now
+            run.state = _final_publication_state(self.session, run)
+            run.state_reason_codes = reason_codes or [run.state]
+            if run.state == ProductionWorkflowState.PUBLICATION_VERIFIED.value:
+                run.completed_at = now
             run.last_progress_at = now
             run.projection_version += 1
             return

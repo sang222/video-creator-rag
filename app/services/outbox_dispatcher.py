@@ -679,6 +679,8 @@ class DurableOutboxDispatcher:
             "YOUTUBE_PROCESSING_PENDING",
             "YOUTUBE_UPLOAD_INCOMPLETE",
             "YOUTUBE_UPLOAD_RECONCILIATION_REQUIRED",
+            "YOUTUBE_PUBLICATION_NOT_YET_PUBLIC",
+            "YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED",
             "LOCAL_MEDIA_PURGE_RECONCILIATION_REQUIRED",
         }
         event.last_error_code = code
@@ -905,6 +907,7 @@ class DurableOutboxDispatcher:
             in {
                 ProductionWorkflowState.CANCELED.value,
                 ProductionWorkflowState.FINAL_REVIEW_READY.value,
+                ProductionWorkflowState.PUBLICATION_VERIFIED.value,
             }
         ):
             raise ConflictError("DEAD_LETTER_NOT_RETRYABLE")
@@ -1798,6 +1801,7 @@ TERMINAL_STATES_FOR_RECLAIM = frozenset(
     {
         ProductionWorkflowState.CANCELED.value,
         ProductionWorkflowState.FINAL_REVIEW_READY.value,
+        ProductionWorkflowState.PUBLICATION_VERIFIED.value,
         ProductionWorkflowState.FAILED_TERMINAL.value,
         ProductionWorkflowState.DEAD_LETTERED.value,
     }

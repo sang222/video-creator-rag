@@ -3,7 +3,7 @@ name: YouTube Private Delivery
 on:
   push:
     branches:
-      - feat/youtube-private-delivery-closeout
+      - feat/youtube-private-staging-human-public-cutover
   pull_request:
     branches:
       - main
@@ -47,7 +47,7 @@ jobs:
         run: |
           alembic upgrade head
           test "$(alembic heads | wc -l | tr -d ' ')" = "1"
-          test "$(alembic heads | awk '{print $1}')" = "0090_learning_reassessment"
+          test "$(alembic heads | awk '{print $1}')" = "0091_youtube_publication_v2"
       - name: Delivery and regression tests
         run: >-
           pytest -q
@@ -64,13 +64,19 @@ jobs:
           app/contracts/channel_policy.py
           app/contracts/production_publish.py
           app/contracts/youtube_delivery.py
+          app/contracts/operator_cockpit.py
+          app/contracts/production_workflow.py
           app/db/models/__init__.py
           app/db/models/m7.py
           app/db/models/youtube_delivery.py
+          app/db/models/production_workflow.py
           app/api/routes/youtube_delivery.py
           app/main.py
           app/services/youtube_delivery.py
           app/services/production_publish.py
+          app/services/production_workflow.py
+          app/services/operator_cockpit.py
+          app/services/launch_cadence.py
           app/services/long_form_analytics.py
           app/services/m9.py
           app/services/outbox_dispatcher.py
@@ -83,10 +89,18 @@ jobs:
           app/services/v2_support_authority.py
           app/workers/production_workflow.py
           alembic/versions/0084_youtube_private_delivery.py
+          alembic/versions/0091_youtube_publication_v2.py
           tests/test_youtube_private_delivery.py
       - name: Compile checks
         run: >-
           python -m compileall -q
           app
           alembic/versions/0084_youtube_private_delivery.py
+          alembic/versions/0091_youtube_publication_v2.py
           tests/test_youtube_private_delivery.py
+      - name: Card C static safety assertions
+        run: |
+          rg -n "YOUTUBE_PRIVATE_STAGE|PUBLICATION_VERIFIED|PUBLICATION_OBSERVATION" app/services/youtube_delivery.py app/services/production_publish.py app/services/production_workflow.py
+          rg -n "privacyStatus.*private|public_release_by_api.*False|public_release_by_api.*false" app/services/youtube_delivery.py
+          ! rg -n "videos\\.(update|delete)|unpublish|privacyStatus.*public" app/services/youtube_delivery.py
+          ! rg -n "FinalVideoDecision|ManualPublishConfirmation|manual upload" frontend/src/features/production/private-publication-surface.tsx

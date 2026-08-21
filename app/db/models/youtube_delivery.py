@@ -175,8 +175,8 @@ class YouTubePrivateStage(Base):
     final_review_candidate_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("final_review_candidates.id"), nullable=False
     )
-    final_video_decision_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("final_video_decisions.id"), nullable=False
+    final_video_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_video_decisions.id")
     )
     final_media_ref_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("final_media_refs.id"), nullable=False
@@ -229,7 +229,8 @@ class YouTubePrivateStage(Base):
         ),
         CheckConstraint(
             "state in ('PREPARED','SESSION_CREATED','UPLOADING','OUTCOME_UNKNOWN',"
-            "'BYTES_ACCEPTED','PROCESSING','PRIVATE_VERIFIED','BLOCKED','FAILED')",
+            "'BYTES_ACCEPTED','PROCESSING','PRIVATE_VERIFIED','PUBLICATION_VERIFIED',"
+            "'REJECTED','NEEDS_RERENDER','BLOCKED','FAILED')",
             name="ck_youtube_private_stages_state",
         ),
         CheckConstraint(
@@ -248,7 +249,8 @@ class YouTubePrivateStage(Base):
             name="ck_youtube_private_stages_private_only",
         ),
         CheckConstraint(
-            "(state <> 'PRIVATE_VERIFIED') or (platform_video_id is not null and "
+            "(state not in ('PRIVATE_VERIFIED','PUBLICATION_VERIFIED')) or "
+            "(platform_video_id is not null and "
             "studio_url is not null and observed_metadata is not null and "
             "observed_metadata_hash is not null and processing_status = 'SUCCEEDED' and "
             "private_verified_at is not null)",
@@ -256,6 +258,48 @@ class YouTubePrivateStage(Base):
         ),
         Index("ix_youtube_private_stages_project", "video_project_id"),
         Index("ix_youtube_private_stages_state", "state"),
+    )
+
+
+class YouTubePrivateReworkRequest(Base):
+    """Immutable human disposition for an exact private stage."""
+
+    __tablename__ = "youtube_private_rework_requests"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    channel_workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
+    )
+    final_review_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_review_candidates.id"), nullable=False
+    )
+    youtube_private_stage_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("youtube_private_stages.id"), nullable=False
+    )
+    disposition: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by_actor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = utc_created_at()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "youtube_private_stage_id",
+            "request_hash",
+            name="uq_youtube_private_rework_stage_request",
+        ),
+        CheckConstraint(
+            "disposition in ('REJECT','NEEDS_RERENDER')",
+            name="ck_youtube_private_rework_disposition",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_youtube_private_rework_hash",
+        ),
+        Index("ix_youtube_private_rework_stage", "youtube_private_stage_id"),
     )
 
 
@@ -441,11 +485,11 @@ class PublicPublicationReceipt(Base):
     final_review_candidate_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("final_review_candidates.id"), nullable=False
     )
-    final_video_decision_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("final_video_decisions.id"), nullable=False
+    final_video_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_video_decisions.id")
     )
-    manual_publish_confirmation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("manual_publish_confirmations.id"), nullable=False
+    manual_publish_confirmation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("manual_publish_confirmations.id")
     )
     youtube_private_stage_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("youtube_private_stages.id")
@@ -480,6 +524,10 @@ class PublicPublicationReceipt(Base):
             "manual_publish_confirmation_id",
             name="uq_public_publication_receipts_confirmation",
         ),
+        UniqueConstraint(
+            "youtube_private_stage_id",
+            name="uq_public_publication_receipts_stage",
+        ),
         CheckConstraint(
             "observed_privacy_status = 'PUBLIC'",
             name="ck_public_publication_receipts_public",
@@ -489,6 +537,14 @@ class PublicPublicationReceipt(Base):
             "verification_evidence_hash ~ '^[0-9a-f]{64}$' and "
             "receipt_hash ~ '^[0-9a-f]{64}$'",
             name="ck_public_publication_receipts_hashes",
+        ),
+        CheckConstraint(
+            "(final_video_decision_id is not null and "
+            "manual_publish_confirmation_id is not null) or "
+            "(youtube_private_stage_id is not null and "
+            "final_video_decision_id is null and "
+            "manual_publish_confirmation_id is null)",
+            name="ck_public_publication_receipts_authority",
         ),
         Index("ix_public_publication_receipts_project", "video_project_id"),
         Index("ix_public_publication_receipts_published", "observed_published_at"),
@@ -785,6 +841,7 @@ def _immutable_delivery_authority(
 for _model in (
     ProductionThumbnailBinding,
     YouTubeComponentReceipt,
+    YouTubePrivateReworkRequest,
     PublicPublicationReceipt,
     LocalMediaPurgeReceipt,
 ):

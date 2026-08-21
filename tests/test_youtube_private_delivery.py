@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -31,6 +32,7 @@ from app.services.youtube_delivery import (
     YouTubeDataApiTransport,
     YouTubePrivateStageExecutor,
     _normalize_youtube_readback,
+    _youtube_insert_body,
     _validate_public_release_observation,
 )
 
@@ -350,7 +352,44 @@ def test_complete_upload_status_requires_platform_video_id() -> None:
 
 def test_uploaded_video_read_contract_accepts_v3_rows() -> None:
     annotation = UploadedVideoReadV2.model_fields["schema_version"].annotation
-    assert set(get_args(annotation)) == {"v2", "v3"}
+    assert set(get_args(annotation)) == {"v2", "v3", "v4"}
+
+
+def test_private_insert_body_drops_local_only_controls() -> None:
+    body = _youtube_insert_body(
+        {
+            "snippet": {
+                "title": "Frozen title",
+                "description": "Frozen description",
+                "tags": ["one"],
+                "categoryId": "28",
+                "defaultLanguage": "en",
+            },
+            "status": {
+                "privacyStatus": "private",
+                "selfDeclaredMadeForKids": False,
+                "containsSyntheticMedia": True,
+            },
+            "privacy_status": "PRIVATE",
+            "public_release_by_api": False,
+            "exact_remote_bytes_unavailable": True,
+            "synthetic_media_assessment": {"assessment_version": "v1"},
+        }
+    )
+    assert body == {
+        "snippet": {
+            "title": "Frozen title",
+            "description": "Frozen description",
+            "tags": ["one"],
+            "categoryId": "28",
+            "defaultLanguage": "en",
+        },
+        "status": {
+            "privacyStatus": "private",
+            "selfDeclaredMadeForKids": False,
+            "containsSyntheticMedia": True,
+        },
+    }
 
 
 def test_resumable_query_and_upload_send_authorization(tmp_path: Path) -> None:
@@ -383,6 +422,62 @@ def test_resumable_query_and_upload_send_authorization(tmp_path: Path) -> None:
     )
     assert uploaded.platform_video_id == "video-authenticated"
     assert len(requests) == 2
+
+
+def test_resumable_insert_sends_only_private_provider_fields() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["Authorization"] == "Bearer exact-token"
+        assert request.content
+        body = json.loads(request.content)
+        assert body["status"]["privacyStatus"] == "private"
+        assert set(body) == {"snippet", "status"}
+        assert set(body["snippet"]) == {
+            "title",
+            "description",
+            "tags",
+            "categoryId",
+            "defaultLanguage",
+        }
+        assert set(body["status"]) == {
+            "privacyStatus",
+            "selfDeclaredMadeForKids",
+            "containsSyntheticMedia",
+        }
+        return httpx.Response(
+            200,
+            headers={"Location": "https://upload.youtube.test/session/private"},
+        )
+
+    transport = YouTubeDataApiTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    session_uri = transport.create_resumable_session(
+        access_token="exact-token",
+        metadata={
+            "snippet": {
+                "title": "Frozen",
+                "description": "Description",
+                "tags": ["tag"],
+                "categoryId": "28",
+                "defaultLanguage": "en",
+            },
+            "status": {
+                "privacyStatus": "private",
+                "selfDeclaredMadeForKids": False,
+                "containsSyntheticMedia": True,
+            },
+            "privacy_status": "PRIVATE",
+            "public_release_by_api": False,
+            "publish_at": None,
+        },
+        total_bytes=10,
+        mime_type="video/mp4",
+    )
+    assert session_uri.endswith("/private")
+    assert len(requests) == 1
 
 
 def test_verified_media_resolver_rejects_path_escape(tmp_path: Path) -> None:
@@ -430,6 +525,7 @@ def test_public_release_observation_must_match_frozen_expectation() -> None:
     _validate_public_release_observation(
         expectation=expectation,
         observed=observed,
+        require_component_flags=True,
     )
     with pytest.raises(
         ValidationFailureError,
@@ -438,6 +534,7 @@ def test_public_release_observation_must_match_frozen_expectation() -> None:
         _validate_public_release_observation(
             expectation=expectation,
             observed={**observed, "tags": ["drifted"]},
+            require_component_flags=True,
         )
     with pytest.raises(
         ValidationFailureError,
@@ -446,7 +543,33 @@ def test_public_release_observation_must_match_frozen_expectation() -> None:
         _validate_public_release_observation(
             expectation=expectation,
             observed={key: value for key, value in observed.items() if key != "category_id"},
+            require_component_flags=True,
         )
+
+
+def test_public_observer_contract_does_not_require_exact_remote_thumbnail_bytes() -> None:
+    expectation = {
+        "expected_privacy_status": "PUBLIC",
+        "manual_release_only": True,
+        "title": "Frozen title",
+        "description": "Frozen description",
+        "tags": ["one"],
+        "category_id": "28",
+        "default_language": "en",
+        "self_declared_made_for_kids": False,
+        "contains_synthetic_media": True,
+    }
+    observed = {
+        **expectation,
+        "privacy_status": "PUBLIC",
+        "thumbnail_assurance": "LOCAL_EFFECT_HASH_VERIFIED",
+        "caption_assurance": "LOCAL_EFFECT_HASH_VERIFIED",
+        "exact_remote_bytes_unavailable": True,
+    }
+    _validate_public_release_observation(
+        expectation=expectation,
+        observed=observed,
+    )
 
 
 def test_concurrent_upload_cannot_create_second_resumable_session(

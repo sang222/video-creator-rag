@@ -47,6 +47,7 @@ from app.db.models.m7 import ManualPublishConfirmation
 from app.db.models.foundation import DomainEvent
 from app.db.models.ops import CredentialReference
 from app.db.models.production_publish import FinalReviewCandidate, FinalVideoDecision
+from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.vcos_v2 import SeriesPlan
 from app.db.models.youtube_delivery import (
     LocalMediaPurgeAttempt,
@@ -56,6 +57,7 @@ from app.db.models.youtube_delivery import (
     TelegramDeliveryNotification,
     YouTubeComponentAttempt,
     YouTubeComponentReceipt,
+    YouTubePrivateReworkRequest,
     YouTubePrivateStage,
     YouTubePublishingCredential,
     YouTubeSeriesEpisodeBinding,
@@ -83,12 +85,22 @@ _REQUIRED_PRIVATE_CAPABILITIES = frozenset(
 _COMPONENTS_REQUIRED_FOR_PRIVATE_VERIFICATION = frozenset(
     {"VIDEO_UPLOAD", "THUMBNAIL", "CAPTION", "METADATA_READBACK", "PROCESSING_READBACK"}
 )
+
+
+def _has_youtube_readback_scope(credential: YouTubePublishingCredential) -> bool:
+    return bool(
+        {YOUTUBE_FORCE_SSL_SCOPE, YOUTUBE_FULL_SCOPE}
+        & set(credential.oauth_scopes)
+    )
+
+
 _UPLOAD_NAMESPACE = uuid.UUID("a35d9ad1-61d3-56a2-a2d5-8e69760e8eab")
 _STAGE_NAMESPACE = uuid.UUID("cf0ef8d4-cd34-5cf0-bf95-edf9ce0dc7ac")
 _PUBLICATION_NAMESPACE = uuid.UUID("f5efbcb0-26c9-5211-b0f3-cba38bc81547")
 _DELIVERY_EVENT_NAMESPACE = uuid.UUID("a33d093f-9f24-5938-a75a-9379b391fc81")
 
 YOUTUBE_PRIVATE_STAGE_EVENT_TYPE = "YOUTUBE_PRIVATE_STAGE_EXECUTION_REQUESTED"
+YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE = "YOUTUBE_PUBLICATION_OBSERVATION_REQUESTED"
 TELEGRAM_DELIVERY_EVENT_TYPE = "TELEGRAM_DELIVERY_NOTIFICATION_REQUESTED"
 LOCAL_MEDIA_PURGE_EVENT_TYPE = "LOCAL_MEDIA_PURGE_REQUESTED"
 YOUTUBE_PRIVATE_STAGE_AGGREGATE_TYPE = "youtube_private_stage"
@@ -97,6 +109,7 @@ LOCAL_MEDIA_PURGE_AGGREGATE_TYPE = "local_media_purge_attempt"
 DELIVERY_EVENT_TYPES = frozenset(
     {
         YOUTUBE_PRIVATE_STAGE_EVENT_TYPE,
+        YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE,
         TELEGRAM_DELIVERY_EVENT_TYPE,
         LOCAL_MEDIA_PURGE_EVENT_TYPE,
     }
@@ -185,7 +198,7 @@ def _thumbnail_binding_identity_hash(
 def _private_stage_identity_hash(
     stage: YouTubePrivateStage,
     *,
-    decision: FinalVideoDecision,
+    decision: FinalVideoDecision | None,
     candidate: FinalReviewCandidate,
     final_media: FinalMediaRef,
     credential: YouTubePublishingCredential,
@@ -193,9 +206,13 @@ def _private_stage_identity_hash(
 ) -> str:
     return _hash(
         {
-            "schema_version": "vcos.youtube-private-stage.v1",
-            "decision_id": str(decision.id),
-            "decision_hash": decision.decision_hash,
+            "schema_version": (
+                "vcos.youtube-private-stage.v2"
+                if decision is None
+                else "vcos.youtube-private-stage.v1"
+            ),
+            "decision_id": str(decision.id) if decision else None,
+            "decision_hash": decision.decision_hash if decision else None,
             "candidate_id": str(candidate.id),
             "candidate_hash": candidate.candidate_hash,
             "final_media_ref_id": str(final_media.id),
@@ -216,6 +233,7 @@ def _validate_public_release_observation(
     *,
     expectation: Mapping[str, Any],
     observed: Mapping[str, Any],
+    require_component_flags: bool = False,
 ) -> None:
     if expectation.get("manual_release_only") is not True:
         raise ValidationFailureError("PUBLICATION_RECEIPT_RELEASE_AUTHORITY_INVALID")
@@ -225,12 +243,26 @@ def _validate_public_release_observation(
         "tags",
         "category_id",
         "default_language",
-        "made_for_kids",
         "contains_synthetic_media",
-        "thumbnail_confirmed",
-        "caption_confirmed",
         "privacy_status",
     )
+    if require_component_flags:
+        required = (*required, "thumbnail_confirmed", "caption_confirmed")
+    if "exact_remote_bytes_unavailable" in expectation:
+        required = (
+            *required,
+            "thumbnail_assurance",
+            "caption_assurance",
+            "exact_remote_bytes_unavailable",
+            "public_thumbnail_identity_semantics",
+            "synthetic_media_assessment",
+        )
+    audience_key = (
+        "self_declared_made_for_kids"
+        if "self_declared_made_for_kids" in expectation
+        else "made_for_kids"
+    )
+    required = (*required, audience_key)
     missing = [key for key in required if key not in observed or observed[key] is None]
     if missing:
         raise ValidationFailureError(
@@ -243,12 +275,30 @@ def _validate_public_release_observation(
         "tags": list(expectation.get("tags") or []),
         "category_id": expectation.get("category_id"),
         "default_language": expectation.get("default_language"),
-        "made_for_kids": expectation.get("made_for_kids"),
+        audience_key: expectation.get(
+            "self_declared_made_for_kids", expectation.get("made_for_kids")
+        ),
         "contains_synthetic_media": expectation.get("contains_synthetic_media"),
-        "thumbnail_confirmed": True,
-        "caption_confirmed": True,
         "privacy_status": str(expectation.get("expected_privacy_status") or "").upper(),
     }
+    if require_component_flags:
+        expected_pairs.update(
+            {"thumbnail_confirmed": True, "caption_confirmed": True}
+        )
+    if "exact_remote_bytes_unavailable" in expectation:
+        expected_pairs.update(
+            {
+                "thumbnail_assurance": expectation.get("thumbnail_assurance"),
+                "caption_assurance": expectation.get("caption_assurance"),
+                "exact_remote_bytes_unavailable": True,
+                "public_thumbnail_identity_semantics": expectation.get(
+                    "public_thumbnail_identity_semantics"
+                ),
+                "synthetic_media_assessment": expectation.get(
+                    "synthetic_media_assessment"
+                ),
+            }
+        )
     for key, expected in expected_pairs.items():
         actual = observed.get(key)
         if key == "privacy_status":
@@ -262,6 +312,38 @@ def _validate_public_release_observation(
             "PUBLICATION_RECEIPT_FROZEN_READBACK_MISMATCH:"
             + ",".join(sorted(mismatches))
         )
+
+
+def _youtube_insert_body(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only fields accepted by ``videos.insert``.
+
+    ``staging_metadata`` is also a local evidence envelope.  Internal hashes,
+    assurance claims, and cutover controls must never cross the provider
+    boundary.
+    """
+
+    snippet = dict(metadata.get("snippet") or {})
+    status = dict(metadata.get("status") or {})
+    title = str(snippet.get("title") or "").strip()
+    privacy = str(status.get("privacyStatus") or "").lower()
+    if not title or privacy != "private":
+        raise ValidationFailureError("YOUTUBE_PRIVATE_INSERT_BODY_INVALID")
+    return {
+        "snippet": {
+            "title": title,
+            "description": str(snippet.get("description") or ""),
+            "tags": [str(value) for value in list(snippet.get("tags") or [])],
+            "categoryId": str(snippet.get("categoryId") or ""),
+            "defaultLanguage": str(snippet.get("defaultLanguage") or ""),
+        },
+        "status": {
+            "privacyStatus": "private",
+            "selfDeclaredMadeForKids": bool(
+                status.get("selfDeclaredMadeForKids", False)
+            ),
+            "containsSyntheticMedia": bool(status.get("containsSyntheticMedia", False)),
+        },
+    }
 
 
 def _append_delivery_event_once(
@@ -591,7 +673,7 @@ class YouTubeDataApiTransport:
                 "X-Upload-Content-Length": str(total_bytes),
                 "X-Upload-Content-Type": mime_type,
             },
-            json=dict(metadata),
+            json=_youtube_insert_body(metadata),
         )
         response.raise_for_status()
         session_uri = response.headers.get("Location")
@@ -804,6 +886,8 @@ class YouTubeDeliveryService:
             and not ({YOUTUBE_FORCE_SSL_SCOPE, YOUTUBE_FULL_SCOPE} & set(scopes))
         ):
             raise ValidationFailureError("YOUTUBE_FORCE_SSL_SCOPE_REQUIRED_FOR_CAPTIONS")
+        if not ({YOUTUBE_FORCE_SSL_SCOPE, YOUTUBE_FULL_SCOPE} & set(scopes)):
+            raise ValidationFailureError("YOUTUBE_READBACK_SCOPE_REQUIRED")
         payload = {
             "schema_version": "vcos.youtube-publishing-credential.v1",
             "company_id": str(company_id),
@@ -961,21 +1045,40 @@ class YouTubeDeliveryService:
     def prepare_private_stage(
         self,
         *,
-        decision_id: uuid.UUID,
+        decision_id: uuid.UUID | None = None,
+        candidate_id: uuid.UUID | None = None,
         data: YouTubePrivateStagePrepare,
     ) -> YouTubePrivateStage:
-        decision = self.session.get(FinalVideoDecision, decision_id)
-        if decision is None:
+        if decision_id is None and candidate_id is None:
+            raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_CANDIDATE_REQUIRED")
+        decision = (
+            self.session.get(FinalVideoDecision, decision_id)
+            if decision_id is not None
+            else None
+        )
+        if decision_id is not None and decision is None:
             raise NotFoundError(f"final video decision not found: {decision_id}")
-        if decision.decision != "UPLOAD":
+        if decision is not None and decision.decision != "UPLOAD":
             raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_REQUIRES_UPLOAD_DECISION")
-        existing = self.session.scalar(
-            select(YouTubePrivateStage).where(
+        resolved_candidate_id = (
+            decision.final_review_candidate_id if decision is not None else candidate_id
+        )
+        candidate = self.session.get(FinalReviewCandidate, resolved_candidate_id)
+        final_media = (
+            self.session.get(FinalMediaRef, candidate.final_media_ref_id)
+            if candidate is not None
+            else None
+        )
+        existing_statement = select(YouTubePrivateStage)
+        if decision is not None:
+            existing_statement = existing_statement.where(
                 YouTubePrivateStage.final_video_decision_id == decision.id
             )
-        )
-        candidate = self.session.get(FinalReviewCandidate, decision.final_review_candidate_id)
-        final_media = self.session.get(FinalMediaRef, decision.final_media_ref_id)
+        else:
+            existing_statement = existing_statement.where(
+                YouTubePrivateStage.final_review_candidate_id == candidate_id
+            )
+        existing = self.session.scalar(existing_statement)
         credential = self.session.get(
             YouTubePublishingCredential, data.publishing_credential_id
         )
@@ -996,6 +1099,12 @@ class YouTubeDeliveryService:
             or thumbnail.state != "VERIFIED"
             or final_media.id != candidate.final_media_ref_id
             or final_media.checksum_sha256 != candidate.final_media_hash
+            or candidate.target_platform != "YOUTUBE"
+            or (
+                decision is None
+                and candidate.publish_metadata_snapshot.get("delivery_mode")
+                != "YOUTUBE_PRIVATE_STAGE"
+            )
         ):
             raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_LINEAGE_MISMATCH")
         title = str(candidate.publish_metadata_snapshot.get("title") or "").strip()
@@ -1003,6 +1112,12 @@ class YouTubeDeliveryService:
         if not title:
             raise ValidationFailureError("YOUTUBE_STAGING_TITLE_REQUIRED")
         frozen_metadata = dict(candidate.publish_metadata_snapshot or {})
+        if frozen_metadata.get("delivery_mode") == "YOUTUBE_PRIVATE_STAGE" and not (
+            str(final_media.file_ref).startswith("vcos-local-archive://")
+            or str(final_media.file_ref).startswith("file://")
+            or Path(str(final_media.file_ref)).is_absolute()
+        ):
+            raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_LOCAL_MEDIA_REQUIRED")
         if frozen_metadata.get("delivery_mode") == "YOUTUBE_PRIVATE_STAGE":
             frozen_caption = frozen_metadata.get("caption_sidecar")
             frozen_tags = [str(item) for item in list(frozen_metadata.get("tags") or [])]
@@ -1023,6 +1138,10 @@ class YouTubeDeliveryService:
                 raise ValidationFailureError(
                     "YOUTUBE_PRIVATE_STAGE_FROZEN_METADATA_DRIFT"
                 )
+        if decision is None and "://" in data.caption_ref and not data.caption_ref.startswith(
+            "file://"
+        ):
+            raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_LOCAL_CAPTION_REQUIRED")
         language = data.default_language or str(
             candidate.target_market_lineage.get("content_language") or "en"
         )
@@ -1053,14 +1172,39 @@ class YouTubeDeliveryService:
             "default_language": language,
             "made_for_kids": data.made_for_kids,
             "contains_synthetic_media": data.contains_synthetic_media,
-            "thumbnail_confirmed": True,
-            "caption_confirmed": True,
             "platform_channel_id": credential.platform_channel_id,
         }
+        if decision is None:
+            public_expectation.update(
+                {
+                    "self_declared_made_for_kids": data.made_for_kids,
+                    "effective_made_for_kids": None,
+                    "thumbnail_assurance": "LOCAL_EFFECT_HASH_VERIFIED",
+                    "caption_assurance": "LOCAL_EFFECT_HASH_VERIFIED",
+                    "exact_remote_bytes_unavailable": True,
+                    "public_thumbnail_identity_semantics": (
+                        "HUMAN_PUBLIC_ATTESTATION_EXACT_REMOTE_BYTES_UNAVAILABLE"
+                    ),
+                    "synthetic_media_assessment": {
+                        "assessment_version": "v1",
+                        "assessment": "FROZEN_DISCLOSURE_SNAPSHOT",
+                        "source_hash": _hash(dict(candidate.disclosure_snapshot or {})),
+                        "contains_synthetic_media": data.contains_synthetic_media,
+                    },
+                }
+            )
+        else:
+            public_expectation.update(
+                {"thumbnail_confirmed": True, "caption_confirmed": True}
+            )
         identity = {
-            "schema_version": "vcos.youtube-private-stage.v1",
-            "decision_id": str(decision.id),
-            "decision_hash": decision.decision_hash,
+            "schema_version": (
+                "vcos.youtube-private-stage.v2"
+                if decision is None
+                else "vcos.youtube-private-stage.v1"
+            ),
+            "decision_id": str(decision.id) if decision else None,
+            "decision_hash": decision.decision_hash if decision else None,
             "candidate_id": str(candidate.id),
             "candidate_hash": candidate.candidate_hash,
             "final_media_ref_id": str(final_media.id),
@@ -1090,7 +1234,7 @@ class YouTubeDeliveryService:
                     "stage_identity_hash": existing.identity_hash,
                 },
                 max_attempts=12,
-                causation_id=decision.id,
+                causation_id=decision.id if decision else candidate.id,
             )
             self._bind_release_task_to_stage(
                 candidate=candidate,
@@ -1105,7 +1249,7 @@ class YouTubeDeliveryService:
             channel_workspace_id=candidate.channel_workspace_id,
             video_project_id=candidate.video_project_id,
             final_review_candidate_id=candidate.id,
-            final_video_decision_id=decision.id,
+            final_video_decision_id=decision.id if decision else None,
             final_media_ref_id=final_media.id,
             final_media_ref=final_media.file_ref,
             final_media_checksum=candidate.final_media_hash,
@@ -1134,7 +1278,7 @@ class YouTubeDeliveryService:
                 "stage_identity_hash": record.identity_hash,
             },
             max_attempts=12,
-            causation_id=decision.id,
+            causation_id=decision.id if decision else candidate.id,
         )
         self._bind_release_task_to_stage(
             candidate=candidate,
@@ -1192,6 +1336,11 @@ class YouTubeDeliveryService:
             )
         metadata = dict(candidate.publish_metadata_snapshot or {})
         caption = metadata.get("caption_sidecar")
+        caption_ref = (
+            caption.get("caption_local_file_ref")
+            if isinstance(caption, Mapping)
+            else None
+        )
         required = {
             "tags": metadata.get("tags"),
             "category_id": metadata.get("category_id"),
@@ -1204,7 +1353,11 @@ class YouTubeDeliveryService:
         if (
             metadata.get("delivery_mode") != "YOUTUBE_PRIVATE_STAGE"
             or not isinstance(caption, Mapping)
-            or not isinstance(caption.get("caption_local_file_ref"), str)
+            or not isinstance(caption_ref, str)
+            or (
+                "://" in caption_ref
+                and not caption_ref.startswith("file://")
+            )
             or not _is_sha256(caption.get("caption_checksum_sha256"))
             or not isinstance(required["tags"], list)
             or not isinstance(required["category_id"], str)
@@ -1222,7 +1375,7 @@ class YouTubeDeliveryService:
             data=YouTubePrivateStagePrepare(
                 publishing_credential_id=credentials[0].id,
                 production_thumbnail_binding_id=thumbnails[0].id,
-                caption_ref=caption["caption_local_file_ref"],
+                caption_ref=caption_ref,
                 caption_hash=caption["caption_checksum_sha256"],
                 tags=[str(item) for item in required["tags"]],
                 category_id=required["category_id"],
@@ -1234,13 +1387,164 @@ class YouTubeDeliveryService:
             ),
         )
 
+    def prepare_private_stage_from_candidate(
+        self,
+        *,
+        candidate_id: uuid.UUID,
+    ) -> YouTubePrivateStage:
+        """Create the active staging authority without a final-video decision."""
+
+        candidate = self.session.get(FinalReviewCandidate, candidate_id)
+        if candidate is None:
+            raise NotFoundError(f"final review candidate not found: {candidate_id}")
+        if candidate.target_platform != "YOUTUBE":
+            raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_TARGET_PLATFORM_REQUIRED")
+        credentials = list(
+            self.session.scalars(
+                select(YouTubePublishingCredential).where(
+                    YouTubePublishingCredential.company_id == candidate.company_id,
+                    YouTubePublishingCredential.channel_workspace_id
+                    == candidate.channel_workspace_id,
+                    YouTubePublishingCredential.platform_channel_id
+                    == candidate.destination_platform_channel_id,
+                    YouTubePublishingCredential.account_identity
+                    == candidate.destination_account_identity,
+                    YouTubePublishingCredential.state == "ACTIVE",
+                )
+            ).all()
+        )
+        thumbnails = list(
+            self.session.scalars(
+                select(ProductionThumbnailBinding).where(
+                    ProductionThumbnailBinding.final_review_candidate_id == candidate.id,
+                    ProductionThumbnailBinding.state == "VERIFIED",
+                )
+            ).all()
+        )
+        metadata = dict(candidate.publish_metadata_snapshot or {})
+        caption = metadata.get("caption_sidecar")
+        caption_ref = (
+            caption.get("caption_local_file_ref")
+            if isinstance(caption, Mapping)
+            else None
+        )
+        required = {
+            "tags": metadata.get("tags"),
+            "category_id": metadata.get("category_id"),
+            "default_language": metadata.get("default_language"),
+            "made_for_kids": metadata.get("made_for_kids"),
+            "contains_synthetic_media": metadata.get("contains_synthetic_media"),
+        }
+        if len(credentials) != 1 or len(thumbnails) != 1:
+            raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_CURRENT_AUTHORITY_INCOMPLETE")
+        if (
+            metadata.get("delivery_mode") != "YOUTUBE_PRIVATE_STAGE"
+            or not isinstance(caption, Mapping)
+            or not isinstance(caption_ref, str)
+            or (
+                "://" in caption_ref
+                and not caption_ref.startswith("file://")
+            )
+            or not _is_sha256(caption.get("caption_checksum_sha256"))
+            or not isinstance(required["tags"], list)
+            or not isinstance(required["category_id"], str)
+            or not required["category_id"]
+            or not isinstance(required["default_language"], str)
+            or not required["default_language"]
+            or not isinstance(required["made_for_kids"], bool)
+            or not isinstance(required["contains_synthetic_media"], bool)
+        ):
+            raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_FROZEN_METADATA_INCOMPLETE")
+        return self.prepare_private_stage(
+            candidate_id=candidate.id,
+            data=YouTubePrivateStagePrepare(
+                publishing_credential_id=credentials[0].id,
+                production_thumbnail_binding_id=thumbnails[0].id,
+                caption_ref=caption_ref,
+                caption_hash=caption["caption_checksum_sha256"],
+                tags=[str(item) for item in required["tags"]],
+                category_id=required["category_id"],
+                default_language=required["default_language"],
+                made_for_kids=required["made_for_kids"],
+                contains_synthetic_media=required["contains_synthetic_media"],
+            ),
+        )
+
+    def review_private_stage(
+        self,
+        *,
+        stage_id: uuid.UUID,
+        disposition: str,
+        reason: str,
+        actor_id: uuid.UUID,
+    ) -> YouTubePrivateStage:
+        """Record an explicit reject/rerender disposition without remote delete."""
+
+        if disposition not in {"REJECT", "NEEDS_RERENDER"} or not reason.strip():
+            raise ValidationFailureError("YOUTUBE_PRIVATE_REVIEW_DISPOSITION_INVALID")
+        stage = self.require_stage(stage_id)
+        payload = {
+            "schema_version": "vcos.youtube-private-rework-request.v1",
+            "stage_id": str(stage.id),
+            "candidate_id": str(stage.final_review_candidate_id),
+            "disposition": disposition,
+            "reason": reason.strip(),
+        }
+        request_hash = _hash(payload)
+        existing = self.session.scalar(
+            select(YouTubePrivateReworkRequest).where(
+                YouTubePrivateReworkRequest.youtube_private_stage_id == stage.id,
+                YouTubePrivateReworkRequest.request_hash == request_hash,
+            )
+        )
+        if existing is not None:
+            return stage
+        if stage.state != "PRIVATE_VERIFIED":
+            raise ValidationFailureError("YOUTUBE_PRIVATE_REVIEW_REQUIRES_PRIVATE_VERIFIED")
+        self.session.add(
+            YouTubePrivateReworkRequest(
+                company_id=stage.company_id,
+                channel_workspace_id=stage.channel_workspace_id,
+                final_review_candidate_id=stage.final_review_candidate_id,
+                youtube_private_stage_id=stage.id,
+                disposition=disposition,
+                reason=reason.strip(),
+                requested_by_actor_id=actor_id,
+                request_hash=request_hash,
+            )
+        )
+        stage.state = "REJECTED" if disposition == "REJECT" else "NEEDS_RERENDER"
+        stage.last_error_code = (
+            "YOUTUBE_PRIVATE_STAGE_REJECTED"
+            if disposition == "REJECT"
+            else "YOUTUBE_PRIVATE_STAGE_NEEDS_RERENDER"
+        )
+        workflow_run = self.session.scalar(
+            select(ProductionWorkflowRun).where(
+                ProductionWorkflowRun.final_review_candidate_id
+                == stage.final_review_candidate_id
+            )
+        )
+        if workflow_run is not None and stage.final_video_decision_id is None:
+            workflow_run.state = "BLOCKED"
+            workflow_run.state_reason_codes = [
+                "YOUTUBE_PRIVATE_STAGE_REWORK_REQUIRED",
+                stage.last_error_code,
+            ]
+            workflow_run.completed_at = None
+            workflow_run.last_progress_at = utc_now()
+        self.session.flush()
+        return stage
+
     def _bind_release_task_to_stage(
         self,
         *,
         candidate: FinalReviewCandidate,
-        decision: FinalVideoDecision,
+        decision: FinalVideoDecision | None,
         stage: YouTubePrivateStage,
     ) -> None:
+        if decision is None:
+            return
         task = self.session.scalar(
             select(HumanUploadTask).where(
                 HumanUploadTask.final_video_decision_id == decision.id
@@ -1285,8 +1589,9 @@ class YouTubeDeliveryService:
         self,
         *,
         candidate: FinalReviewCandidate,
-        decision: FinalVideoDecision,
-        confirmation: ManualPublishConfirmation,
+        decision: FinalVideoDecision | None,
+        confirmation: ManualPublishConfirmation | None,
+        youtube_private_stage_id: uuid.UUID | None = None,
         observed_metadata: Mapping[str, Any],
         observed_platform_channel_id: str,
         observed_platform_video_id: str,
@@ -1298,26 +1603,42 @@ class YouTubeDeliveryService:
         privacy = str(observed_metadata.get("privacy_status") or "").upper()
         if privacy != "PUBLIC":
             raise ValidationFailureError("PUBLICATION_RECEIPT_REQUIRES_PUBLIC_VISIBILITY")
-        if (
+        if (decision is None) != (confirmation is None):
+            raise ValidationFailureError("PUBLICATION_RECEIPT_AUTHORITY_LINEAGE_MISMATCH")
+        if decision is not None and (
             decision.final_review_candidate_id != candidate.id
             or decision.final_media_ref_id != candidate.final_media_ref_id
             or decision.company_id != candidate.company_id
             or decision.channel_workspace_id != candidate.channel_workspace_id
             or decision.video_project_id != candidate.video_project_id
-            or confirmation.confirmation_state != "VERIFIED"
+        ):
+            raise ValidationFailureError("PUBLICATION_RECEIPT_AUTHORITY_LINEAGE_MISMATCH")
+        if confirmation is not None and (
+            confirmation.confirmation_state != "VERIFIED"
             or confirmation.final_review_candidate_id != candidate.id
-            or confirmation.final_video_decision_id != decision.id
+            or confirmation.final_video_decision_id != (decision.id if decision else None)
             or confirmation.final_media_ref_id != candidate.final_media_ref_id
             or confirmation.company_id != candidate.company_id
             or confirmation.channel_workspace_id != candidate.channel_workspace_id
             or confirmation.video_project_id != candidate.video_project_id
         ):
             raise ValidationFailureError("PUBLICATION_RECEIPT_AUTHORITY_LINEAGE_MISMATCH")
-        stage = self.session.scalar(
-            select(YouTubePrivateStage).where(
+        stage_statement = select(YouTubePrivateStage)
+        if youtube_private_stage_id is not None:
+            stage_statement = stage_statement.where(
+                YouTubePrivateStage.id == youtube_private_stage_id
+            )
+        elif decision is not None:
+            stage_statement = stage_statement.where(
                 YouTubePrivateStage.final_video_decision_id == decision.id
             )
-        )
+        else:
+            stage_statement = stage_statement.where(
+                YouTubePrivateStage.final_review_candidate_id == candidate.id
+            )
+        stage = self.session.scalar(stage_statement)
+        if decision is None and stage is None:
+            raise ValidationFailureError("PUBLICATION_RECEIPT_STAGE_REQUIRED")
         if stage is not None:
             final_media = self.session.get(FinalMediaRef, stage.final_media_ref_id)
             credential = self.session.get(
@@ -1335,7 +1656,9 @@ class YouTubeDeliveryService:
                 or stage.public_release_expectation.get("platform_channel_id")
                 != observed_platform_channel_id
                 or stage.final_review_candidate_id != candidate.id
-                or stage.final_video_decision_id != decision.id
+                or stage.final_video_decision_id != (
+                    decision.id if decision is not None else None
+                )
                 or stage.final_media_ref_id != candidate.final_media_ref_id
                 or stage.staging_metadata_hash != _hash(stage.staging_metadata)
                 or stage.public_release_expectation_hash
@@ -1358,14 +1681,15 @@ class YouTubeDeliveryService:
             _validate_public_release_observation(
                 expectation=stage.public_release_expectation,
                 observed=observed_metadata,
+                require_component_flags=confirmation is not None,
             )
         payload = {
             "schema_version": "vcos.public-publication-receipt.v1",
             "candidate_id": str(candidate.id),
             "candidate_hash": candidate.candidate_hash,
-            "decision_id": str(decision.id),
-            "decision_hash": decision.decision_hash,
-            "confirmation_id": str(confirmation.id),
+            "decision_id": str(decision.id) if decision else None,
+            "decision_hash": decision.decision_hash if decision else None,
+            "confirmation_id": str(confirmation.id) if confirmation else None,
             "youtube_private_stage_id": str(stage.id) if stage else None,
             "platform_channel_id": observed_platform_channel_id,
             "platform_video_id": observed_platform_video_id,
@@ -1376,12 +1700,29 @@ class YouTubeDeliveryService:
             "verification_evidence_ref": verification_evidence_ref,
             "verification_evidence_hash": verification_evidence_hash,
         }
+        if decision is None and stage is not None:
+            payload.update(
+                {
+                    "private_stage_identity_hash": stage.identity_hash,
+                    "frozen_public_release_expectation_hash": (
+                        stage.public_release_expectation_hash
+                    ),
+                    "channel_workspace_id": str(stage.channel_workspace_id),
+                }
+            )
         digest = _hash(payload)
-        existing = self.session.scalar(
-            select(PublicPublicationReceipt).where(
+        receipt_statement = select(PublicPublicationReceipt)
+        if decision is None and stage is not None:
+            receipt_statement = receipt_statement.where(
+                PublicPublicationReceipt.youtube_private_stage_id == stage.id
+            )
+        elif decision is not None:
+            receipt_statement = receipt_statement.where(
                 PublicPublicationReceipt.final_video_decision_id == decision.id
             )
-        )
+        else:
+            raise ValidationFailureError("PUBLICATION_RECEIPT_STAGE_REQUIRED")
+        existing = self.session.scalar(receipt_statement)
         if existing is not None:
             if existing.receipt_hash != digest:
                 raise ConflictError("PUBLICATION_RECEIPT_IMMUTABLE_CONFLICT")
@@ -1392,8 +1733,8 @@ class YouTubeDeliveryService:
             channel_workspace_id=candidate.channel_workspace_id,
             video_project_id=candidate.video_project_id,
             final_review_candidate_id=candidate.id,
-            final_video_decision_id=decision.id,
-            manual_publish_confirmation_id=confirmation.id,
+            final_video_decision_id=decision.id if decision else None,
+            manual_publish_confirmation_id=confirmation.id if confirmation else None,
             youtube_private_stage_id=stage.id if stage else None,
             platform_channel_id=observed_platform_channel_id,
             platform_video_id=observed_platform_video_id,
@@ -1600,7 +1941,12 @@ class YouTubePrivateStageExecutor:
             stage, candidate, final_media, cloud, credential, thumbnail, access_token = (
                 self._load_scope(session, stage_id)
             )
-            if stage.state == "PRIVATE_VERIFIED":
+            if stage.state in {
+                "PRIVATE_VERIFIED",
+                "PUBLICATION_VERIFIED",
+                "REJECTED",
+                "NEEDS_RERENDER",
+            }:
                 return stage
             caption_ref = stage.caption_ref
             caption_hash = stage.caption_hash
@@ -1610,7 +1956,14 @@ class YouTubePrivateStageExecutor:
                 "staging_metadata": dict(stage.staging_metadata),
                 "final_media_checksum": stage.final_media_checksum,
                 "publishing_credential_hash": credential.content_hash,
+                "active_delivery": stage.final_video_decision_id is None,
             }
+            if stage_snapshot["active_delivery"] and not (
+                str(final_media.file_ref).startswith("vcos-local-archive://")
+                or str(final_media.file_ref).startswith("file://")
+                or Path(str(final_media.file_ref)).is_absolute()
+            ):
+                raise ValidationFailureError("YOUTUBE_PRIVATE_STAGE_LOCAL_MEDIA_REQUIRED")
         with self.media_resolver.resolve_final_media(
             final_media=final_media,
             cloud_ref=cloud,
@@ -1703,7 +2056,11 @@ class YouTubePrivateStageExecutor:
         if stage is None:
             raise NotFoundError(f"youtube private stage not found: {stage_id}")
         candidate = session.get(FinalReviewCandidate, stage.final_review_candidate_id)
-        decision = session.get(FinalVideoDecision, stage.final_video_decision_id)
+        decision = (
+            session.get(FinalVideoDecision, stage.final_video_decision_id)
+            if stage.final_video_decision_id is not None
+            else None
+        )
         final_media = session.get(FinalMediaRef, stage.final_media_ref_id)
         credential = session.get(
             YouTubePublishingCredential, stage.publishing_credential_id
@@ -1718,20 +2075,26 @@ class YouTubePrivateStageExecutor:
         )
         if (
             candidate is None
-            or decision is None
+            or (stage.final_video_decision_id is not None and decision is None)
             or final_media is None
             or credential is None
             or thumbnail is None
             or credential.state != "ACTIVE"
             or not _REQUIRED_PRIVATE_CAPABILITIES.issubset(set(credential.capabilities))
+            or not _has_youtube_readback_scope(credential)
             or stage.company_id != candidate.company_id
             or stage.channel_workspace_id != candidate.channel_workspace_id
             or stage.video_project_id != candidate.video_project_id
-            or decision.final_review_candidate_id != candidate.id
-            or decision.final_media_ref_id != final_media.id
-            or decision.company_id != candidate.company_id
-            or decision.channel_workspace_id != candidate.channel_workspace_id
-            or decision.video_project_id != candidate.video_project_id
+            or (
+                decision is not None
+                and (
+                    decision.final_review_candidate_id != candidate.id
+                    or decision.final_media_ref_id != final_media.id
+                    or decision.company_id != candidate.company_id
+                    or decision.channel_workspace_id != candidate.channel_workspace_id
+                    or decision.video_project_id != candidate.video_project_id
+                )
+            )
             or candidate.final_media_ref_id != final_media.id
             or final_media.file_ref != stage.final_media_ref
             or final_media.checksum_sha256 != stage.final_media_checksum
@@ -1822,6 +2185,7 @@ class YouTubePrivateStageExecutor:
                 attempt.outcome_certainty = "UNCERTAIN"
                 stage_lock.state = "UPLOADING"
             session.commit()
+
         with self.session_factory() as session:
             attempt = session.get(YouTubeUploadAttempt, attempt_id)
             stage = session.get(YouTubePrivateStage, stage_id)
@@ -1833,7 +2197,7 @@ class YouTubePrivateStageExecutor:
                 try:
                     session_uri = self.transport.create_resumable_session(
                         access_token=access_token,
-                        metadata=stage_snapshot["staging_metadata"],
+                        metadata=_youtube_insert_body(stage_snapshot["staging_metadata"]),
                         total_bytes=media.size_bytes,
                         mime_type=media.mime_type,
                     )
@@ -2146,10 +2510,12 @@ class YouTubePrivateStageExecutor:
                 != (snippet.get("defaultLanguage") or None)
                 or readback.privacy_status != "PRIVATE"
                 or readback.processing_status != "SUCCEEDED"
-                or readback.made_for_kids != status["selfDeclaredMadeForKids"]
+                or (
+                    readback.self_declared_made_for_kids is not None
+                    and readback.self_declared_made_for_kids
+                    != status["selfDeclaredMadeForKids"]
+                )
                 or readback.contains_synthetic_media != status["containsSyntheticMedia"]
-                or not readback.thumbnail_verified
-                or not readback.caption_verified
             ):
                 stage.state = "BLOCKED"
                 stage.last_error_code = "YOUTUBE_PRIVATE_READBACK_MISMATCH"
@@ -2165,7 +2531,23 @@ class YouTubePrivateStageExecutor:
                 "default_language": readback.default_language,
                 "privacy_status": readback.privacy_status,
                 "made_for_kids": readback.made_for_kids,
+                "self_declared_made_for_kids": (
+                    readback.self_declared_made_for_kids
+                    if readback.self_declared_made_for_kids is not None
+                    else status["selfDeclaredMadeForKids"]
+                ),
+                "effective_made_for_kids": readback.made_for_kids,
                 "contains_synthetic_media": readback.contains_synthetic_media,
+                "thumbnail_assurance": stage.public_release_expectation.get(
+                    "thumbnail_assurance"
+                ),
+                "caption_assurance": stage.public_release_expectation.get(
+                    "caption_assurance"
+                ),
+                "exact_remote_bytes_unavailable": True,
+                "synthetic_media_assessment": stage.public_release_expectation.get(
+                    "synthetic_media_assessment"
+                ),
             }
             self._component_receipt(
                 session=session,
@@ -2198,6 +2580,16 @@ class YouTubePrivateStageExecutor:
             stage.state = "PRIVATE_VERIFIED"
             stage.private_verified_at = utc_now()
             stage.last_error_code = None
+            workflow_run = session.scalar(
+                select(ProductionWorkflowRun).where(
+                    ProductionWorkflowRun.final_review_candidate_id
+                    == stage.final_review_candidate_id
+                )
+            )
+            if workflow_run is not None and stage.final_video_decision_id is None:
+                workflow_run.state = "PRIVATE_VERIFIED_AWAITING_PUBLIC"
+                workflow_run.state_reason_codes = ["PRIVATE_VERIFIED_REQUIRES_HUMAN_PUBLIC_CUTOVER"]
+                workflow_run.last_progress_at = utc_now()
             release_task = session.scalar(
                 select(HumanUploadTask).where(
                     HumanUploadTask.final_video_decision_id
@@ -2243,7 +2635,242 @@ class YouTubePrivateStageExecutor:
             LocalMediaPurgeService(session).prepare_after_private_verified(
                 stage_id=stage.id,
             )
+            if stage.final_video_decision_id is None:
+                _append_delivery_event_once(
+                    session,
+                    event_type=YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE,
+                    aggregate_type=YOUTUBE_PRIVATE_STAGE_AGGREGATE_TYPE,
+                    aggregate_id=stage.id,
+                    company_id=stage.company_id,
+                    channel_workspace_id=stage.channel_workspace_id,
+                    payload={
+                        "youtube_private_stage_id": str(stage.id),
+                        "stage_identity_hash": stage.identity_hash,
+                    },
+                    max_attempts=48,
+                    causation_id=stage.id,
+                )
             session.commit()
+
+
+class YouTubePublicPublicationObserver:
+    """Read-only cutover observer; it has no public-write capability."""
+
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        *,
+        transport: YouTubePrivateTransport | None = None,
+    ) -> None:
+        self.session_factory = session_factory
+        self.transport = transport or YouTubeDataApiTransport()
+
+    def reconcile(self, *, stage_id: uuid.UUID) -> YouTubePrivateStage:
+        with self.session_factory() as session:
+            stage = session.scalar(
+                select(YouTubePrivateStage)
+                .where(YouTubePrivateStage.id == stage_id)
+                .with_for_update()
+            )
+            if stage is None:
+                raise NotFoundError(f"youtube private stage not found: {stage_id}")
+            if stage.state == "PUBLICATION_VERIFIED":
+                if stage.final_video_decision_id is not None:
+                    return stage
+                candidate = session.get(
+                    FinalReviewCandidate, stage.final_review_candidate_id
+                )
+                receipt = session.scalar(
+                    select(PublicPublicationReceipt).where(
+                        PublicPublicationReceipt.youtube_private_stage_id == stage.id
+                    )
+                )
+                if candidate is None or receipt is None:
+                    raise ValidationFailureError(
+                        "YOUTUBE_PUBLICATION_VERIFIED_PROJECTION_INCOMPLETE"
+                    )
+                from app.services.production_publish import ProductionPublishService
+
+                ProductionPublishService(session).materialize_publication_from_receipt(
+                    candidate=candidate,
+                    stage=stage,
+                    receipt=receipt,
+                )
+                session.commit()
+                return stage
+            if stage.final_video_decision_id is not None:
+                raise ValidationFailureError(
+                    "YOUTUBE_PUBLICATION_OBSERVATION_ACTIVE_ONLY"
+                )
+            if stage.state in {"REJECTED", "NEEDS_RERENDER", "BLOCKED", "FAILED"}:
+                raise ValidationFailureError("YOUTUBE_PUBLICATION_OBSERVATION_NOT_ALLOWED")
+            if stage.state != "PRIVATE_VERIFIED" or not stage.platform_video_id:
+                raise ValidationFailureError("YOUTUBE_PUBLICATION_OBSERVATION_REQUIRES_PRIVATE_VERIFIED")
+            candidate = session.get(FinalReviewCandidate, stage.final_review_candidate_id)
+            credential = session.get(
+                YouTubePublishingCredential, stage.publishing_credential_id
+            )
+            replacement_exists = (
+                candidate is not None
+                and session.scalar(
+                    select(FinalReviewCandidate.id).where(
+                        FinalReviewCandidate.supersedes_final_review_candidate_id
+                        == candidate.id
+                    )
+                )
+                is not None
+            )
+            if (
+                candidate is None
+                or credential is None
+                or replacement_exists
+                or not _REQUIRED_PRIVATE_CAPABILITIES.issubset(
+                    set(credential.capabilities)
+                )
+                or not _has_youtube_readback_scope(credential)
+            ):
+                if replacement_exists:
+                    stage.state = "BLOCKED"
+                    stage.last_error_code = (
+                        "YOUTUBE_PUBLICATION_OBSERVATION_STALE_CANDIDATE"
+                    )
+                    session.commit()
+                    raise ValidationFailureError(
+                        "YOUTUBE_PUBLICATION_OBSERVATION_STALE_CANDIDATE"
+                    )
+                raise ValidationFailureError("YOUTUBE_PUBLICATION_OBSERVATION_SCOPE_INVALID")
+            access_token = YouTubeCredentialResolver(session).access_token(credential)
+            platform_video_id = stage.platform_video_id
+
+        try:
+            observed = dict(
+                self.transport.readback_video(
+                    access_token=access_token,
+                    platform_video_id=platform_video_id,
+                )
+            )
+        except Exception as exc:
+            raise ValidationFailureError(
+                "YOUTUBE_PUBLICATION_OBSERVATION_RECONCILIATION_REQUIRED"
+            ) from exc
+
+        snippet = dict(observed.get("snippet") or {})
+        status = dict(observed.get("status") or {})
+        privacy = str(status.get("privacyStatus") or "").upper()
+        observed_channel = str(snippet.get("channelId") or "")
+        observed_id = str(observed.get("id") or "")
+        with self.session_factory() as session:
+            stage = session.get(YouTubePrivateStage, stage_id)
+            candidate = (
+                session.get(FinalReviewCandidate, stage.final_review_candidate_id)
+                if stage is not None
+                else None
+            )
+            credential = (
+                session.get(YouTubePublishingCredential, stage.publishing_credential_id)
+                if stage is not None
+                else None
+            )
+            if (
+                stage is None
+                or candidate is None
+                or credential is None
+                or observed_id != stage.platform_video_id
+                or observed_channel != credential.platform_channel_id
+            ):
+                if stage is not None:
+                    stage.state = "BLOCKED"
+                    stage.last_error_code = "YOUTUBE_PUBLICATION_OBSERVATION_IDENTITY_MISMATCH"
+                    session.commit()
+                raise ValidationFailureError(
+                    "YOUTUBE_PUBLICATION_OBSERVATION_IDENTITY_MISMATCH"
+                )
+            if stage.state != "PRIVATE_VERIFIED":
+                raise ValidationFailureError("YOUTUBE_PUBLICATION_OBSERVATION_NOT_ALLOWED")
+            if privacy != "PUBLIC":
+                stage.last_error_code = "YOUTUBE_PUBLICATION_NOT_YET_PUBLIC"
+                session.commit()
+                raise ValidationFailureError("YOUTUBE_PUBLICATION_NOT_YET_PUBLIC")
+            published_at = _parse_provider_datetime(snippet.get("publishedAt"))
+            if published_at is None:
+                stage.state = "BLOCKED"
+                stage.last_error_code = "YOUTUBE_PUBLICATION_PUBLISHED_AT_MISSING"
+                session.commit()
+                raise ValidationFailureError("YOUTUBE_PUBLICATION_PUBLISHED_AT_MISSING")
+            observed_metadata = {
+                "title": str(snippet.get("title") or ""),
+                "description": str(snippet.get("description") or ""),
+                "tags": [str(value) for value in list(snippet.get("tags") or [])],
+                "category_id": str(snippet.get("categoryId") or ""),
+                "default_language": (
+                    str(snippet.get("defaultLanguage"))
+                    if snippet.get("defaultLanguage")
+                    else None
+                ),
+                "privacy_status": privacy,
+                "self_declared_made_for_kids": bool(
+                    status.get("selfDeclaredMadeForKids", False)
+                ),
+                "effective_made_for_kids": bool(status.get("madeForKids", False)),
+                "contains_synthetic_media": bool(
+                    status.get("containsSyntheticMedia", False)
+                ),
+                "thumbnail_assurance": stage.public_release_expectation.get(
+                    "thumbnail_assurance"
+                ),
+                "caption_assurance": stage.public_release_expectation.get(
+                    "caption_assurance"
+                ),
+                "exact_remote_bytes_unavailable": True,
+                "public_thumbnail_identity_semantics": stage.public_release_expectation.get(
+                    "public_thumbnail_identity_semantics"
+                ),
+                "synthetic_media_assessment": stage.public_release_expectation.get(
+                    "synthetic_media_assessment"
+                ),
+                "platform_channel_id": observed_channel,
+                "platform_video_id": observed_id,
+            }
+            _validate_public_release_observation(
+                expectation=stage.public_release_expectation,
+                observed=observed_metadata,
+            )
+            receipt = YouTubeDeliveryService(session).create_publication_receipt(
+                candidate=candidate,
+                decision=None,
+                confirmation=None,
+                youtube_private_stage_id=stage.id,
+                observed_metadata=observed_metadata,
+                observed_platform_channel_id=observed_channel,
+                observed_platform_video_id=observed_id,
+                observed_video_url=f"https://www.youtube.com/watch?v={quote(observed_id, safe='')}",
+                observed_published_at=published_at,
+                verification_evidence_ref="youtube-readback://videos.list",
+                verification_evidence_hash=_hash({"raw_observation": observed}),
+            )
+            stage.state = "PUBLICATION_VERIFIED"
+            stage.observed_metadata = observed_metadata
+            stage.observed_metadata_hash = _hash(observed_metadata)
+            stage.last_error_code = None
+            workflow_run = session.scalar(
+                select(ProductionWorkflowRun).where(
+                    ProductionWorkflowRun.final_review_candidate_id == candidate.id
+                )
+            )
+            if workflow_run is not None and stage.final_video_decision_id is None:
+                workflow_run.state = "PUBLICATION_VERIFIED"
+                workflow_run.state_reason_codes = ["PUBLICATION_VERIFIED"]
+                workflow_run.completed_at = utc_now()
+                workflow_run.last_progress_at = utc_now()
+            from app.services.production_publish import ProductionPublishService
+
+            ProductionPublishService(session).materialize_publication_from_receipt(
+                candidate=candidate,
+                stage=stage,
+                receipt=receipt,
+            )
+            session.commit()
+            return stage
 
 
 class LocalMediaPurgeService:
@@ -2610,6 +3237,14 @@ class TelegramDeliveryService:
             "production_package_hash": candidate.production_package_hash,
             "total_budget": _candidate_budget_summary(self.session, candidate),
             "youtube_private_stage_id": (str(youtube_stage.id) if youtube_stage else None),
+            "youtube_platform_video_id": (
+                youtube_stage.platform_video_id if youtube_stage else None
+            ),
+            "youtube_platform_channel_id": (
+                youtube_stage.public_release_expectation.get("platform_channel_id")
+                if youtube_stage
+                else None
+            ),
             "youtube_studio_url": youtube_stage.studio_url if youtube_stage else None,
         }
         state = "PENDING" if reference is not None and chat_ref else "BLOCKED_CONFIG"
@@ -2848,11 +3483,25 @@ def _normalize_youtube_readback(item: Mapping[str, Any]) -> YouTubePrivateReadba
         privacy_status=str(status.get("privacyStatus") or "").upper(),
         processing_status=str(processing.get("processingStatus") or "").upper(),
         made_for_kids=bool(status.get("madeForKids", status.get("selfDeclaredMadeForKids", False))),
+        self_declared_made_for_kids=(
+            bool(status["selfDeclaredMadeForKids"])
+            if "selfDeclaredMadeForKids" in status
+            else None
+        ),
         contains_synthetic_media=bool(status.get("containsSyntheticMedia", False)),
         thumbnail_verified=bool(item.get("vcosThumbnailVerified", False)),
         caption_verified=bool(item.get("vcosCaptionVerified", False)),
         evidence_ref=str(item.get("vcosEvidenceRef") or "youtube-readback://videos.list"),
     )
+
+
+def _parse_provider_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _candidate_budget_summary(
@@ -2981,6 +3630,20 @@ def _resolve_chat_binding(value: str) -> str:
 
 
 def _telegram_text(payload: Mapping[str, Any]) -> str:
+    if payload.get("notification_kind") == "YOUTUBE_PRIVATE_VERIFIED":
+        return "\n".join(
+            [
+                "VCOS — YOUTUBE PRIVATE VERIFIED",
+                f"Title: {payload.get('title')}",
+                f"Candidate: {payload.get('final_review_candidate_id')}",
+                f"Media SHA256: {payload.get('final_media_checksum')}",
+                f"YouTube channel ID: {payload.get('youtube_platform_channel_id') or 'not available'}",
+                f"YouTube video ID: {payload.get('youtube_platform_video_id') or 'not available'}",
+                f"YouTube Studio: {payload.get('youtube_studio_url') or 'not available'}",
+                "Review the actual staged package in YouTube Studio.",
+                "Press PUBLIC manually only after human review. VCOS does not publish.",
+            ]
+        )
     return "\n".join(
         [
             "VCOS — VIDEO READY",

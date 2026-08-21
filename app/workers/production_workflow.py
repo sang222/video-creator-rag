@@ -51,10 +51,12 @@ from app.services.stale_workflow_recovery import (
 from app.services.youtube_delivery import (
     LOCAL_MEDIA_PURGE_EVENT_TYPE,
     TELEGRAM_DELIVERY_EVENT_TYPE,
+    YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE,
     YOUTUBE_PRIVATE_STAGE_EVENT_TYPE,
     LocalMediaPurgeExecutor,
     TelegramDeliveryExecutor,
     YouTubePrivateStageExecutor,
+    YouTubePublicPublicationObserver,
 )
 
 
@@ -251,6 +253,17 @@ class ProductionWorkflowWorker:
                 if stage_id != event.aggregate_id:
                     raise ValueError("YOUTUBE_PRIVATE_STAGE_EVENT_AUTHORITY_MISMATCH")
                 YouTubePrivateStageExecutor(self.session_factory).execute(
+                    stage_id=stage_id
+                )
+            elif event.event_type == YOUTUBE_PUBLICATION_OBSERVATION_EVENT_TYPE:
+                stage_id = uuid.UUID(
+                    str(event.payload["youtube_private_stage_id"])
+                )
+                if stage_id != event.aggregate_id:
+                    raise ValueError(
+                        "YOUTUBE_PUBLICATION_OBSERVATION_EVENT_AUTHORITY_MISMATCH"
+                    )
+                YouTubePublicPublicationObserver(self.session_factory).reconcile(
                     stage_id=stage_id
                 )
             elif event.event_type == TELEGRAM_DELIVERY_EVENT_TYPE:

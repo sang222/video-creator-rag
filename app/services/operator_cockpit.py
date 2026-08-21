@@ -20,6 +20,7 @@ from app.contracts.operator_cockpit import (
     NextVideoRead,
     ProductionCockpitRead,
     ProductionProgressRead,
+    YouTubePrivateStageCockpitRead,
     WorkflowStageProgressRead,
 )
 from app.contracts.vcos_v2 import StrategicLineageV2
@@ -41,6 +42,7 @@ from app.db.models.production_workflow import (
 )
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.db.models.workflow import ArtifactVersion, VideoProject
+from app.db.models.youtube_delivery import YouTubePrivateStage
 from app.services.company_access import (
     accessible_company_ids,
     require_company_permission,
@@ -52,6 +54,7 @@ from app.services.production_package import (
 
 
 TERMINAL_WORKFLOW_STATES = {
+    "PUBLICATION_VERIFIED",
     "CANCELED",
     "FAILED_TERMINAL",
     "DEAD_LETTERED",
@@ -122,6 +125,8 @@ class OperatorCockpitService:
         incident = self._blocking_incident(project=project, run=run)
         candidate = self._candidate(project=project, run=run)
         decision = self._decision(candidate)
+        private_stage = self._private_stage(candidate)
+        private_publication_mode = self._is_private_publication_candidate(candidate)
         task = self._upload_task(project=project, candidate=candidate)
         confirmation = self._confirmation(task)
         uploaded_video = self._uploaded_video(task=task, confirmation=confirmation)
@@ -139,6 +144,7 @@ class OperatorCockpitService:
             task=task,
             costs=costs,
             provider_attempt=provider_attempt,
+            private_stage=private_stage,
         )
         progress = (
             self._progress(
@@ -174,6 +180,38 @@ class OperatorCockpitService:
                 uploaded_video=uploaded_video,
             )
             if candidate is not None and task is not None
+            and not private_publication_mode
+            else None
+        )
+        private_stage_read = (
+            YouTubePrivateStageCockpitRead(
+                stage_id=private_stage.id,
+                final_review_candidate_id=private_stage.final_review_candidate_id,
+                state=private_stage.state,
+                platform_video_id=private_stage.platform_video_id,
+                studio_url=private_stage.studio_url,
+                last_error_code=private_stage.last_error_code,
+                staged_title=(
+                    (private_stage.staging_metadata.get("snippet") or {}).get("title")
+                ),
+                thumbnail_assurance=private_stage.public_release_expectation.get(
+                    "thumbnail_assurance"
+                ),
+                caption_assurance=private_stage.public_release_expectation.get(
+                    "caption_assurance"
+                ),
+                final_media_checksum=private_stage.final_media_checksum,
+                staging_metadata_hash=private_stage.staging_metadata_hash,
+                public_release_expectation_hash=(
+                    private_stage.public_release_expectation_hash
+                ),
+                next_action=(
+                    "Mở YouTube Studio, xem đúng asset PRIVATE rồi bấm PUBLIC thủ công."
+                    if private_stage.state == "PRIVATE_VERIFIED"
+                    else "Chờ VCOS hoàn tất private staging và readback."
+                ),
+            )
+            if private_stage is not None
             else None
         )
         return ProductionCockpitRead(
@@ -182,6 +220,13 @@ class OperatorCockpitService:
             progress=progress,
             final_review=final_review,
             manual_publish=manual_publish,
+            private_publication_mode=private_publication_mode,
+            youtube_private_stage=private_stage_read,
+            safety_notice=(
+                "VCOS chỉ staging PRIVATE; người vận hành review asset thực tế và bấm PUBLIC thủ công."
+                if private_publication_mode
+                else "VCOS không tự upload hoặc publish. Người vận hành thực hiện upload bên ngoài VCOS."
+            ),
             technical_appendix={
                 "company_id": project.company_id,
                 "channel_workspace_id": project.channel_workspace_id,
@@ -276,6 +321,7 @@ class OperatorCockpitService:
         task: HumanUploadTask | None,
         costs: dict[str, Any],
         provider_attempt: ProviderAttempt | None,
+        private_stage: YouTubePrivateStage | None,
     ) -> NextVideoRead:
         metadata = run.metadata_ if run is not None else {}
         state = run.state if run is not None else project.status
@@ -289,6 +335,7 @@ class OperatorCockpitService:
             incident=incident,
             decision=decision,
             task=task,
+            private_stage=private_stage,
         )
         return NextVideoRead(
             project_id=project.id,
@@ -946,6 +993,31 @@ class OperatorCockpitService:
             .order_by(FinalVideoDecision.created_at.desc())
         ).first()
 
+    def _private_stage(
+        self,
+        candidate: FinalReviewCandidate | None,
+    ) -> YouTubePrivateStage | None:
+        if candidate is None:
+            return None
+        if not self._is_private_publication_candidate(candidate):
+            return None
+        return self.session.scalar(
+            select(YouTubePrivateStage)
+            .where(YouTubePrivateStage.final_review_candidate_id == candidate.id)
+            .order_by(YouTubePrivateStage.created_at.desc())
+        )
+
+    @staticmethod
+    def _is_private_publication_candidate(
+        candidate: FinalReviewCandidate | None,
+    ) -> bool:
+        return bool(
+            candidate is not None
+            and candidate.target_platform == "YOUTUBE"
+            and candidate.publish_metadata_snapshot.get("delivery_mode")
+            == "YOUTUBE_PRIVATE_STAGE"
+        )
+
     def _upload_task(
         self,
         *,
@@ -1096,6 +1168,7 @@ def _operator_action(
     incident: OpsIncident | None,
     decision: FinalVideoDecision | None,
     task: HumanUploadTask | None,
+    private_stage: YouTubePrivateStage | None = None,
 ) -> str:
     if incident is not None:
         return "RESOLVE_INCIDENT"
@@ -1103,6 +1176,10 @@ def _operator_action(
         return "START_PRODUCTION"
     if run.state in {"BLOCKED", "RETRY_SCHEDULED", "FAILED_TERMINAL"}:
         return "RESUME_PRODUCTION"
+    if private_stage is not None and private_stage.state == "PRIVATE_VERIFIED":
+        return "REVIEW_PRIVATE_STAGE"
+    if run.state in {"PRIVATE_STAGING_PENDING", "PRIVATE_VERIFIED_AWAITING_PUBLIC"}:
+        return "REVIEW_PRIVATE_STAGE"
     if decision is None and (
         run.state == "FINAL_REVIEW_READY" or run.final_review_candidate_id is not None
     ):
@@ -1133,6 +1210,10 @@ def _next_action_text(
         return "Kiểm tra trở ngại rồi tiếp tục luồng theo checkpoint bền vững."
     if action == "FINAL_REVIEW":
         return "Xem MP4 cuối và chọn UPLOAD hoặc DO_NOT_UPLOAD."
+    if action == "REVIEW_PRIVATE_STAGE":
+        if run is not None and run.state == "PRIVATE_STAGING_PENDING":
+            return "Chờ VCOS hoàn tất staging PRIVATE trước khi mở Studio."
+        return "Mở YouTube Studio, xem đúng asset PRIVATE rồi bấm PUBLIC thủ công."
     if action == "START_MANUAL_UPLOAD":
         return "Tải đúng file đã xác minh và bắt đầu upload thủ công."
     if action == "CONFIRM_MANUAL_UPLOAD":

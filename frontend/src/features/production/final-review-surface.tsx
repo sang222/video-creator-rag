@@ -13,11 +13,13 @@ type FinalDecision = "UPLOAD" | "DO_NOT_UPLOAD";
 export function FinalReviewSurface({
   review,
   onDecision,
-  busyDecision
+  busyDecision,
+  privateStage = false
 }: {
   review: FinalReview;
   onDecision?: (decision: FinalDecision) => void;
   busyDecision?: FinalDecision | null;
+  privateStage?: boolean;
 }) {
   const context = review.series_title
     ? [review.series_title, review.run_label, review.episode_label].filter(Boolean).join(" · ")
@@ -41,8 +43,9 @@ export function FinalReviewSurface({
           </div>
           <h2 className="mt-1 text-xl font-semibold">Xem và quyết định</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Đây là điểm quyết định đầu tiên của người vận hành trong luồng v2. Quyết định
-            UPLOAD chỉ mở luồng upload thủ công; VCOS không gửi video lên nền tảng.
+            {privateStage
+              ? "QC PASS đã chuyển package sang YouTube PRIVATE staging. Hãy dùng panel cutover để review asset thực tế trong Studio."
+              : "Đây là điểm quyết định đầu tiên của người vận hành trong luồng v2. Quyết định UPLOAD chỉ mở luồng upload thủ công; VCOS không gửi video lên nền tảng."}
           </p>
         </div>
         <FriendlyStatusBadge value={review.state} />
@@ -189,7 +192,7 @@ export function FinalReviewSurface({
         </Panel>
       ) : null}
 
-      <Panel className="border-primary/35">
+      {!privateStage ? <Panel className="border-primary/35">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h3 className="text-base font-semibold">Quyết định video cuối</h3>
@@ -231,7 +234,7 @@ export function FinalReviewSurface({
             </Button>
           </div>
         </div>
-      </Panel>
+      </Panel> : null}
 
       <TechnicalAppendix>
         <SafeTechnicalJson

@@ -18,6 +18,7 @@ from app.contracts.youtube_delivery import (
     ProductionThumbnailBindingRead,
     PublicPublicationReceiptRead,
     TelegramNotificationRead,
+    YouTubePrivateStageReview,
     YouTubePrivateStageRead,
     YouTubePublishingCredentialCreate,
     YouTubePublishingCredentialRead,
@@ -26,6 +27,7 @@ from app.contracts.youtube_delivery import (
     YouTubeSeriesPlaylistBindingCreate,
     YouTubeSeriesPlaylistBindingRead,
 )
+from app.core.db import get_session_factory
 from app.db.models.channel import ChannelWorkspace
 from app.db.models.production_publish import FinalReviewCandidate, FinalVideoDecision
 from app.db.models.vcos_v2 import SeriesPlan
@@ -33,6 +35,7 @@ from app.db.models.youtube_delivery import (
     PublicPublicationReceipt,
     TelegramDeliveryNotification,
     YouTubeSeriesEpisodeBinding,
+    YouTubePrivateStage,
 )
 from app.db.session import session_scope
 from app.services.company_access import require_company_permission
@@ -133,6 +136,33 @@ def create_router() -> APIRouter:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @router.post(
+        "/final-review-candidates/{candidate_id}/youtube-private-stage",
+        response_model=YouTubePrivateStageRead,
+    )
+    def prepare_youtube_private_stage_from_candidate(
+        candidate_id: uuid.UUID,
+        request: Request,
+    ) -> YouTubePrivateStageRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                candidate = session.get(FinalReviewCandidate, candidate_id)
+                if candidate is None:
+                    raise ValueError("FINAL_REVIEW_CANDIDATE_NOT_FOUND")
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="publish.prepare",
+                    company_id=candidate.company_id,
+                )
+                stage = YouTubeDeliveryService(session).prepare_private_stage_from_candidate(
+                    candidate_id=candidate.id
+                )
+                return YouTubePrivateStageRead.model_validate(stage)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @router.get(
         "/youtube-private-stages/{stage_id}",
         response_model=YouTubePrivateStageRead,
@@ -152,6 +182,62 @@ def create_router() -> APIRouter:
                     company_id=stage.company_id,
                 )
                 return YouTubePrivateStageRead.model_validate(stage)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/youtube-private-stages/{stage_id}/review",
+        response_model=YouTubePrivateStageRead,
+    )
+    def review_youtube_private_stage(
+        stage_id: uuid.UUID,
+        data: YouTubePrivateStageReview,
+        request: Request,
+    ) -> YouTubePrivateStageRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                stage = YouTubeDeliveryService(session).require_stage(stage_id)
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="publish.confirm",
+                    company_id=stage.company_id,
+                )
+                stage = YouTubeDeliveryService(session).review_private_stage(
+                    stage_id=stage.id,
+                    disposition=data.disposition,
+                    reason=data.reason,
+                    actor_id=actor.actor_id,
+                )
+                return YouTubePrivateStageRead.model_validate(stage)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/youtube-private-stages/{stage_id}/observe-publication",
+        response_model=YouTubePrivateStageRead,
+    )
+    def observe_youtube_publication(
+        stage_id: uuid.UUID,
+        request: Request,
+    ) -> YouTubePrivateStageRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                stage = YouTubeDeliveryService(session).require_stage(stage_id)
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.read",
+                    company_id=stage.company_id,
+                )
+                from app.services.youtube_delivery import YouTubePublicPublicationObserver
+
+                observed = YouTubePublicPublicationObserver(
+                    get_session_factory()
+                ).reconcile(stage_id=stage.id)
+                return YouTubePrivateStageRead.model_validate(observed)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -179,6 +265,37 @@ def create_router() -> APIRouter:
                     select(PublicPublicationReceipt).where(
                         PublicPublicationReceipt.final_video_decision_id
                         == decision.id
+                    )
+                )
+                if receipt is None:
+                    raise ValueError("PUBLIC_PUBLICATION_RECEIPT_NOT_FOUND")
+                return PublicPublicationReceiptRead.model_validate(receipt)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get(
+        "/youtube-private-stages/{stage_id}/public-publication-receipt",
+        response_model=PublicPublicationReceiptRead,
+    )
+    def get_stage_public_publication_receipt(
+        stage_id: uuid.UUID,
+        request: Request,
+    ) -> PublicPublicationReceiptRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                stage = session.get(YouTubePrivateStage, stage_id)
+                if stage is None:
+                    raise ValueError("YOUTUBE_PRIVATE_STAGE_NOT_FOUND")
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.read",
+                    company_id=stage.company_id,
+                )
+                receipt = session.scalar(
+                    select(PublicPublicationReceipt).where(
+                        PublicPublicationReceipt.youtube_private_stage_id == stage.id
                     )
                 )
                 if receipt is None:

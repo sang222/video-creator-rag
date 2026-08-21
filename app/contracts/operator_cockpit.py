@@ -18,6 +18,7 @@ OperatorAction = Literal[
     "START_PRODUCTION",
     "RESUME_PRODUCTION",
     "FINAL_REVIEW",
+    "REVIEW_PRIVATE_STAGE",
     "START_MANUAL_UPLOAD",
     "CONFIRM_MANUAL_UPLOAD",
     "CORRECT_CONFIRMATION",
@@ -190,13 +191,34 @@ class ManualPublishRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class YouTubePrivateStageCockpitRead(BaseModel):
+    stage_id: uuid.UUID
+    final_review_candidate_id: uuid.UUID
+    state: str
+    platform_video_id: str | None = None
+    studio_url: str | None = None
+    last_error_code: str | None = None
+    staged_title: str | None = None
+    thumbnail_assurance: str | None = None
+    caption_assurance: str | None = None
+    final_media_checksum: str
+    staging_metadata_hash: str
+    public_release_expectation_hash: str
+    next_action: str
+    exact_remote_bytes_unavailable: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ProductionCockpitRead(BaseModel):
     generated_at: AwareDatetime
     next_video: NextVideoRead | None = None
     progress: ProductionProgressRead | None = None
     final_review: FinalReviewRead | None = None
     manual_publish: ManualPublishRead | None = None
-    safety_notice: str = "VCOS không tự upload hoặc publish. Người vận hành thực hiện upload bên ngoài VCOS."
+    private_publication_mode: bool = False
+    youtube_private_stage: YouTubePrivateStageCockpitRead | None = None
+    safety_notice: str = "VCOS chỉ staging PRIVATE; người vận hành review asset thực tế và bấm PUBLIC thủ công."
     technical_appendix: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
