@@ -53,6 +53,11 @@ def semantic_hash(value: Any) -> str:
 def _sealed_body(model_type: type[BaseModel], values: dict[str, Any]) -> dict[str, Any]:
     """Materialize pydantic defaults before computing a sealed content hash."""
 
+    accepted_fields = set(model_type.model_fields) - {"content_hash"}
+    if unknown_fields := set(values) - accepted_fields:
+        raise ValueError(
+            f"SEMANTIC_SEALED_FIELD_UNKNOWN:{','.join(sorted(unknown_fields))}"
+        )
     instance = model_type.model_construct(**values)
     return instance.model_dump(mode="json", exclude={"content_hash"})
 
@@ -164,6 +169,18 @@ class PresentationOutcome(StrEnum):
     PRESENTATION_CHANGE = "PRESENTATION_CHANGE"
 
 
+_PRESENTATION_OUTCOME_ROLE_MATRIX: dict[
+    PresentationOutcome, frozenset[SemanticPresentationRole | None]
+] = {
+    PresentationOutcome.HOLD: frozenset({None, SemanticPresentationRole.HOLD}),
+    PresentationOutcome.NO_VISUAL_CHANGE: frozenset(
+        {None, SemanticPresentationRole.HOLD}
+    ),
+    PresentationOutcome.PRESENTATION_CHANGE: frozenset(SemanticPresentationRole)
+    - {SemanticPresentationRole.HOLD},
+}
+
+
 class OverlayState(StrEnum):
     NO_OVERLAY = "NO_OVERLAY"
     OVERLAY = "OVERLAY"
@@ -202,8 +219,8 @@ _VISUAL_ATOMS = frozenset(
         SemanticAtomKind.CAUSAL_RELATION,
         SemanticAtomKind.COMPARISON,
         SemanticAtomKind.TEMPORAL_RELATION,
-        SemanticAtomKind.CONTEXT,
         SemanticAtomKind.VIEWER_INFERENCE,
+        SemanticAtomKind.CONTEXT,
         SemanticAtomKind.MUST_PRESERVE,
         SemanticAtomKind.MAY_ABSTRACT,
         SemanticAtomKind.MUST_NOT_INVENT,
@@ -266,7 +283,9 @@ class SemanticMeaningUnit(_StrictFrozen):
         return self
 
 
-_CANONICAL_MEANING_FIELD_KEYS = frozenset({"factuality", "evidence_requirement"})
+_CANONICAL_MEANING_FIELD_KEYS = frozenset(
+    {kind.value.lower() for kind in SemanticAtomKind}
+).union({"factuality", "evidence_requirement"})
 
 
 class SemanticExtensionDefinition(_StrictFrozen):
@@ -495,6 +514,17 @@ class SemanticProfileCompilation(_StrictFrozen):
             raise ValueError("SEMANTIC_COMPILATION_FEATURE_KEY_COLLISION")
         if len(extension_ids) != len(set(extension_ids)):
             raise ValueError("SEMANTIC_COMPILATION_EXTENSION_ID_COLLISION")
+        if (
+            self.channel_profile.channel_authority.ref
+            == self.format_profile.format_authority.ref
+        ):
+            raise ValueError("SEMANTIC_CHANNEL_FORMAT_AUTHORITY_COLLISION")
+        if (
+            SemanticProjectionFamily.LEARNING
+            in self.format_profile.required_projection_families
+            and not self.feature_definitions
+        ):
+            raise ValueError("LEARNING_REQUIRED_COMPARISON_AUTHORITY_MISSING")
         self.verify_integrity()
         return self
 
@@ -536,13 +566,7 @@ class PresentationSemanticIntent(_StrictFrozen):
 
     @model_validator(mode="after")
     def valid_authorship_law(self) -> Self:
-        if (
-            self.outcome == PresentationOutcome.PRESENTATION_CHANGE
-            and self.semantic_role is None
-        ) or (
-            self.outcome != PresentationOutcome.PRESENTATION_CHANGE
-            and self.semantic_role not in {None, SemanticPresentationRole.HOLD}
-        ):
+        if self.semantic_role not in _PRESENTATION_OUTCOME_ROLE_MATRIX[self.outcome]:
             raise ValueError("SEMANTIC_PRESENTATION_ROLE_OUTCOME_INVALID")
         # Reuse Card D's law rather than re-declaring a competing rule set.
         validate_viewer_facing_presentation(
@@ -581,11 +605,17 @@ class TemporalSemanticBinding(_StrictFrozen):
             flags=re.IGNORECASE,
         ):
             raise ValueError("AUTHORED_SEMANTIC_TRIGGER_POSITIONAL_FORBIDDEN")
-        if self.semantic_boundary_ref and self.semantic_boundary_ref in {
-            self.viewer_beat_ref,
-            self.technical_segment_ref,
-        }:
-            raise ValueError("SEMANTIC_BOUNDARY_PRESENTATION_OR_TECHNICAL_COLLISION")
+        temporal_refs = [
+            ref
+            for ref in (
+                self.semantic_boundary_ref,
+                self.viewer_beat_ref,
+                self.technical_segment_ref,
+            )
+            if ref is not None
+        ]
+        if len(temporal_refs) != len(set(temporal_refs)):
+            raise ValueError("TEMPORAL_SEMANTIC_IDENTITIES_NOT_PAIRWISE_DISTINCT")
         return self
 
     @property
@@ -710,11 +740,13 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
             for meaning in self.meaning_units
             for atom in meaning.atoms
         }
-        trigger_refs = {
-            binding.authored_semantic_trigger_ref for binding in self.temporal_bindings
-        }
-        if not trigger_refs.issubset(atom_refs):
-            raise ValueError("AUTHORED_SEMANTIC_TRIGGER_REF_UNKNOWN")
+        for binding in self.temporal_bindings:
+            if binding.authored_semantic_trigger_ref not in atom_refs:
+                raise ValueError("AUTHORED_SEMANTIC_TRIGGER_REF_UNKNOWN")
+            if not binding.authored_semantic_trigger_ref.startswith(
+                f"{binding.semantic_owner_ref}#"
+            ):
+                raise ValueError("AUTHORED_SEMANTIC_TRIGGER_OWNER_MISMATCH")
         target_refs = {
             target_ref
             for intent in self.overlay_intents
@@ -723,6 +755,13 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
         semantic_targets = set(meaning_ids).union(atom_refs)
         if not target_refs.issubset(semantic_targets):
             raise ValueError("SEMANTIC_OVERLAY_TARGET_REF_UNKNOWN")
+        for intent in self.overlay_intents:
+            if any(
+                target_ref != intent.semantic_owner_ref
+                and not target_ref.startswith(f"{intent.semantic_owner_ref}#")
+                for target_ref in intent.target_refs
+            ):
+                raise ValueError("SEMANTIC_OVERLAY_TARGET_OWNER_MISMATCH")
         authored_refs = {
             binding.presentation_intent.editorial_authority_ref
             for binding in self.temporal_bindings
@@ -778,6 +817,15 @@ _VISUAL_REUSE_SIGNATURE_KINDS = frozenset(
         SemanticAtomKind.CAUSAL_RELATION,
         SemanticAtomKind.COMPARISON,
         SemanticAtomKind.TEMPORAL_RELATION,
+        SemanticAtomKind.VIEWER_INFERENCE,
+    }
+)
+
+_VISUAL_REUSE_CONSTRAINT_KINDS = frozenset(
+    {
+        SemanticAtomKind.MUST_PRESERVE,
+        SemanticAtomKind.MAY_ABSTRACT,
+        SemanticAtomKind.MUST_NOT_INVENT,
     }
 )
 
@@ -792,6 +840,19 @@ class VisualReuseSemanticFact(_StrictFrozen):
     def valid_signature_kind(self) -> Self:
         if self.kind not in _VISUAL_REUSE_SIGNATURE_KINDS:
             raise ValueError("VISUAL_REUSE_SIGNATURE_KIND_INVALID")
+        return self
+
+
+class VisualReuseConstraintFact(_StrictFrozen):
+    """One canonical realization-safety constraint in a reuse signature."""
+
+    kind: SemanticAtomKind
+    value: str = Field(min_length=1, max_length=8_000)
+
+    @model_validator(mode="after")
+    def valid_constraint_kind(self) -> Self:
+        if self.kind not in _VISUAL_REUSE_CONSTRAINT_KINDS:
+            raise ValueError("VISUAL_REUSE_CONSTRAINT_KIND_INVALID")
         return self
 
 
@@ -811,6 +872,10 @@ class VisualReuseCompatibility(_StrictFrozen):
     )
     context_refs: list[str] = Field(default_factory=list)
     factuality: Factuality
+    evidence_requirement: EvidenceRequirement
+    representation_constraints: list[VisualReuseConstraintFact] = Field(
+        default_factory=list
+    )
     reuse_eligible: bool
     content_hash: str = Field(pattern=SHA256_PATTERN)
 
@@ -821,6 +886,10 @@ class VisualReuseCompatibility(_StrictFrozen):
             or len(self.context_refs) != len(set(self.context_refs))
             or len({(fact.kind, fact.value) for fact in self.semantic_signature_facts})
             != len(self.semantic_signature_facts)
+            or len(
+                {(fact.kind, fact.value) for fact in self.representation_constraints}
+            )
+            != len(self.representation_constraints)
         ):
             raise ValueError("VISUAL_REUSE_SIGNATURE_DUPLICATE")
         expected = bool(
@@ -842,11 +911,14 @@ def visual_reuse_compatible(
 ) -> bool:
     """Strict semantic gate for a future grouping/reuse implementation."""
 
+    left.verify_integrity()
+    right.verify_integrity()
+
     def normalized_refs(values: Iterable[str]) -> tuple[str, ...]:
         return tuple(sorted(values))
 
     def normalized_signature(
-        facts: Iterable[VisualReuseSemanticFact],
+        facts: Iterable[VisualReuseSemanticFact | VisualReuseConstraintFact],
     ) -> tuple[tuple[str, str], ...]:
         return tuple(sorted((fact.kind.value, fact.value) for fact in facts))
 
@@ -859,6 +931,9 @@ def visual_reuse_compatible(
         == normalized_signature(right.semantic_signature_facts)
         and normalized_refs(left.context_refs) == normalized_refs(right.context_refs)
         and left.factuality == right.factuality
+        and left.evidence_requirement == right.evidence_requirement
+        and normalized_signature(left.representation_constraints)
+        == normalized_signature(right.representation_constraints)
     )
 
 
@@ -947,6 +1022,14 @@ class VisualSemanticProjection(_Projection):
         )
         for compatibility in self.reuse_compatibility:
             compatibility.verify_integrity()
+        compatibility_owner_refs = [
+            item.semantic_owner_ref for item in self.reuse_compatibility
+        ]
+        if (
+            len(compatibility_owner_refs) != len(set(compatibility_owner_refs))
+            or set(compatibility_owner_refs) != owner_refs
+        ):
+            raise ValueError("VISUAL_REUSE_OWNER_1_TO_1_INVALID")
         referenced_owners = {
             *(item.semantic_owner_ref for item in self.reuse_compatibility),
             *(item.semantic_owner_ref for item in self.temporal_bindings),
@@ -1307,6 +1390,15 @@ class SemanticProjectionCompiler:
                 if atom.kind in _VISUAL_REUSE_SIGNATURE_KINDS
             ]
 
+        def constraint_facts_for(
+            unit: SemanticMeaningUnit,
+        ) -> list[VisualReuseConstraintFact]:
+            return [
+                VisualReuseConstraintFact(kind=atom.kind, value=atom.value)
+                for atom in unit.atoms
+                if atom.kind in _VISUAL_REUSE_CONSTRAINT_KINDS
+            ]
+
         return [
             VisualReuseCompatibility.build(
                 semantic_owner_ref=unit.meaning_id,
@@ -1318,6 +1410,8 @@ class SemanticProjectionCompiler:
                 semantic_signature_facts=signature_facts_for(unit),
                 context_refs=values_for(unit, frozenset({SemanticAtomKind.CONTEXT})),
                 factuality=unit.factuality,
+                evidence_requirement=unit.evidence_requirement,
+                representation_constraints=constraint_facts_for(unit),
                 reuse_eligible=bool(
                     values_for(
                         unit,

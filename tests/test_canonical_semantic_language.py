@@ -37,6 +37,7 @@ from app.contracts.semantic import (
     SemanticProjectionFamily,
     TemporalSemanticBinding,
     VisualReuseCompatibility,
+    VisualReuseConstraintFact,
     VisualReuseSemanticFact,
     VisualSemanticProjection,
     WriterSemanticProjection,
@@ -448,16 +449,28 @@ def _reuse_compatibility(
     *facts: tuple[SemanticAtomKind, str],
     subject_refs: list[str] | None = None,
     context_refs: list[str] | None = None,
+    evidence_requirement: EvidenceRequirement = EvidenceRequirement.REQUIRED,
+    representation_constraints: list[tuple[SemanticAtomKind, str]] | None = None,
+    semantic_owner_ref: str = "meaning-approval-recovery",
 ) -> VisualReuseCompatibility:
     return VisualReuseCompatibility.build(
-        semantic_owner_ref="meaning-approval-recovery",
-        subject_refs=subject_refs or ["approval recovery"],
+        semantic_owner_ref=semantic_owner_ref,
+        subject_refs=(
+            subject_refs if subject_refs is not None else ["approval recovery"]
+        ),
         proposition="The same proposition is being considered.",
         semantic_signature_facts=[
             VisualReuseSemanticFact(kind=kind, value=value) for kind, value in facts
         ],
-        context_refs=context_refs or ["operational workflow"],
+        context_refs=(
+            context_refs if context_refs is not None else ["operational workflow"]
+        ),
         factuality=Factuality.FACTUAL,
+        evidence_requirement=evidence_requirement,
+        representation_constraints=[
+            VisualReuseConstraintFact(kind=kind, value=value)
+            for kind, value in (representation_constraints or [])
+        ],
         reuse_eligible=bool(facts),
     )
 
@@ -699,6 +712,8 @@ def test_visual_reuse_requires_subject_proposition_action_context_and_factuality
         semantic_signature_facts=compatibility.semantic_signature_facts,
         context_refs=compatibility.context_refs,
         factuality=compatibility.factuality,
+        evidence_requirement=compatibility.evidence_requirement,
+        representation_constraints=compatibility.representation_constraints,
         reuse_eligible=True,
     )
     assert visual_reuse_compatible(compatibility, incompatible) is False
@@ -1459,3 +1474,444 @@ def test_snapshot_reference_and_nested_signature_drift_fail_closed():
                 )
             ],
         )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "semantic_role"),
+    [
+        (PresentationOutcome.PRESENTATION_CHANGE, SemanticPresentationRole.HOLD),
+        (PresentationOutcome.PRESENTATION_CHANGE, None),
+        (PresentationOutcome.HOLD, SemanticPresentationRole.REVEAL),
+        (PresentationOutcome.NO_VISUAL_CHANGE, SemanticPresentationRole.COMPARE),
+    ],
+)
+def test_presentation_outcome_role_matrix_blocks_contradictions(
+    outcome: PresentationOutcome,
+    semantic_role: SemanticPresentationRole | None,
+):
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_PRESENTATION_ROLE_OUTCOME_INVALID"
+    ):
+        PresentationSemanticIntent(
+            outcome=outcome,
+            semantic_role=semantic_role,
+            editorial_reason="Exercise the canonical outcome-role matrix.",
+            editorial_authority_ref="editorial-authorship://authority",
+        )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "semantic_role"),
+    [
+        (PresentationOutcome.PRESENTATION_CHANGE, SemanticPresentationRole.REVEAL),
+        (PresentationOutcome.HOLD, SemanticPresentationRole.HOLD),
+        (PresentationOutcome.HOLD, None),
+        (PresentationOutcome.NO_VISUAL_CHANGE, SemanticPresentationRole.HOLD),
+        (PresentationOutcome.NO_VISUAL_CHANGE, None),
+    ],
+)
+def test_presentation_outcome_role_matrix_accepts_canonical_combinations(
+    outcome: PresentationOutcome,
+    semantic_role: SemanticPresentationRole | None,
+):
+    intent = PresentationSemanticIntent(
+        outcome=outcome,
+        semantic_role=semantic_role,
+        editorial_reason="Exercise the canonical outcome-role matrix.",
+        editorial_authority_ref="editorial-authorship://authority",
+    )
+
+    assert intent.semantic_role == semantic_role
+
+
+@pytest.mark.parametrize(
+    ("semantic_boundary_ref", "viewer_beat_ref", "technical_segment_ref"),
+    [
+        ("identity://same", "identity://same", None),
+        ("identity://same", None, "identity://same"),
+        (None, "identity://same", "identity://same"),
+    ],
+)
+def test_temporal_semantic_identities_are_pairwise_distinct(
+    semantic_boundary_ref: str | None,
+    viewer_beat_ref: str | None,
+    technical_segment_ref: str | None,
+):
+    with pytest.raises(
+        ValidationError, match="TEMPORAL_SEMANTIC_IDENTITIES_NOT_PAIRWISE_DISTINCT"
+    ):
+        TemporalSemanticBinding(
+            semantic_owner_ref="meaning-approval-recovery",
+            authored_semantic_trigger_ref="meaning-approval-recovery#state",
+            presentation_intent=_snapshot().temporal_bindings[0].presentation_intent,
+            semantic_boundary_ref=semantic_boundary_ref,
+            viewer_beat_ref=viewer_beat_ref,
+            technical_segment_ref=technical_segment_ref,
+        )
+
+
+@pytest.mark.parametrize(
+    ("semantic_boundary_ref", "viewer_beat_ref", "technical_segment_ref"),
+    [
+        ("semantic://boundary", None, None),
+        (None, "viewer://beat", None),
+        (None, None, "technical://segment"),
+        (None, "viewer://beat", "technical://segment"),
+        ("semantic://boundary", "viewer://beat", "technical://segment"),
+    ],
+)
+def test_distinct_temporal_semantic_identity_combinations_remain_valid(
+    semantic_boundary_ref: str | None,
+    viewer_beat_ref: str | None,
+    technical_segment_ref: str | None,
+):
+    binding = TemporalSemanticBinding(
+        semantic_owner_ref="meaning-approval-recovery",
+        authored_semantic_trigger_ref="meaning-approval-recovery#state",
+        presentation_intent=_snapshot().temporal_bindings[0].presentation_intent,
+        semantic_boundary_ref=semantic_boundary_ref,
+        viewer_beat_ref=viewer_beat_ref,
+        technical_segment_ref=technical_segment_ref,
+    )
+
+    assert len(
+        {
+            ref
+            for ref in (
+                binding.semantic_boundary_ref,
+                binding.viewer_beat_ref,
+                binding.technical_segment_ref,
+            )
+            if ref is not None
+        }
+    ) == sum(
+        ref is not None
+        for ref in (
+            binding.semantic_boundary_ref,
+            binding.viewer_beat_ref,
+            binding.technical_segment_ref,
+        )
+    )
+
+
+def test_temporal_trigger_must_resolve_to_its_declared_owner():
+    snapshot = _snapshot()
+    valid_binding = snapshot.temporal_bindings[0].model_copy(
+        update={"authored_semantic_trigger_ref": "meaning-approval-recovery#state"}
+    )
+    valid = _snapshot_variant(
+        snapshot,
+        snapshot_id="semantic-snapshot-owner-bound-trigger",
+        temporal_bindings=[valid_binding],
+    )
+    other_meaning = SemanticMeaningUnit(
+        meaning_id="meaning-other",
+        statement="A different meaning owns this state.",
+        factuality=Factuality.FACTUAL,
+        evidence_requirement=EvidenceRequirement.NOT_REQUIRED,
+        atoms=[
+            SemanticAtom(
+                atom_id="state",
+                kind=SemanticAtomKind.STATE,
+                value="a distinct state",
+            )
+        ],
+    )
+    cross_owner_binding = valid_binding.model_copy(
+        update={"authored_semantic_trigger_ref": "meaning-other#state"}
+    )
+
+    assert valid.temporal_bindings[0].semantic_owner_ref == "meaning-approval-recovery"
+    with pytest.raises(
+        ValidationError, match="AUTHORED_SEMANTIC_TRIGGER_OWNER_MISMATCH"
+    ):
+        _snapshot_variant(
+            snapshot,
+            snapshot_id="semantic-snapshot-cross-owner-trigger",
+            meaning_units=[*snapshot.meaning_units, other_meaning],
+            temporal_bindings=[cross_owner_binding],
+        )
+    with pytest.raises(ValidationError, match="AUTHORED_SEMANTIC_TRIGGER_REF_UNKNOWN"):
+        _snapshot_variant(
+            snapshot,
+            snapshot_id="semantic-snapshot-unknown-owner-trigger",
+            temporal_bindings=[
+                valid_binding.model_copy(
+                    update={
+                        "authored_semantic_trigger_ref": (
+                            "meaning-approval-recovery#unknown"
+                        )
+                    }
+                )
+            ],
+        )
+    with pytest.raises(
+        ValidationError, match="AUTHORED_SEMANTIC_TRIGGER_POSITIONAL_FORBIDDEN"
+    ):
+        TemporalSemanticBinding(
+            semantic_owner_ref="meaning-approval-recovery",
+            authored_semantic_trigger_ref="position-3",
+            presentation_intent=valid_binding.presentation_intent,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_key",
+    [kind.value.lower() for kind in SemanticAtomKind]
+    + ["factuality", "evidence_requirement"],
+)
+def test_extensions_cannot_shadow_any_canonical_kernel_owner(field_key: str):
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_EXTENSION_CANONICAL_FIELD_RESERVED"
+    ):
+        SemanticExtensionDefinition.build(
+            extension_definition_id=f"channel-extension://invalid/{field_key}",
+            scope=SemanticDefinitionScope.CHANNEL,
+            definition_version="v1",
+            field_keys=[field_key],
+        )
+
+
+def test_profile_specific_extension_fields_remain_allowed():
+    definition = SemanticExtensionDefinition.build(
+        extension_definition_id="channel-extension://podcast/speaker",
+        scope=SemanticDefinitionScope.CHANNEL,
+        definition_version="v1",
+        field_keys=["speaker_role"],
+    )
+
+    assert definition.field_keys == ["speaker_role"]
+
+
+def test_visual_reuse_compares_evidence_and_representation_constraints():
+    constraints = [
+        (SemanticAtomKind.MUST_PRESERVE, "the accountable approval boundary"),
+        (SemanticAtomKind.MAY_ABSTRACT, "the concrete product interface"),
+        (SemanticAtomKind.MUST_NOT_INVENT, "an autonomous approval decision"),
+    ]
+    baseline = _reuse_compatibility(
+        (SemanticAtomKind.STATE, "fallback is bounded"),
+        representation_constraints=constraints,
+    )
+    reordered = _reuse_compatibility(
+        (SemanticAtomKind.STATE, "fallback is bounded"),
+        representation_constraints=list(reversed(constraints)),
+    )
+
+    assert visual_reuse_compatible(baseline, reordered) is True
+    assert (
+        visual_reuse_compatible(
+            baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.STATE, "fallback is bounded"),
+                evidence_requirement=EvidenceRequirement.NOT_REQUIRED,
+                representation_constraints=constraints,
+            ),
+        )
+        is False
+    )
+    assert (
+        visual_reuse_compatible(
+            baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.STATE, "fallback is bounded"),
+                representation_constraints=[
+                    (
+                        SemanticAtomKind.MUST_PRESERVE,
+                        "only a generic recovery state",
+                    ),
+                    *constraints[1:],
+                ],
+            ),
+        )
+        is False
+    )
+    assert (
+        visual_reuse_compatible(
+            baseline,
+            _reuse_compatibility(
+                (SemanticAtomKind.STATE, "fallback is bounded"),
+                representation_constraints=constraints[:-1],
+            ),
+        )
+        is False
+    )
+
+    compiled = SemanticProjectionCompiler.visual(_snapshot()).reuse_compatibility[0]
+    assert compiled.evidence_requirement == EvidenceRequirement.REQUIRED
+    assert {fact.kind for fact in compiled.representation_constraints} == {
+        SemanticAtomKind.MUST_PRESERVE,
+        SemanticAtomKind.MAY_ABSTRACT,
+        SemanticAtomKind.MUST_NOT_INVENT,
+    }
+
+
+def test_visual_reuse_authority_is_exactly_one_record_per_visual_owner():
+    projection = SemanticProjectionCompiler.visual(_snapshot())
+    assert isinstance(projection, VisualSemanticProjection)
+
+    def rebuild(records: list[VisualReuseCompatibility]):
+        return VisualSemanticProjection.build(
+            semantic_snapshot_ref=projection.semantic_snapshot_ref,
+            semantic_snapshot_hash=projection.semantic_snapshot_hash,
+            visual_units=projection.visual_units,
+            reuse_compatibility=records,
+            temporal_bindings=projection.temporal_bindings,
+            overlay_intents=projection.overlay_intents,
+            extensions=projection.extensions,
+        )
+
+    compatibility = projection.reuse_compatibility[0]
+    assert {unit.semantic_owner_ref for unit in projection.visual_units} == {
+        item.semantic_owner_ref for item in projection.reuse_compatibility
+    }
+    with pytest.raises(ValidationError, match="VISUAL_REUSE_OWNER_1_TO_1_INVALID"):
+        rebuild([compatibility, compatibility])
+    with pytest.raises(ValidationError, match="VISUAL_REUSE_OWNER_1_TO_1_INVALID"):
+        rebuild([])
+    with pytest.raises(ValidationError, match="VISUAL_REUSE_OWNER_1_TO_1_INVALID"):
+        rebuild(
+            [
+                compatibility,
+                _reuse_compatibility(
+                    (SemanticAtomKind.STATE, "an unrelated state"),
+                    semantic_owner_ref="meaning-unknown",
+                ),
+            ]
+        )
+
+
+def test_learning_required_fails_at_profile_compilation_without_feature_authority():
+    base_format = _explainer_format()
+    empty_kernel = SemanticKernelDefinition.build(global_feature_definitions=[])
+    empty_channel = _small_team_channel_variant(comparison_feature_definitions=[])
+
+    def format_with(
+        required: list[SemanticProjectionFamily],
+        definitions: list[ComparisonFeatureDefinition],
+    ) -> FormatSemanticProfile:
+        return FormatSemanticProfile.build(
+            format_authority=base_format.format_authority,
+            semantic_definition_version=base_format.semantic_definition_version,
+            required_projection_families=required,
+            extension_definitions=base_format.extension_definitions,
+            comparison_feature_definitions=definitions,
+        )
+
+    with pytest.raises(
+        ValidationError, match="LEARNING_REQUIRED_COMPARISON_AUTHORITY_MISSING"
+    ):
+        SemanticProfileCompiler.compile(
+            kernel=empty_kernel,
+            channel_profile=empty_channel,
+            format_profile=format_with([SemanticProjectionFamily.LEARNING], []),
+        )
+
+    controlled = SemanticProfileCompiler.compile(
+        kernel=empty_kernel,
+        channel_profile=empty_channel,
+        format_profile=format_with(
+            [SemanticProjectionFamily.LEARNING],
+            [
+                _feature(
+                    "learning_signal",
+                    ComparisonFeatureScope.FORMAT,
+                    ["PRESENT"],
+                )
+            ],
+        ),
+    )
+    not_required = SemanticProfileCompiler.compile(
+        kernel=empty_kernel,
+        channel_profile=empty_channel,
+        format_profile=format_with([SemanticProjectionFamily.WRITER], []),
+    )
+
+    assert len(controlled.feature_definitions) == 1
+    assert not_required.feature_definitions == ()
+
+
+def test_overlay_targets_must_resolve_to_their_declared_owner():
+    snapshot = _snapshot()
+    other_meaning = SemanticMeaningUnit(
+        meaning_id="meaning-other",
+        statement="A different meaning owns this overlay target.",
+        factuality=Factuality.FACTUAL,
+        evidence_requirement=EvidenceRequirement.NOT_REQUIRED,
+        atoms=[
+            SemanticAtom(
+                atom_id="state",
+                kind=SemanticAtomKind.STATE,
+                value="a distinct state",
+            )
+        ],
+    )
+    cross_owner_overlay = OverlaySemanticIntent(
+        overlay_state=OverlayState.OVERLAY,
+        semantic_owner_ref="meaning-approval-recovery",
+        presentation_intent=PresentationSemanticIntent(
+            outcome=PresentationOutcome.PRESENTATION_CHANGE,
+            semantic_role=SemanticPresentationRole.LABEL,
+            editorial_reason="Label an authored semantic target.",
+            editorial_authority_ref=(
+                snapshot.temporal_bindings[
+                    0
+                ].presentation_intent.editorial_authority_ref
+            ),
+        ),
+        overlay_role="LABEL",
+        information_purpose="Identify the semantic state.",
+        target_refs=["meaning-other#state"],
+        continuity_or_change_reason="The label changes the authored presentation.",
+    )
+
+    with pytest.raises(ValidationError, match="SEMANTIC_OVERLAY_TARGET_OWNER_MISMATCH"):
+        _snapshot_variant(
+            snapshot,
+            snapshot_id="semantic-snapshot-cross-owner-overlay",
+            meaning_units=[*snapshot.meaning_units, other_meaning],
+            overlay_intents=[cross_owner_overlay],
+        )
+
+
+def test_channel_and_format_authorities_cannot_share_one_identity_ref():
+    format_profile = _explainer_format()
+    colliding_channel = _small_team_channel_variant(
+        authority=PolicyRef(
+            ref=format_profile.format_authority.ref,
+            version="3",
+            content_hash="a" * 64,
+        )
+    )
+
+    with pytest.raises(
+        ValidationError, match="SEMANTIC_CHANNEL_FORMAT_AUTHORITY_COLLISION"
+    ):
+        SemanticProfileCompiler.compile(
+            kernel=_kernel(),
+            channel_profile=colliding_channel,
+            format_profile=format_profile,
+        )
+
+
+def test_viewer_inference_is_part_of_visual_reuse_safety():
+    baseline = _reuse_compatibility(
+        (SemanticAtomKind.STATE, "fallback is bounded"),
+        (SemanticAtomKind.VIEWER_INFERENCE, "approval remains human-owned"),
+    )
+    changed_inference = _reuse_compatibility(
+        (SemanticAtomKind.STATE, "fallback is bounded"),
+        (SemanticAtomKind.VIEWER_INFERENCE, "approval is autonomous"),
+    )
+
+    assert visual_reuse_compatible(baseline, changed_inference) is False
+
+
+def test_sealed_builders_reject_unknown_fields_and_reuse_checks_integrity():
+    with pytest.raises(ValueError, match="SEMANTIC_SEALED_FIELD_UNKNOWN:shadow"):
+        SemanticKernelDefinition.build(global_feature_definitions=[], shadow="value")
+
+    baseline = _reuse_compatibility((SemanticAtomKind.STATE, "fallback is bounded"))
+    tampered = baseline.model_copy(update={"proposition": "tampered proposition"})
+    with pytest.raises(ValueError, match="SEMANTIC_CONTENT_HASH_MISMATCH"):
+        visual_reuse_compatible(baseline, tampered)
