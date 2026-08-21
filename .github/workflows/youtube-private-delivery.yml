@@ -100,7 +100,7 @@ jobs:
           tests/test_youtube_private_delivery.py
       - name: Card C static safety assertions
         run: |
-          rg -n "YOUTUBE_PRIVATE_STAGE|PUBLICATION_VERIFIED|PUBLICATION_OBSERVATION" app/services/youtube_delivery.py app/services/production_publish.py app/services/production_workflow.py
-          rg -n "privacyStatus.*private|public_release_by_api.*False|public_release_by_api.*false" app/services/youtube_delivery.py
-          ! rg -n "videos\\.(update|delete)|unpublish|privacyStatus.*public" app/services/youtube_delivery.py
-          ! rg -n "FinalVideoDecision|ManualPublishConfirmation|manual upload" frontend/src/features/production/private-publication-surface.tsx
+          git grep -n -E "YOUTUBE_PRIVATE_STAGE|PUBLICATION_VERIFIED|PUBLICATION_OBSERVATION" -- app/services/youtube_delivery.py app/services/production_publish.py app/services/production_workflow.py
+          git grep -n -E "privacyStatus.*private|public_release_by_api.*False|public_release_by_api.*false" -- app/services/youtube_delivery.py
+          ! git grep -n -E "videos\\.(update|delete)|unpublish|privacyStatus.*public" -- app/services/youtube_delivery.py
+          ! git grep -n -E "FinalVideoDecision|ManualPublishConfirmation|manual upload" -- frontend/src/features/production/private-publication-surface.tsx
