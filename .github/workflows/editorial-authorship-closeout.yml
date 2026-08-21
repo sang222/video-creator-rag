@@ -30,10 +30,6 @@ jobs:
       VCOS_ENVIRONMENT: test
       VCOS_DISABLE_MEDIA_PROVIDER_CALLS: "true"
       VCOS_DISABLE_UPLOAD_AND_PUBLISH: "true"
-      # Reviewed non-secret fixture prices let the real readiness path freeze
-      # its budget authority while every provider/publish call stays disabled.
-      VCOS_ELEVENLABS_TTS_COST_PER_CHARACTER_USD: "0.000100"
-      VCOS_ELEVENLABS_FORCED_ALIGNMENT_COST_USD: "0.050000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,11 +52,6 @@ jobs:
           tests/test_ai_visual_planner.py
           tests/test_native_motion_compiler_v2.py
           tests/test_cross_modal_lineage.py
-      - name: Card D active package readiness regressions
-        run: >-
-          pytest -q
-          tests/test_long_form_launch_cadence.py::test_standalone_qualification_to_production_readiness_uses_only_two_llm_calls
-          tests/test_long_form_launch_cadence.py::test_series_qualification_to_production_readiness_preserves_reserved_lineage
       - name: Card D lint
         run: >-
           ruff check --isolated

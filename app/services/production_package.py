@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.gates import GateRunCreate
+from app.contracts.editorial_authorship import EditorialAuthorshipContract
 from app.contracts.production_package import (
     DURATION_CONTRACT_VERSION_V2,
     PRODUCTION_PACKAGE_SCHEMA_V2,
@@ -82,6 +83,33 @@ MATERIAL_CHANGE_CLASSES = frozenset(
         ProductionPackageMateriality.MATERIAL_RIGHTS_OR_EVIDENCE_CHANGE,
     }
 )
+
+
+def _require_current_editorial_authorship(
+    *,
+    contract: EditorialAuthorshipContract | None,
+    readiness_hash: str | None,
+) -> None:
+    """Fail closed at the current production-package write/readiness boundary."""
+
+    if contract is None:
+        raise ValidationFailureError(
+            "PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_REQUIRED"
+        )
+    try:
+        contract.verify_integrity()
+    except ValueError as exc:
+        raise ValidationFailureError(
+            "PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_INVALID"
+        ) from exc
+    if not contract.has_transitive_authority_binding:
+        raise ValidationFailureError(
+            "PRODUCTION_PACKAGE_TRANSITIVE_AUTHORSHIP_REQUIRED"
+        )
+    if readiness_hash != contract.content_hash:
+        raise ValidationFailureError(
+            "PRODUCTION_PACKAGE_AUTHORSHIP_HASH_MISMATCH"
+        )
 
 
 def semantic_hash(value: Any) -> str:
@@ -427,22 +455,10 @@ class ProductionPackageService:
     def _validate_live_authority(self, content: ProductionPackageContentV2) -> None:
         if content.production_lane != ProductionLane.LONG_FORM:
             raise ValidationFailureError("PRODUCTION_PACKAGE_LONG_FORM_REQUIRED")
-        if content.editorial_authorship is None:
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_REQUIRED"
-            )
-        content.editorial_authorship.verify_integrity()
-        if not content.editorial_authorship.has_transitive_authority_binding:
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_TRANSITIVE_AUTHORSHIP_REQUIRED"
-            )
-        if (
-            content.readiness_evidence.authorship_contract_hash
-            != content.editorial_authorship.content_hash
-        ):
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_AUTHORSHIP_HASH_MISMATCH"
-            )
+        _require_current_editorial_authorship(
+            contract=content.editorial_authorship,
+            readiness_hash=content.readiness_evidence.authorship_contract_hash,
+        )
         project = self.session.get(VideoProject, content.video_project_id)
         if project is None:
             raise NotFoundError(f"video project not found: {content.video_project_id}")

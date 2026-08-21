@@ -18,6 +18,7 @@ from app.contracts.editorial_authorship import (
 from app.core.errors import ValidationFailureError
 from app.services.editorial_specificity import EditorialIdeaProposal
 from app.services.gates import _production_editorial_authorship_gate
+from app.services.production_package import _require_current_editorial_authorship
 from app.services.v2_package_readiness import _exact_reasoning_progression
 
 
@@ -494,6 +495,33 @@ def test_new_production_package_missing_authorship_blocks() -> None:
     assert result.result == "BLOCK"
     assert "EDITORIAL_AUTHORSHIP_CONTRACT_REQUIRED" in result.reason_codes
 
+    with pytest.raises(
+        ValidationFailureError,
+        match="PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_REQUIRED",
+    ):
+        _require_current_editorial_authorship(
+            contract=None,
+            readiness_hash=None,
+        )
+
+
+def test_current_production_service_requires_transitive_matching_authorship() -> None:
+    contract = _contract()
+
+    with pytest.raises(
+        ValidationFailureError,
+        match="PRODUCTION_PACKAGE_AUTHORSHIP_HASH_MISMATCH",
+    ):
+        _require_current_editorial_authorship(
+            contract=contract,
+            readiness_hash="0" * 64,
+        )
+
+    _require_current_editorial_authorship(
+        contract=contract,
+        readiness_hash=contract.content_hash,
+    )
+
 
 def test_historical_string_lineage_cannot_authorize_new_production() -> None:
     from app.contracts.editorial_authorship import _semantic_hash
@@ -527,3 +555,11 @@ def test_historical_string_lineage_cannot_authorize_new_production() -> None:
 
     assert result.result == "BLOCK"
     assert "EDITORIAL_AUTHORSHIP_TRANSITIVE_AUTHORITY_REQUIRED" in result.reason_codes
+    with pytest.raises(
+        ValidationFailureError,
+        match="PRODUCTION_PACKAGE_TRANSITIVE_AUTHORSHIP_REQUIRED",
+    ):
+        _require_current_editorial_authorship(
+            contract=legacy,
+            readiness_hash=legacy.content_hash,
+        )
