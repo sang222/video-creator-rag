@@ -640,14 +640,26 @@ def _build_editorial_authorship_contract(
         if candidate is not None
         else None
     )
-    proposal = (
-        candidate.editorial_idea_proposal
-        if candidate is not None
-        and isinstance(candidate.editorial_idea_proposal, dict)
-        else {}
-    )
-    if topic is None or not proposal:
+    if topic is None or candidate is None or not isinstance(
+        candidate.editorial_idea_proposal, dict
+    ):
         raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_AUTHORITY_REQUIRED")
+    try:
+        from app.services.editorial_specificity import (
+            EditorialIdeaProposal,
+            EditorialSpecificityService,
+        )
+
+        proposal = EditorialIdeaProposal.model_validate(
+            candidate.editorial_idea_proposal
+        )
+    except ValueError as exc:
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_PROPOSAL_INVALID") from exc
+    if not EditorialSpecificityService(context.session).current_pass(candidate):
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_SPECIFICITY_REQUIRED")
+    specificity_receipt = candidate.editorial_specificity_receipt
+    if not isinstance(specificity_receipt, dict):
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_SPECIFICITY_REQUIRED")
 
     lineage = (
         authority.support_envelope.cross_modal_script_lineage
@@ -670,18 +682,54 @@ def _build_editorial_authorship_contract(
     series_binding = (
         topic.series_binding if isinstance(topic.series_binding, dict) else {}
     )
+    content_mode = str(authority.admission.content_mode)
     channel_promise = str(
         authority.project.audience_promise
         or authority.admission.audience_promise
         or ""
     ).strip()
-    episode_reasoning = str(
+    episode_reasoning_raw = (
         series_binding.get("episode_delta")
-        or proposal.get("editorial_delta")
-        or ""
-    ).strip()
+        if content_mode == "SERIES_EPISODE"
+        else proposal.editorial_delta
+    )
+    episode_reasoning = str(episode_reasoning_raw or "").strip()
     if not channel_promise or not episode_reasoning:
         raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_PROMISE_REQUIRED")
+    if content_mode == "SERIES_EPISODE":
+        _require_distinct_episode_reasoning(
+            context=context,
+            authority=authority,
+            episode_reasoning=episode_reasoning,
+        )
+    if proposal.tension_applicability is None:
+        raise ValidationFailureError(
+            "V2_EDITORIAL_AUTHORSHIP_TENSION_APPLICABILITY_REQUIRED"
+        )
+    if (
+        proposal.tension_applicability == "APPLICABLE"
+        and not proposal.tension_failure_contradiction_or_tradeoff
+    ):
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_TENSION_REQUIRED")
+
+    specificity_evaluation_hash = specificity_receipt.get("evaluation_hash")
+    if not isinstance(specificity_evaluation_hash, str) or not specificity_evaluation_hash:
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_SPECIFICITY_REQUIRED")
+    if not isinstance(authority.admission.decision_hash, str) or not authority.admission.decision_hash:
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_AUTHORITY_REQUIRED")
+
+    authored_authority_refs = [
+        f"video-project://{authority.project.id}",
+        f"project-admission://{authority.admission.id}/{authority.admission.decision_hash}",
+        f"channel-profile://{authority.profile.id}/{authority.profile.profile_input_hash}",
+        f"editorial-proposal://{proposal.proposal_hash}",
+        f"editorial-specificity://{specificity_evaluation_hash}",
+        f"topic-definition://{topic.topic_definition_hash}",
+    ]
+    if lineage is not None:
+        authored_authority_refs.append(
+            f"section-coverage-plan://{lineage.section_coverage_plan.content_hash}"
+        )
 
     return EditorialAuthorshipContract.build(
         source_evidence_refs=[
@@ -689,41 +737,98 @@ def _build_editorial_authorship_contract(
             for item in authority.source_refs
             if str(item.get("ref") or item.get("id") or "").strip()
         ],
-        content_mode=str(authority.admission.content_mode),
+        authored_authority_refs=authored_authority_refs,
+        content_mode=content_mode,
         format_key=str(authority.project.project_type or "UNSPECIFIED"),
         channel_promise=channel_promise,
         episode_reasoning=episode_reasoning,
-        central_question=str(
-            proposal.get("central_question_or_thesis")
-            or topic.central_question_or_thesis
-            or ""
-        ).strip(),
+        central_question=proposal.central_question_or_thesis.strip(),
         early_stakes_or_payoff=str(
-            proposal.get("specific_audience_problem")
-            or topic.audience_problem
-            or ""
+            proposal.specific_audience_problem or topic.audience_problem or ""
         ).strip(),
-        original_thesis_or_position=str(
-            proposal.get("proposed_angle") or ""
-        ).strip(),
-        editorial_delta=str(
-            proposal.get("editorial_delta") or ""
-        ).strip(),
+        original_thesis_or_position=proposal.proposed_angle.strip(),
+        editorial_delta=proposal.editorial_delta.strip(),
         reasoning_or_narrative_spine=" -> ".join(section_deltas),
         progression=" -> ".join(
             f"{index + 1}: {delta}" for index, delta in enumerate(section_deltas)
         ),
-        tension_applicability="NOT_APPLICABLE",
+        tension_applicability=proposal.tension_applicability,
+        tension_failure_contradiction_or_tradeoff=(
+            proposal.tension_failure_contradiction_or_tradeoff
+        ),
         visible_editorial_judgment=str(
-            proposal.get("decision_value") or topic.viewer_value or ""
+            proposal.decision_value or topic.viewer_value or ""
         ).strip(),
         memorable_payoff_framework_or_conclusion=str(
-            proposal.get("viewer_value")
-            or proposal.get("learning_outcome")
+            proposal.viewer_value
+            or proposal.learning_outcome
             or topic.learning_outcome
             or ""
         ).strip(),
     )
+
+
+def _require_distinct_episode_reasoning(
+    *,
+    context: WorkflowStageContext,
+    authority: _SupportAuthority,
+    episode_reasoning: str,
+) -> None:
+    """Prevent a series from reusing an earlier episode's reasoning spine."""
+
+    series_run_id = authority.admission.series_run_id
+    episode_number = authority.admission.episode_number
+    if series_run_id is None or episode_number is None:
+        raise ValidationFailureError("V2_EDITORIAL_EPISODE_REASONING_AUTHORITY_REQUIRED")
+
+    def normalized(value: str) -> str:
+        return " ".join(value.casefold().split())
+
+    prior_admissions = context.session.scalars(
+        select(ProjectAdmissionDecision).where(
+            ProjectAdmissionDecision.series_run_id == series_run_id,
+            ProjectAdmissionDecision.episode_number < episode_number,
+            ProjectAdmissionDecision.decision == "ADMIT",
+        )
+    ).all()
+    current_key = normalized(episode_reasoning)
+    for prior in prior_admissions:
+        prior_candidate = (
+            context.session.get(EditorialIdeaCandidate, prior.editorial_idea_candidate_id)
+            if prior.editorial_idea_candidate_id is not None
+            else None
+        )
+        if prior_candidate is None or not isinstance(
+            prior_candidate.editorial_idea_proposal, dict
+        ):
+            raise ValidationFailureError(
+                "V2_EDITORIAL_EPISODE_REASONING_AUTHORITY_REQUIRED"
+            )
+        prior_proposal = prior_candidate.editorial_idea_proposal
+        prior_topic = context.session.scalars(
+            select(EditorialTopicDefinition)
+            .where(
+                EditorialTopicDefinition.editorial_idea_candidate_id
+                == prior_candidate.id
+            )
+            .order_by(EditorialTopicDefinition.topic_definition_version.desc())
+        ).first()
+        prior_binding = (
+            prior_topic.series_binding
+            if prior_topic is not None and isinstance(prior_topic.series_binding, dict)
+            else {}
+        )
+        prior_reasoning = str(
+            prior_binding.get("episode_delta")
+            or prior_proposal.get("editorial_delta")
+            or ""
+        ).strip()
+        if not prior_reasoning:
+            raise ValidationFailureError(
+                "V2_EDITORIAL_EPISODE_REASONING_AUTHORITY_REQUIRED"
+            )
+        if normalized(prior_reasoning) == current_key:
+            raise ValidationFailureError("V2_EDITORIAL_EPISODE_REASONING_DUPLICATE")
 
 
 def _require_frozen_support_envelope(

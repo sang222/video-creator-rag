@@ -44,6 +44,10 @@ def _semantic_hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _normalized_text(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
 class _StrictFrozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -87,6 +91,7 @@ class EditorialAuthorshipContract(_StrictFrozen):
     )
     source_role: Literal["EVIDENCE"] = "EVIDENCE"
     source_evidence_refs: list[str] = Field(min_length=1)
+    authored_authority_refs: list[str] = Field(min_length=3)
     content_mode: str = Field(min_length=1, max_length=120)
     format_key: str = Field(min_length=1, max_length=160)
     channel_promise: str = Field(min_length=1, max_length=4_000)
@@ -126,6 +131,24 @@ class EditorialAuthorshipContract(_StrictFrozen):
             raise ValueError("EDITORIAL_AUTHORSHIP_VALUE_MISSING")
         if any(not ref.strip() for ref in self.source_evidence_refs):
             raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_EVIDENCE_REF_INVALID")
+        if any(not ref.strip() for ref in self.authored_authority_refs):
+            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORED_AUTHORITY_REF_INVALID")
+        if set(self.source_evidence_refs).intersection(self.authored_authority_refs):
+            raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_AUTHORITY_OVERLAP")
+        if _normalized_text(self.channel_promise) == _normalized_text(
+            self.episode_reasoning
+        ):
+            raise ValueError(
+                "EDITORIAL_AUTHORSHIP_CHANNEL_EPISODE_REASONING_NOT_DISTINCT"
+            )
+        authored_roles = {
+            _normalized_text(self.central_question),
+            _normalized_text(self.editorial_delta),
+            _normalized_text(self.visible_editorial_judgment),
+            _normalized_text(self.memorable_payoff_framework_or_conclusion),
+        }
+        if len(authored_roles) != 4:
+            raise ValueError("EDITORIAL_AUTHORSHIP_REASONING_NOT_DISTINCT")
         if self.tension_applicability == "APPLICABLE":
             if not self.tension_failure_contradiction_or_tradeoff:
                 raise ValueError("EDITORIAL_AUTHORSHIP_TENSION_REQUIRED")
@@ -167,8 +190,6 @@ def validate_viewer_facing_presentation(
         decisions = (decisions,)
     for decision in decisions:
         outcome = str(decision.get("outcome") or "").strip().upper()
-        if outcome in {"HOLD", "NO_VISUAL_CHANGE"}:
-            continue
         reason = decision.get("editorial_reason") or decision.get("authored_reason")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("NO_EFFECT_WITHOUT_EDITORIAL_REASON")
@@ -182,6 +203,8 @@ def validate_viewer_facing_presentation(
             decision.get("editorial_authority_ref") or ""
         ).strip():
             raise ValueError("MECHANICAL_PRESENTATION_TRIGGER_HAS_NO_AUTHORITY")
+        if not str(decision.get("editorial_authority_ref") or "").strip():
+            raise ValueError("EDITORIAL_PRESENTATION_AUTHORITY_REQUIRED")
 
 
 NO_EFFECT_WITHOUT_EDITORIAL_REASON = "NO_EFFECT_WITHOUT_EDITORIAL_REASON"

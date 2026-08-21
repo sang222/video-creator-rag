@@ -828,7 +828,10 @@ class MotionIntentPlanner:
                 {
                     "outcome": "HOLD" if function == "HOLD" else "CHANGE",
                     "editorial_reason": semantic_reason,
-                    "editorial_authority_ref": scene_plan.content_hash,
+                    "editorial_authority_ref": (
+                        "scene-plan-semantic://"
+                        + _authored_scene_semantic_key(scene_plan)
+                    ),
                 }
             ]
         )

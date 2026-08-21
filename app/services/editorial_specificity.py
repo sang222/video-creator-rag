@@ -235,6 +235,14 @@ class EditorialIdeaProposal(BaseModel):
     ]
     content_mode: Literal["STANDALONE", "SERIES_EPISODE"]
     series_binding: dict[str, Any] | None = None
+    # Card D requires an explicit decision about whether conflict, failure,
+    # contradiction, or trade-off is part of this project's logic.  These
+    # remain optional for historical proposal rows; production compilation
+    # rejects a proposal that has not made the decision explicitly.
+    tension_applicability: Literal["APPLICABLE", "NOT_APPLICABLE"] | None = None
+    tension_failure_contradiction_or_tradeoff: str | None = Field(
+        default=None, max_length=2_000
+    )
     proposal_hash: str | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -243,7 +251,22 @@ class EditorialIdeaProposal(BaseModel):
     def _hash_is_semantic_and_stable(self) -> "EditorialIdeaProposal":
         if self.proposal_schema_version != EDITORIAL_IDEA_PROPOSAL_SCHEMA:
             raise ValueError("EDITORIAL_IDEA_PROPOSAL_SCHEMA_INVALID")
+        if self.tension_applicability == "APPLICABLE" and not (
+            self.tension_failure_contradiction_or_tradeoff
+            and self.tension_failure_contradiction_or_tradeoff.strip()
+        ):
+            raise ValueError("EDITORIAL_IDEA_TENSION_REQUIRED")
+        if self.tension_applicability == "NOT_APPLICABLE" and (
+            self.tension_failure_contradiction_or_tradeoff is not None
+        ):
+            raise ValueError("EDITORIAL_IDEA_TENSION_NOT_APPLICABLE")
         body = self.model_dump(mode="json", exclude={"proposal_hash"})
+        # Preserve hashes of historical proposals that predate Card D's
+        # explicit tension decision fields.
+        if self.tension_applicability is None:
+            body.pop("tension_applicability", None)
+        if self.tension_failure_contradiction_or_tradeoff is None:
+            body.pop("tension_failure_contradiction_or_tradeoff", None)
         digest = content_hash(_proposal_hash_payload(body))
         if self.proposal_hash is not None and self.proposal_hash != digest:
             raise ValueError("EDITORIAL_IDEA_PROPOSAL_HASH_MISMATCH")
@@ -502,7 +525,9 @@ class EditorialIdeaSynthesisService:
             "learning_outcome, viewer_value, editorial_delta, specific_mechanism_or_use_case, "
             "decision_value, scope_inclusions, scope_exclusions, primary_evidence_refs, "
             "supporting_evidence_refs, evidence_bindings, source_specificity_class, content_mode, "
-            "series_binding. Do not include proposal_hash; the server computes it. Evidence refs use {id, ref}; evidence_bindings use "
+            "series_binding, tension_applicability, and tension_failure_contradiction_or_tradeoff. "
+            "tension_applicability must be APPLICABLE or NOT_APPLICABLE, and the latter must not include a fabricated conflict. "
+            "Do not include proposal_hash; the server computes it. Evidence refs use {id, ref}; evidence_bindings use "
             "{field, supporting_span_ids}, where supporting_span_ids contains one or more "
             "span_id values supplied in the source pack. Never invent span IDs or quote text. "
             "Every proposal must include at least one "

@@ -343,7 +343,7 @@ items:
     input_schema_version: production-package-gate-input.v2
     output_schema_version: gate-output.m3.v1
     definition: {logic: production_editorial_authorship_gate, review_required: false}
-    reason_code_refs: [EDITORIAL_AUTHORSHIP_PASS, EDITORIAL_AUTHORSHIP_CONTRACT_REQUIRED, EDITORIAL_AUTHORSHIP_CONTRACT_INVALID]
+    reason_code_refs: [EDITORIAL_AUTHORSHIP_PASS, EDITORIAL_AUTHORSHIP_CONTRACT_REQUIRED, EDITORIAL_AUTHORSHIP_CONTRACT_INVALID, EDITORIAL_AUTHORSHIP_HASH_MISMATCH]
   - gate_key: production_anti_padding_gate
     gate_name: Anti Padding Gate
     gate_domain: production_readiness

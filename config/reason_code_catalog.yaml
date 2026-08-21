@@ -57,6 +57,22 @@ items:
     description: Publishable content is missing the global editorial authorship contract.
   - code: EDITORIAL_AUTHORSHIP_CONTRACT_INVALID
     description: Global editorial authorship contract is invalid or not hash-bound.
+  - code: EDITORIAL_AUTHORSHIP_HASH_MISMATCH
+    description: Readiness evidence is not bound to the global editorial authorship contract.
+  - code: EDITORIAL_PRESENTATION_AUTHORITY_REQUIRED
+    description: Viewer-facing presentation requires an authored editorial authority reference.
+  - code: V2_EDITORIAL_AUTHORSHIP_PROPOSAL_INVALID
+    description: The proposal authority cannot be validated for authorship compilation.
+  - code: V2_EDITORIAL_AUTHORSHIP_SPECIFICITY_REQUIRED
+    description: A current passing editorial specificity receipt is required for authorship compilation.
+  - code: V2_EDITORIAL_AUTHORSHIP_TENSION_APPLICABILITY_REQUIRED
+    description: The proposal must explicitly declare whether tension or trade-off applies.
+  - code: V2_EDITORIAL_AUTHORSHIP_TENSION_REQUIRED
+    description: Applicable tension, failure, contradiction, or trade-off is missing.
+  - code: V2_EDITORIAL_EPISODE_REASONING_AUTHORITY_REQUIRED
+    description: Prior series episode reasoning authority is missing or incomplete.
+  - code: V2_EDITORIAL_EPISODE_REASONING_DUPLICATE
+    description: The episode repeats an earlier episode's reasoning delta.
   - code: ENTITY_RESTRICTED
     description: Restricted entity is referenced.
   - code: AFFILIATE_CONFLICT_WITH_CLAIM

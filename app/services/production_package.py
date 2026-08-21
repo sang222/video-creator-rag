@@ -1116,7 +1116,7 @@ def _package_semantic_payload(
         payload.pop("support_envelope_ref", None)
     if content.strategic_lineage is None:
         payload.pop("strategic_lineage", None)
-    if content.editorial_authorship is None:
+    if getattr(content, "editorial_authorship", None) is None:
         payload.pop("editorial_authorship", None)
     if (
         content.production_visual_policy_version is None

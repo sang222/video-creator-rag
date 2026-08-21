@@ -1178,6 +1178,12 @@ def _production_editorial_authorship_gate(
             snapshot,
             "EDITORIAL_AUTHORSHIP_CONTRACT_INVALID",
         )
+    readiness_hash = (_evidence or {}).get("authorship_contract_hash")
+    if readiness_hash != contract.content_hash:
+        return _production_block(
+            snapshot,
+            "EDITORIAL_AUTHORSHIP_HASH_MISMATCH",
+        )
     return _production_pass(
         snapshot,
         "EDITORIAL_AUTHORSHIP_PASS",
@@ -2268,6 +2274,7 @@ def _reason_refs_for_gate(gate_key: str) -> list[str]:
             "EDITORIAL_AUTHORSHIP_PASS",
             "EDITORIAL_AUTHORSHIP_CONTRACT_REQUIRED",
             "EDITORIAL_AUTHORSHIP_CONTRACT_INVALID",
+            "EDITORIAL_AUTHORSHIP_HASH_MISMATCH",
         ],
         "production_anti_padding_gate": [
             "ANTI_PADDING_PASS",
