@@ -18,6 +18,7 @@ MotionNeed = Literal[
 VisualImportance = Literal["SUPPORTING", "STANDARD", "HIGH", "HERO"]
 FactualRisk = Literal["LOW", "MEDIUM", "HIGH"]
 TransitionSemanticReason = Literal[
+    "UNAUTHORED_TECHNICAL_CUT",
     "CONTINUATION",
     "NEW_STEP",
     "CONTRAST",
@@ -538,6 +539,7 @@ class VideoMotionGrammar(BaseModel):
             "default_motion_intensity": "SUBTLE",
             "preferred_transition_family": [
                 "cut",
+                "fade_black",
                 "fade_soft",
                 "dissolve",
                 "reveal_up",
@@ -547,7 +549,7 @@ class VideoMotionGrammar(BaseModel):
             "maximum_consecutive_same_motion_preset": 2,
             "maximum_consecutive_same_transition": 3,
             "maximum_consecutive_same_camera_direction": 3,
-            "still_motion_policy": "Meaning-aligned bounded camera motion; intentional hold only for short scenes.",
+            "still_motion_policy": "Meaning-aligned bounded realization; intentional stability may be long.",
             "hero_motion_policy": "Preserve provider-authored motion and use restrained entry, trim, and transition treatment.",
             "comparison_motion_policy": "Use one coherent reveal or lateral comparison movement without mechanical alternation.",
             "ending_motion_policy": "Settle motion and prefer a clean cut or slow fade at the conclusion.",

@@ -11,7 +11,12 @@ from typing import Any, Protocol, runtime_checkable
 from sqlalchemy import select
 
 from app.contracts.channel_policy import ChannelScopedPolicy
-from app.contracts.editorial_authorship import EditorialAuthorshipContract
+from app.contracts.cross_modal import SectionCoveragePlan
+from app.contracts.editorial_authorship import (
+    EditorialAuthorityBinding,
+    EditorialAuthorityType,
+    EditorialAuthorshipContract,
+)
 from app.contracts.production_package import (
     ExactContentRefV2,
     ProductionDurationContractV2,
@@ -93,6 +98,60 @@ _SUPPORT_TYPES = (
     "cost_estimate_snapshot",
     "destination_binding",
 )
+_GENERIC_REASONING_LABELS = frozenset(
+    {
+        "hook",
+        "introduction",
+        "intro",
+        "main idea",
+        "main section",
+        "body",
+        "summary",
+        "conclusion",
+        "closing",
+    }
+)
+
+
+def _normalized_editorial_value(value: str) -> str:
+    return " ".join(value.casefold().split()).strip(" .:-→")
+
+
+def _exact_reasoning_progression(plan: SectionCoveragePlan) -> list[str]:
+    """Resolve a spine only from exact information-unit semantic deltas."""
+
+    ordered_sections = sorted(plan.sections, key=lambda item: item.ordinal)
+    if len(ordered_sections) < 3:
+        raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_SPINE_REQUIRED")
+    units_by_id = {item.information_unit_id: item for item in plan.information_units}
+    section_deltas: list[str] = []
+    for section in ordered_sections:
+        owned_deltas = [
+            units_by_id[unit_id].new_information_delta.strip()
+            for unit_id in section.owned_information_unit_ids
+        ]
+        expected_delta = " → ".join(owned_deltas)
+        if (
+            not owned_deltas
+            or any(not item for item in owned_deltas)
+            or _normalized_editorial_value(section.section_delta)
+            != _normalized_editorial_value(expected_delta)
+            or any(
+                _normalized_editorial_value(item) in _GENERIC_REASONING_LABELS
+                for item in owned_deltas
+            )
+        ):
+            raise ValidationFailureError(
+                "V2_EDITORIAL_AUTHORSHIP_SPINE_AUTHORITY_INVALID"
+            )
+        section_deltas.append(section.section_delta.strip())
+    if len({_normalized_editorial_value(item) for item in section_deltas}) != len(
+        section_deltas
+    ):
+        raise ValidationFailureError(
+            "V2_EDITORIAL_AUTHORSHIP_SPINE_NOT_DISTINCT"
+        )
+    return section_deltas
 
 
 @runtime_checkable
@@ -661,23 +720,21 @@ def _build_editorial_authorship_contract(
     if not isinstance(specificity_receipt, dict):
         raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_SPECIFICITY_REQUIRED")
 
+    if not proposal.has_exact_card_d_authorship:
+        raise ValidationFailureError(
+            "V2_EDITORIAL_AUTHORSHIP_EXACT_VALUES_REQUIRED"
+        )
+
     lineage = (
         authority.support_envelope.cross_modal_script_lineage
         if authority.support_envelope is not None
         else None
     )
-    if lineage is not None:
-        ordered_sections = sorted(
-            lineage.section_coverage_plan.sections, key=lambda item: item.ordinal
-        )
-        section_deltas = [item.section_delta.strip() for item in ordered_sections]
-    else:
-        section_deltas = [
-            section.heading.strip()
-            for section in authority.support_envelope.approved_script.sections
-        ] if authority.support_envelope is not None else []
-    if len(section_deltas) < 3 or any(not delta for delta in section_deltas):
+    if lineage is None:
         raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_SPINE_REQUIRED")
+    section_deltas = _exact_reasoning_progression(
+        lineage.section_coverage_plan
+    )
 
     series_binding = (
         topic.series_binding if isinstance(topic.series_binding, dict) else {}
@@ -688,11 +745,15 @@ def _build_editorial_authorship_contract(
         or authority.admission.audience_promise
         or ""
     ).strip()
-    episode_reasoning_raw = (
-        series_binding.get("episode_delta")
-        if content_mode == "SERIES_EPISODE"
-        else proposal.editorial_delta
-    )
+    episode_reasoning_raw = proposal.episode_reasoning
+    if content_mode == "SERIES_EPISODE":
+        series_episode_delta = str(series_binding.get("episode_delta") or "").strip()
+        if _normalized_editorial_value(series_episode_delta) != _normalized_editorial_value(
+            str(proposal.episode_reasoning or "")
+        ):
+            raise ValidationFailureError(
+                "V2_EDITORIAL_EPISODE_REASONING_AUTHORITY_MISMATCH"
+            )
     episode_reasoning = str(episode_reasoning_raw or "").strip()
     if not channel_promise or not episode_reasoning:
         raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_PROMISE_REQUIRED")
@@ -718,35 +779,82 @@ def _build_editorial_authorship_contract(
     if not isinstance(authority.admission.decision_hash, str) or not authority.admission.decision_hash:
         raise ValidationFailureError("V2_EDITORIAL_AUTHORSHIP_AUTHORITY_REQUIRED")
 
-    authored_authority_refs = [
-        f"video-project://{authority.project.id}",
-        f"project-admission://{authority.admission.id}/{authority.admission.decision_hash}",
-        f"channel-profile://{authority.profile.id}/{authority.profile.profile_input_hash}",
-        f"editorial-proposal://{proposal.proposal_hash}",
-        f"editorial-specificity://{specificity_evaluation_hash}",
-        f"topic-definition://{topic.topic_definition_hash}",
-    ]
-    if lineage is not None:
-        authored_authority_refs.append(
-            f"section-coverage-plan://{lineage.section_coverage_plan.content_hash}"
-        )
+    try:
+        source_evidence_authorities = [
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.SOURCE_EVIDENCE,
+                authority_ref=str(item.get("ref") or "").strip(),
+                content_hash=str(item.get("content_hash") or "").strip(),
+            )
+            for item in authority.source_refs
+        ]
+        authored_authorities = [
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.VIDEO_PROJECT,
+                authority_ref=f"video-project://{authority.project.id}",
+                content_hash=_project_authority_hash(authority.project),
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.PROJECT_ADMISSION,
+                authority_ref=(
+                    f"project-admission://{authority.admission.id}/"
+                    f"{authority.admission.decision_hash}"
+                ),
+                content_hash=str(authority.admission.decision_hash),
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.CHANNEL_PROFILE,
+                authority_ref=(
+                    f"channel-profile://{authority.profile.id}/"
+                    f"{authority.profile.profile_input_hash}"
+                ),
+                content_hash=authority.profile.profile_input_hash,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.EDITORIAL_PROPOSAL,
+                authority_ref=f"editorial-proposal://{proposal.proposal_hash}",
+                content_hash=str(proposal.proposal_hash),
+            ),
+            EditorialAuthorityBinding(
+                authority_type=(
+                    EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT
+                ),
+                authority_ref=(
+                    f"editorial-specificity://{specificity_evaluation_hash}"
+                ),
+                content_hash=specificity_evaluation_hash,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.TOPIC_DEFINITION,
+                authority_ref=f"topic-definition://{topic.topic_definition_hash}",
+                content_hash=topic.topic_definition_hash,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.SECTION_COVERAGE_PLAN,
+                authority_ref=(
+                    "section-coverage-plan://"
+                    f"{lineage.section_coverage_plan.content_hash}"
+                ),
+                content_hash=lineage.section_coverage_plan.content_hash,
+            ),
+        ]
+    except ValueError as exc:
+        raise ValidationFailureError(
+            "V2_EDITORIAL_AUTHORSHIP_LINEAGE_INVALID"
+        ) from exc
 
     return EditorialAuthorshipContract.build(
-        source_evidence_refs=[
-            str(item.get("ref") or item.get("id") or "").strip()
-            for item in authority.source_refs
-            if str(item.get("ref") or item.get("id") or "").strip()
-        ],
-        authored_authority_refs=authored_authority_refs,
+        source_evidence_authorities=source_evidence_authorities,
+        authored_authorities=authored_authorities,
         content_mode=content_mode,
         format_key=str(authority.project.project_type or "UNSPECIFIED"),
         channel_promise=channel_promise,
         episode_reasoning=episode_reasoning,
-        central_question=proposal.central_question_or_thesis.strip(),
-        early_stakes_or_payoff=str(
-            proposal.specific_audience_problem or topic.audience_problem or ""
+        central_question=str(proposal.central_question).strip(),
+        early_stakes_or_payoff=str(proposal.early_stakes_or_payoff).strip(),
+        original_thesis_or_position=str(
+            proposal.original_thesis_or_position
         ).strip(),
-        original_thesis_or_position=proposal.proposed_angle.strip(),
         editorial_delta=proposal.editorial_delta.strip(),
         reasoning_or_narrative_spine=" -> ".join(section_deltas),
         progression=" -> ".join(
@@ -757,13 +865,10 @@ def _build_editorial_authorship_contract(
             proposal.tension_failure_contradiction_or_tradeoff
         ),
         visible_editorial_judgment=str(
-            proposal.decision_value or topic.viewer_value or ""
+            proposal.visible_editorial_judgment
         ).strip(),
         memorable_payoff_framework_or_conclusion=str(
-            proposal.viewer_value
-            or proposal.learning_outcome
-            or topic.learning_outcome
-            or ""
+            proposal.memorable_payoff_framework_or_conclusion
         ).strip(),
     )
 

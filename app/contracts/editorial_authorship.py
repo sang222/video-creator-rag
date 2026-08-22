@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
+from enum import StrEnum
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,6 +26,7 @@ MECHANICAL_PRESENTATION_TRIGGERS = frozenset(
     {
         "TIMER",
         "SCENE_ORDINAL",
+        "MODULO",
         "ANTI_REPEAT_HEURISTIC",
         "SILENCE_MIDPOINT",
         "PROVIDER_DURATION_BOUNDARY",
@@ -50,6 +53,107 @@ def _normalized_text(value: str) -> str:
 
 class _StrictFrozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class EditorialAuthorityType(StrEnum):
+    """Closed Card D authority classes; source evidence is never authorship."""
+
+    SOURCE_EVIDENCE = "SOURCE_EVIDENCE"
+    VIDEO_PROJECT = "VIDEO_PROJECT"
+    PROJECT_ADMISSION = "PROJECT_ADMISSION"
+    CHANNEL_PROFILE = "CHANNEL_PROFILE"
+    EDITORIAL_PROPOSAL = "EDITORIAL_PROPOSAL"
+    EDITORIAL_SPECIFICITY_RECEIPT = "EDITORIAL_SPECIFICITY_RECEIPT"
+    TOPIC_DEFINITION = "TOPIC_DEFINITION"
+    SECTION_COVERAGE_PLAN = "SECTION_COVERAGE_PLAN"
+    EDITORIAL_AUTHORSHIP_CONTRACT = "EDITORIAL_AUTHORSHIP_CONTRACT"
+
+
+_AUTHORED_CHILD_AUTHORITY_TYPES = frozenset(
+    {
+        EditorialAuthorityType.VIDEO_PROJECT,
+        EditorialAuthorityType.PROJECT_ADMISSION,
+        EditorialAuthorityType.CHANNEL_PROFILE,
+        EditorialAuthorityType.EDITORIAL_PROPOSAL,
+        EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT,
+        EditorialAuthorityType.TOPIC_DEFINITION,
+        EditorialAuthorityType.SECTION_COVERAGE_PLAN,
+    }
+)
+# Current Card D production has one closed authority composition.  Keeping the
+# canonical roles here prevents callers from treating an arbitrary collection
+# of otherwise allowed child types as project authorship.
+CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES = (
+    EditorialAuthorityType.VIDEO_PROJECT,
+    EditorialAuthorityType.PROJECT_ADMISSION,
+    EditorialAuthorityType.CHANNEL_PROFILE,
+    EditorialAuthorityType.EDITORIAL_PROPOSAL,
+    EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT,
+    EditorialAuthorityType.TOPIC_DEFINITION,
+    EditorialAuthorityType.SECTION_COVERAGE_PLAN,
+)
+_AUTHORITY_REF_PREFIXES = {
+    EditorialAuthorityType.VIDEO_PROJECT: "video-project://",
+    EditorialAuthorityType.PROJECT_ADMISSION: "project-admission://",
+    EditorialAuthorityType.CHANNEL_PROFILE: "channel-profile://",
+    EditorialAuthorityType.EDITORIAL_PROPOSAL: "editorial-proposal://",
+    EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT: "editorial-specificity://",
+    EditorialAuthorityType.TOPIC_DEFINITION: "topic-definition://",
+    EditorialAuthorityType.SECTION_COVERAGE_PLAN: "section-coverage-plan://",
+    EditorialAuthorityType.EDITORIAL_AUTHORSHIP_CONTRACT: "editorial-authorship://",
+}
+_DIRECT_HASH_REF_AUTHORITY_TYPES = frozenset(
+    {
+        EditorialAuthorityType.EDITORIAL_PROPOSAL,
+        EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT,
+        EditorialAuthorityType.TOPIC_DEFINITION,
+        EditorialAuthorityType.SECTION_COVERAGE_PLAN,
+        EditorialAuthorityType.EDITORIAL_AUTHORSHIP_CONTRACT,
+    }
+)
+_SCOPED_HASH_REF_AUTHORITY_TYPES = frozenset(
+    {
+        EditorialAuthorityType.PROJECT_ADMISSION,
+        EditorialAuthorityType.CHANNEL_PROFILE,
+    }
+)
+
+
+class EditorialAuthorityBinding(_StrictFrozen):
+    """Exact typed/hash-bound authority consumed by Card D."""
+
+    authority_type: EditorialAuthorityType
+    authority_ref: str = Field(min_length=1, max_length=500)
+    content_hash: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_binding(self) -> Self:
+        prefix = _AUTHORITY_REF_PREFIXES.get(self.authority_type)
+        if prefix is not None and not self.authority_ref.startswith(prefix):
+            raise ValueError("EDITORIAL_AUTHORITY_REF_TYPE_MISMATCH")
+        if self.authority_type in _DIRECT_HASH_REF_AUTHORITY_TYPES and (
+            self.authority_ref != f"{prefix}{self.content_hash}"
+        ):
+            raise ValueError("EDITORIAL_AUTHORITY_REF_HASH_MISMATCH")
+        if self.authority_type in _SCOPED_HASH_REF_AUTHORITY_TYPES and not re.fullmatch(
+            rf"{re.escape(str(prefix))}[^/]+/{self.content_hash}",
+            self.authority_ref,
+        ):
+            raise ValueError("EDITORIAL_AUTHORITY_REF_HASH_MISMATCH")
+        return self
+
+
+def _authorship_contract_body(contract: BaseModel) -> dict[str, Any]:
+    body = contract.model_dump(mode="json", exclude={"content_hash"})
+    if not body.get("source_evidence_refs"):
+        body.pop("source_evidence_refs", None)
+    if not body.get("authored_authority_refs"):
+        body.pop("authored_authority_refs", None)
+    if not body.get("source_evidence_authorities"):
+        body.pop("source_evidence_authorities", None)
+    if not body.get("authored_authorities"):
+        body.pop("authored_authorities", None)
+    return body
 
 
 class ViewerFacingAuthorshipLaw(_StrictFrozen):
@@ -90,8 +194,14 @@ class EditorialAuthorshipContract(_StrictFrozen):
         EDITORIAL_AUTHORSHIP_LAW_VERSION
     )
     source_role: Literal["EVIDENCE"] = "EVIDENCE"
-    source_evidence_refs: list[str] = Field(min_length=1)
-    authored_authority_refs: list[str] = Field(min_length=3)
+    # Legacy string lists remain readable only for immutable historical
+    # packages.  ``build`` forbids producing a new contract through them.
+    source_evidence_refs: list[str] = Field(default_factory=list)
+    authored_authority_refs: list[str] = Field(default_factory=list)
+    source_evidence_authorities: list[EditorialAuthorityBinding] = Field(
+        default_factory=list
+    )
+    authored_authorities: list[EditorialAuthorityBinding] = Field(default_factory=list)
     content_mode: str = Field(min_length=1, max_length=120)
     format_key: str = Field(min_length=1, max_length=160)
     channel_promise: str = Field(min_length=1, max_length=4_000)
@@ -129,13 +239,51 @@ class EditorialAuthorshipContract(_StrictFrozen):
         )
         if any(not value.strip() for value in text_fields):
             raise ValueError("EDITORIAL_AUTHORSHIP_VALUE_MISSING")
-        if any(not ref.strip() for ref in self.source_evidence_refs):
-            raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_EVIDENCE_REF_INVALID")
-        if any(not ref.strip() for ref in self.authored_authority_refs):
-            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORED_AUTHORITY_REF_INVALID")
-        if len(set(self.authored_authority_refs)) != len(self.authored_authority_refs):
+        legacy_mode = bool(self.source_evidence_refs or self.authored_authority_refs)
+        typed_mode = bool(self.source_evidence_authorities or self.authored_authorities)
+        authored_types: list[EditorialAuthorityType] | None = None
+        if legacy_mode and typed_mode:
+            raise ValueError("EDITORIAL_AUTHORSHIP_DUAL_LINEAGE_AUTHORITY_FORBIDDEN")
+        if legacy_mode:
+            if (
+                not self.source_evidence_refs
+                or len(self.authored_authority_refs) < 3
+                or any(not ref.strip() for ref in self.source_evidence_refs)
+                or any(not ref.strip() for ref in self.authored_authority_refs)
+            ):
+                raise ValueError("EDITORIAL_AUTHORSHIP_LEGACY_LINEAGE_INVALID")
+            source_refs = self.source_evidence_refs
+            authored_refs = self.authored_authority_refs
+        else:
+            if not self.source_evidence_authorities or not self.authored_authorities:
+                raise ValueError("EDITORIAL_AUTHORSHIP_TRANSITIVE_LINEAGE_REQUIRED")
+            if any(
+                item.authority_type != EditorialAuthorityType.SOURCE_EVIDENCE
+                for item in self.source_evidence_authorities
+            ):
+                raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_AUTHORITY_TYPE_INVALID")
+            if any(
+                item.authority_type not in _AUTHORED_CHILD_AUTHORITY_TYPES
+                for item in self.authored_authorities
+            ):
+                raise ValueError("EDITORIAL_AUTHORSHIP_CHILD_AUTHORITY_TYPE_INVALID")
+            authored_types = [item.authority_type for item in self.authored_authorities]
+            source_refs = [
+                item.authority_ref for item in self.source_evidence_authorities
+            ]
+            authored_refs = [item.authority_ref for item in self.authored_authorities]
+        if len(source_refs) != len(set(source_refs)) or len(authored_refs) != len(
+            set(authored_refs)
+        ):
             raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_REF_DUPLICATE")
-        if set(self.source_evidence_refs).intersection(self.authored_authority_refs):
+        if authored_types is not None:
+            if len(authored_types) != len(set(authored_types)):
+                raise ValueError(
+                    "EDITORIAL_AUTHORSHIP_AUTHORITY_ROLE_CARDINALITY_INVALID"
+                )
+            if set(authored_types) != set(CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES):
+                raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_COMPOSITION_INVALID")
+        if set(source_refs).intersection(authored_refs):
             raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_AUTHORITY_OVERLAP")
         if _normalized_text(self.channel_promise) == _normalized_text(
             self.episode_reasoning
@@ -156,19 +304,77 @@ class EditorialAuthorshipContract(_StrictFrozen):
                 raise ValueError("EDITORIAL_AUTHORSHIP_TENSION_REQUIRED")
         elif self.tension_failure_contradiction_or_tradeoff is not None:
             raise ValueError("EDITORIAL_AUTHORSHIP_TENSION_NOT_APPLICABLE")
-        body = self.model_dump(mode="json", exclude={"content_hash"})
+        body = _authorship_contract_body(self)
         if self.content_hash != _semantic_hash(body):
             raise ValueError("EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH")
         return self
 
     @classmethod
     def build(cls, **values: Any) -> "EditorialAuthorshipContract":
+        if values.get("source_evidence_refs") or values.get("authored_authority_refs"):
+            raise ValueError("EDITORIAL_AUTHORSHIP_LEGACY_BUILD_FORBIDDEN")
+        accepted_fields = set(cls.model_fields) - {"content_hash"}
+        if unknown_fields := set(values) - accepted_fields:
+            raise ValueError(
+                f"EDITORIAL_AUTHORSHIP_FIELD_UNKNOWN:{','.join(sorted(unknown_fields))}"
+            )
         values.setdefault("schema_version", EDITORIAL_AUTHORSHIP_LAW_VERSION)
         values.setdefault("source_role", "EVIDENCE")
-        values.setdefault("viewer_facing_presentation", ViewerFacingAuthorshipLaw.build())
-        body = cls.model_construct(**values).model_dump(mode="json")
-        body.pop("content_hash", None)
+        values.setdefault(
+            "viewer_facing_presentation", ViewerFacingAuthorshipLaw.build()
+        )
+        values["viewer_facing_presentation"] = ViewerFacingAuthorshipLaw.model_validate(
+            values["viewer_facing_presentation"]
+        )
+        for field_name in (
+            "source_evidence_authorities",
+            "authored_authorities",
+        ):
+            values[field_name] = [
+                EditorialAuthorityBinding.model_validate(item)
+                for item in values.get(field_name, [])
+            ]
+        body = _authorship_contract_body(cls.model_construct(**values))
         return cls(**body, content_hash=_semantic_hash(body))
+
+    @property
+    def has_transitive_authority_binding(self) -> bool:
+        return bool(
+            self.source_evidence_authorities and self.authored_authorities
+        ) and not bool(self.source_evidence_refs or self.authored_authority_refs)
+
+    @property
+    def presentation_authority(self) -> EditorialAuthorityBinding:
+        self.require_current_authority()
+        return EditorialAuthorityBinding(
+            authority_type=EditorialAuthorityType.EDITORIAL_AUTHORSHIP_CONTRACT,
+            authority_ref=f"editorial-authorship://{self.content_hash}",
+            content_hash=self.content_hash,
+        )
+
+    def verify_integrity(self) -> None:
+        ViewerFacingAuthorshipLaw.model_validate(
+            self.viewer_facing_presentation.model_dump(mode="json")
+        )
+        for binding in (
+            *self.source_evidence_authorities,
+            *self.authored_authorities,
+        ):
+            EditorialAuthorityBinding.model_validate(binding.model_dump(mode="json"))
+        if self.content_hash != _semantic_hash(_authorship_contract_body(self)):
+            raise ValueError("EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH")
+
+    def require_current_authority(self) -> None:
+        """Verify integrity and the exact current typed authority composition."""
+
+        self.verify_integrity()
+        if not self.has_transitive_authority_binding:
+            raise ValueError("EDITORIAL_AUTHORSHIP_CURRENT_AUTHORITY_REQUIRED")
+        authored_types = [item.authority_type for item in self.authored_authorities]
+        if len(authored_types) != len(set(authored_types)):
+            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_ROLE_CARDINALITY_INVALID")
+        if set(authored_types) != set(CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES):
+            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_COMPOSITION_INVALID")
 
 
 # Explicit aliases make the law discoverable under the language used by later
@@ -182,16 +388,18 @@ def validate_viewer_facing_presentation(
 ) -> None:
     """Validate generic presentation decisions without defining their schema.
 
-    ``HOLD`` and ``NO_VISUAL_CHANGE`` are valid stable outcomes.  Any other
-    viewer-facing decision needs a human-readable editorial reason and an
-    editorial authority reference; mechanical triggers can never be that
-    authority on their own.
+    ``HOLD`` and ``NO_VISUAL_CHANGE`` are valid stable outcomes.  Every
+    decision resolves one exact EditorialAuthorshipContract binding;
+    arbitrary strings, evidence refs, and generator-owned scene refs cannot
+    become presentation authority.
     """
 
     if isinstance(decisions, Mapping):
         decisions = (decisions,)
     for decision in decisions:
         outcome = str(decision.get("outcome") or "").strip().upper()
+        if outcome not in {"HOLD", "NO_VISUAL_CHANGE", "CHANGE", "PRESENTATION_CHANGE"}:
+            raise ValueError("VIEWER_FACING_PRESENTATION_OUTCOME_INVALID")
         reason = decision.get("editorial_reason") or decision.get("authored_reason")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("NO_EFFECT_WITHOUT_EDITORIAL_REASON")
@@ -201,12 +409,34 @@ def validate_viewer_facing_presentation(
             triggers.add(raw_trigger.strip().upper())
         elif isinstance(raw_trigger, Iterable):
             triggers.update(str(item).strip().upper() for item in raw_trigger)
-        if triggers.intersection(MECHANICAL_PRESENTATION_TRIGGERS) and not str(
-            decision.get("editorial_authority_ref") or ""
-        ).strip():
+        raw_authority = decision.get("editorial_authority")
+        if (
+            triggers.intersection(MECHANICAL_PRESENTATION_TRIGGERS)
+            and raw_authority is None
+        ):
             raise ValueError("MECHANICAL_PRESENTATION_TRIGGER_HAS_NO_AUTHORITY")
-        if not str(decision.get("editorial_authority_ref") or "").strip():
-            raise ValueError("EDITORIAL_PRESENTATION_AUTHORITY_REQUIRED")
+        try:
+            authority = (
+                raw_authority
+                if isinstance(raw_authority, EditorialAuthorityBinding)
+                else EditorialAuthorityBinding.model_validate(raw_authority)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "EDITORIAL_PRESENTATION_AUTHORITY_BINDING_REQUIRED"
+            ) from exc
+        if authority.authority_type == EditorialAuthorityType.SOURCE_EVIDENCE:
+            raise ValueError("SOURCE_CANNOT_AUTHOR_PRESENTATION")
+        if (
+            authority.authority_type
+            != EditorialAuthorityType.EDITORIAL_AUTHORSHIP_CONTRACT
+        ):
+            raise ValueError("EDITORIAL_PRESENTATION_AUTHORITY_TYPE_INVALID")
+        if (
+            outcome in {"HOLD", "NO_VISUAL_CHANGE"}
+            and decision.get("actual_presentation_change") is True
+        ):
+            raise ValueError("STABLE_PRESENTATION_OUTCOME_RUNTIME_MISMATCH")
 
 
 NO_EFFECT_WITHOUT_EDITORIAL_REASON = "NO_EFFECT_WITHOUT_EDITORIAL_REASON"

@@ -21,6 +21,8 @@ from typing import Any, Iterable, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.contracts.editorial_authorship import (
+    EditorialAuthorityBinding,
+    EditorialAuthorityType,
     EditorialAuthorshipContract,
     validate_viewer_facing_presentation,
 )
@@ -568,12 +570,24 @@ class PresentationSemanticIntent(_StrictFrozen):
     def valid_authorship_law(self) -> Self:
         if self.semantic_role not in _PRESENTATION_OUTCOME_ROLE_MATRIX[self.outcome]:
             raise ValueError("SEMANTIC_PRESENTATION_ROLE_OUTCOME_INVALID")
+        authority_prefix = "editorial-authorship://"
+        if not self.editorial_authority_ref.startswith(authority_prefix):
+            raise ValueError("SEMANTIC_PRESENTATION_AUTHORITY_NOT_AUTHORED")
+        authority_hash = self.editorial_authority_ref.removeprefix(authority_prefix)
+        try:
+            editorial_authority = EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.EDITORIAL_AUTHORSHIP_CONTRACT,
+                authority_ref=self.editorial_authority_ref,
+                content_hash=authority_hash,
+            )
+        except ValueError as exc:
+            raise ValueError("SEMANTIC_PRESENTATION_AUTHORITY_BINDING_INVALID") from exc
         # Reuse Card D's law rather than re-declaring a competing rule set.
         validate_viewer_facing_presentation(
             {
                 "outcome": self.outcome.value,
                 "editorial_reason": self.editorial_reason,
-                "editorial_authority_ref": self.editorial_authority_ref,
+                "editorial_authority": editorial_authority,
             }
         )
         return self
@@ -786,15 +800,16 @@ class ProjectRichSemanticSnapshot(_StrictFrozen):
         source_authorities: Iterable[SemanticAuthorityRef] = (),
         **values: Any,
     ) -> "ProjectRichSemanticSnapshot":
-        authorship_ref = (
-            f"editorial-authorship://{editorial_authorship_contract.content_hash}"
-        )
+        # Card D owns current-authority qualification.  Reading an object's
+        # hash is insufficient: a legacy or in-memory-tampered contract must
+        # never mint new Card E semantic authority.
+        authorship_authority = editorial_authorship_contract.presentation_authority
         authorities = list(source_authorities)
         authorities.append(
             SemanticAuthorityRef(
-                authority_type="EDITORIAL_AUTHORSHIP_CONTRACT",
-                authority_ref=authorship_ref,
-                content_hash=editorial_authorship_contract.content_hash,
+                authority_type=authorship_authority.authority_type.value,
+                authority_ref=authorship_authority.authority_ref,
+                content_hash=authorship_authority.content_hash,
             )
         )
         return cls.build(source_authorities=authorities, **values)

@@ -677,8 +677,7 @@ def _narration_units_with_motion_evidence(
     group_by_information_id = _semantic_group_keys(raw_units)
     result: list[AIVisualNarrationUnit] = []
     classifications: list[dict[str, Any]] = []
-    previous_group: str | None = None
-    for ordinal, raw in enumerate(raw_units, start=1):
+    for raw in raw_units:
         if not isinstance(raw, dict):
             raise ValidationFailureError("V2_AI_VISUAL_NARRATION_UNIT_INVALID")
         narration_unit_id = str(raw.get("narration_unit_id") or "")
@@ -704,13 +703,6 @@ def _narration_units_with_motion_evidence(
             visual_function=source_function,
             semantic_intent=semantic_intent,
             spoken_text=spoken_text,
-        )
-        transition_reason = (
-            "CONTINUATION"
-            if semantic_group == previous_group
-            else "CONTRAST"
-            if function == "COMPARISON" and ordinal > 1
-            else "TOPIC_SHIFT"
         )
         result.append(
             AIVisualNarrationUnit(
@@ -744,12 +736,15 @@ def _narration_units_with_motion_evidence(
                 motion_need=motion_need,
                 factual_risk=_factual_risk(str(raw.get("factual_risk") or "MEDIUM")),
                 importance=_importance(str(raw.get("importance") or "STANDARD")),
-                transition_semantic_reason=transition_reason,
+                # This active timeline carries no upstream Card E
+                # PresentationSemanticIntent.  This explicit non-authority
+                # marker can only resolve to a technical CUT; group, function,
+                # and position never become transition authorship.
+                transition_semantic_reason="UNAUTHORED_TECHNICAL_CUT",
                 semantic_group_key=semantic_group,
             )
         )
         classifications.append(motion_evidence)
-        previous_group = semantic_group
     return result, _motion_classification_set(classifications)
 
 
@@ -853,10 +848,9 @@ def compile_ai_visual_stage_planning(
         raise ValidationFailureError("V2_AI_VISUAL_ROUTE_AUTHORITY_INVALID")
     style_bible = build_video_visual_style_bible(visual_run=visual_run)
     motion_policy = _active_motion_policy()
-    # The active motion policy permits a meaning-stable AI image to remain on
-    # screen for at most 14 seconds when a valid motion intent is compiled.
-    # The active policy uses a bounded semantic extension (13.25s) for
-    # comparison/concept/example blocks and retains the 12s process ceiling.
+    # The active planning policy bounds a single AI-image presentation window
+    # for asset/runtime reasons.  It does not turn duration into authority for
+    # motion or make an otherwise authored stable hold semantically invalid.
     policy = AIVisualPlanningPolicy.production_default(
         maximum_ai_image_presentation_ms=int(
             motion_policy["maximum_static_presentation_ms"]
@@ -1004,7 +998,9 @@ def compile_pre_tts_ai_visual_cost_preflight(
     ]
     if not sentences:
         raise ValidationFailureError("COMBINED_REPLACEMENT_VISUAL_PLAN_INVALID")
-    word_counts = [max(1, len(re.findall(r"\\b[\\w'-]+\\b", item))) for item in sentences]
+    word_counts = [
+        max(1, len(re.findall(r"\\b[\\w'-]+\\b", item))) for item in sentences
+    ]
     total_words = sum(word_counts)
     cursor = 0
     raw_units: list[dict[str, Any]] = []
@@ -1023,7 +1019,9 @@ def compile_pre_tts_ai_visual_cost_preflight(
         unit_id = f"preflight-nu-{ordinal:03d}"
         visual_function = (
             "PROCESS"
-            if any(pattern.search(sentence) for _cue_id, pattern in _REQUIRED_MOTION_CUES)
+            if any(
+                pattern.search(sentence) for _cue_id, pattern in _REQUIRED_MOTION_CUES
+            )
             else "CONCEPT_MODEL"
         )
         raw_units.append(
@@ -1458,8 +1456,7 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                     key: amount
                     for key, amount in {
                         V2_AI_VISUAL_PROVIDER_KEY: (
-                            V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD
-                            * maximum_images
+                            V2_AI_VISUAL_CONSERVATIVE_UNIT_COST_USD * maximum_images
                         ),
                         V2_AI_VISUAL_VIDEO_PROVIDER_KEY: (
                             video_unit_cost * maximum_videos
@@ -1507,7 +1504,8 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                 if (
                     combined_authority is None
                     or combined_authority.state != "FROZEN"
-                    or combined_authority.content_hash != visual_run.budget_authority_hash
+                    or combined_authority.content_hash
+                    != visual_run.budget_authority_hash
                     or combined_authority.budget_reservation_ref
                     != visual_run.budget_reservation_ref
                     or Decimal(combined_authority.ai_image_projected_cost_usd)
@@ -1527,9 +1525,13 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                 expected_budget_allocations = {
                     str(key): Decimal(str(value))
                     for key, value in (
-                        ((combined_authority.source_refs or {})
-                         .get("ai_visual_preflight") or {})
-                        .get("provider_allocations_usd") or {}
+                        (
+                            (combined_authority.source_refs or {}).get(
+                                "ai_visual_preflight"
+                            )
+                            or {}
+                        ).get("provider_allocations_usd")
+                        or {}
                     ).items()
                 }
                 expected_budget_run_id = workflow.id
@@ -1559,9 +1561,12 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
                 or budget_ceiling <= 0
                 or budget_ceiling != expected_budget_ceiling
                 or {
-                    key: value for key, value in allocations.items() if key
+                    key: value
+                    for key, value in allocations.items()
+                    if key
                     in {V2_AI_VISUAL_PROVIDER_KEY, V2_AI_VISUAL_VIDEO_PROVIDER_KEY}
-                } != expected_visual_allocations
+                }
+                != expected_visual_allocations
                 or allocations != expected_budget_allocations
                 or budget.status
                 not in {"RESERVED", "SUBMITTED", "SETTLED_CONSERVATIVE"}
@@ -2332,10 +2337,14 @@ class V2AIVisualProductionAdapter(V2LocalNativeProductionAdapter):
             budget = session.get(
                 MR1MonthlyBudgetReservation, visual_run.budget_reservation_id
             )
-            allocations = {
-                str(key): Decimal(str(value))
-                for key, value in (budget.provider_allocations_json or {}).items()
-            } if budget is not None else {}
+            allocations = (
+                {
+                    str(key): Decimal(str(value))
+                    for key, value in (budget.provider_allocations_json or {}).items()
+                }
+                if budget is not None
+                else {}
+            )
             # A normal run shares the pre-TTS aggregate reservation.  The
             # already-authorized ElevenLabs partition remains conservatively
             # occupied while this method reconciles only the Gemini/Veo

@@ -6,7 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.contracts.ai_visual_production import AIVisualNarrationUnit
-from app.contracts.editorial_authorship import EditorialAuthorshipContract
+from app.contracts.editorial_authorship import (
+    EditorialAuthorityBinding,
+    EditorialAuthorityType,
+    EditorialAuthorshipContract,
+)
 from app.contracts.channel_policy import FormatIdentityBinding, PolicyRef
 from app.contracts.semantic import (
     Applicability,
@@ -240,11 +244,49 @@ def _explainer_format_variant(
 
 def _authorship() -> EditorialAuthorshipContract:
     return EditorialAuthorshipContract.build(
-        source_evidence_refs=["evidence://approved/recovery"],
-        authored_authority_refs=[
-            "brief://episode",
-            "outline://episode",
-            "review://episode",
+        source_evidence_authorities=[
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.SOURCE_EVIDENCE,
+                authority_ref="evidence://approved/recovery",
+                content_hash="a" * 64,
+            )
+        ],
+        authored_authorities=[
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.VIDEO_PROJECT,
+                authority_ref="video-project://001",
+                content_hash="3" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.PROJECT_ADMISSION,
+                authority_ref=f"project-admission://001/{'4' * 64}",
+                content_hash="4" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.CHANNEL_PROFILE,
+                authority_ref=f"channel-profile://001/{'5' * 64}",
+                content_hash="5" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.EDITORIAL_PROPOSAL,
+                authority_ref=f"editorial-proposal://{'b' * 64}",
+                content_hash="b" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT,
+                authority_ref=f"editorial-specificity://{'c' * 64}",
+                content_hash="c" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.TOPIC_DEFINITION,
+                authority_ref=f"topic-definition://{'d' * 64}",
+                content_hash="d" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.SECTION_COVERAGE_PLAN,
+                authority_ref=f"section-coverage-plan://{'6' * 64}",
+                content_hash="6" * 64,
+            ),
         ],
         content_mode="STANDALONE",
         format_key="editorial-explainer",
@@ -657,12 +699,51 @@ def test_semantic_owner_requires_explicit_identity_never_a_position():
         )
 
 
+def test_card_e_bridge_requires_verified_current_card_d_authority():
+    authorship = _authorship()
+    snapshot = _snapshot()
+    assert any(
+        authority.authority_ref == authorship.presentation_authority.authority_ref
+        for authority in snapshot.source_authorities
+    )
+
+    authorities = list(authorship.authored_authorities)
+    authorities[0] = authorities[0].model_copy(update={"content_hash": "0" * 64})
+    tampered = authorship.model_copy(update={"authored_authorities": authorities})
+    with pytest.raises(ValueError, match="EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH"):
+        ProjectRichSemanticSnapshot.build_from_authorship_contract(
+            editorial_authorship_contract=tampered
+        )
+
+    from app.contracts.editorial_authorship import _semantic_hash
+
+    legacy_body = authorship.model_dump(mode="json", exclude={"content_hash"})
+    legacy_body.pop("source_evidence_authorities")
+    legacy_body.pop("authored_authorities")
+    legacy_body["source_evidence_refs"] = ["evidence://historical"]
+    legacy_body["authored_authority_refs"] = [
+        "editorial-proposal://historical",
+        "editorial-specificity://historical",
+        "topic-definition://historical",
+    ]
+    legacy = EditorialAuthorshipContract.model_validate(
+        {**legacy_body, "content_hash": _semantic_hash(legacy_body)}
+    )
+    with pytest.raises(
+        ValueError, match="EDITORIAL_AUTHORSHIP_CURRENT_AUTHORITY_REQUIRED"
+    ):
+        ProjectRichSemanticSnapshot.build_from_authorship_contract(
+            editorial_authorship_contract=legacy
+        )
+
+
 def test_effect_role_is_semantic_why_not_a_renderer_primitive():
+    authority_ref = f"editorial-authorship://{'a' * 64}"
     intent = PresentationSemanticIntent(
         outcome=PresentationOutcome.PRESENTATION_CHANGE,
         semantic_role=SemanticPresentationRole.REVEAL,
         editorial_reason="Reveal the causal boundary when it becomes relevant.",
-        editorial_authority_ref="editorial-authorship://authority",
+        editorial_authority_ref=authority_ref,
     )
 
     assert intent.semantic_role == SemanticPresentationRole.REVEAL
@@ -672,7 +753,7 @@ def test_effect_role_is_semantic_why_not_a_renderer_primitive():
             outcome=PresentationOutcome.PRESENTATION_CHANGE,
             semantic_role="TEXT_SWIPE_IN",
             editorial_reason="Renderer primitive is not a semantic role.",
-            editorial_authority_ref="editorial-authorship://authority",
+            editorial_authority_ref=authority_ref,
         )
 
 
@@ -1496,7 +1577,7 @@ def test_presentation_outcome_role_matrix_blocks_contradictions(
             outcome=outcome,
             semantic_role=semantic_role,
             editorial_reason="Exercise the canonical outcome-role matrix.",
-            editorial_authority_ref="editorial-authorship://authority",
+            editorial_authority_ref=f"editorial-authorship://{'a' * 64}",
         )
 
 
@@ -1518,7 +1599,7 @@ def test_presentation_outcome_role_matrix_accepts_canonical_combinations(
         outcome=outcome,
         semantic_role=semantic_role,
         editorial_reason="Exercise the canonical outcome-role matrix.",
-        editorial_authority_ref="editorial-authorship://authority",
+        editorial_authority_ref=f"editorial-authorship://{'a' * 64}",
     )
 
     assert intent.semantic_role == semantic_role
