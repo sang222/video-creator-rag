@@ -93,23 +93,19 @@ def _require_current_editorial_authorship(
     """Fail closed at the current production-package write/readiness boundary."""
 
     if contract is None:
-        raise ValidationFailureError(
-            "PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_REQUIRED"
-        )
-    try:
-        contract.verify_integrity()
-    except ValueError as exc:
-        raise ValidationFailureError(
-            "PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_INVALID"
-        ) from exc
+        raise ValidationFailureError("PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_REQUIRED")
     if not contract.has_transitive_authority_binding:
         raise ValidationFailureError(
             "PRODUCTION_PACKAGE_TRANSITIVE_AUTHORSHIP_REQUIRED"
         )
-    if readiness_hash != contract.content_hash:
+    try:
+        contract.require_current_authority()
+    except ValueError as exc:
         raise ValidationFailureError(
-            "PRODUCTION_PACKAGE_AUTHORSHIP_HASH_MISMATCH"
-        )
+            "PRODUCTION_PACKAGE_EDITORIAL_AUTHORSHIP_INVALID"
+        ) from exc
+    if readiness_hash != contract.content_hash:
+        raise ValidationFailureError("PRODUCTION_PACKAGE_AUTHORSHIP_HASH_MISMATCH")
 
 
 def semantic_hash(value: Any) -> str:

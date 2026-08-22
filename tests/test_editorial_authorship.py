@@ -9,6 +9,7 @@ from app.contracts.cross_modal import (
     cross_modal_hash,
 )
 from app.contracts.editorial_authorship import (
+    CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES,
     EditorialAuthorityBinding,
     EditorialAuthorityType,
     EditorialAuthorshipContract,
@@ -16,9 +17,15 @@ from app.contracts.editorial_authorship import (
     validate_viewer_facing_presentation,
 )
 from app.core.errors import ValidationFailureError
-from app.services.editorial_specificity import EditorialIdeaProposal
+from app.services.editorial_specificity import (
+    EDITORIAL_SPECIFICITY_GATE_VERSION,
+    EditorialIdeaProposal,
+    EditorialSpecificityService,
+    _card_d_project_intent_reasons,
+)
 from app.services.gates import _production_editorial_authorship_gate
 from app.services.production_package import _require_current_editorial_authorship
+from app.services.v2_ai_visual_stage import narration_units_from_frozen_timeline
 from app.services.v2_package_readiness import _exact_reasoning_progression
 
 
@@ -33,14 +40,27 @@ def _contract() -> EditorialAuthorshipContract:
         ],
         authored_authorities=[
             EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.VIDEO_PROJECT,
+                authority_ref="video-project://project-1",
+                content_hash="e" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.PROJECT_ADMISSION,
+                authority_ref=f"project-admission://admission-1/{'f' * 64}",
+                content_hash="f" * 64,
+            ),
+            EditorialAuthorityBinding(
+                authority_type=EditorialAuthorityType.CHANNEL_PROFILE,
+                authority_ref=f"channel-profile://profile-1/{'1' * 64}",
+                content_hash="1" * 64,
+            ),
+            EditorialAuthorityBinding(
                 authority_type=EditorialAuthorityType.EDITORIAL_PROPOSAL,
                 authority_ref=f"editorial-proposal://{'b' * 64}",
                 content_hash="b" * 64,
             ),
             EditorialAuthorityBinding(
-                authority_type=(
-                    EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT
-                ),
+                authority_type=(EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT),
                 authority_ref=f"editorial-specificity://{'c' * 64}",
                 content_hash="c" * 64,
             ),
@@ -50,9 +70,9 @@ def _contract() -> EditorialAuthorshipContract:
                 content_hash="d" * 64,
             ),
             EditorialAuthorityBinding(
-                authority_type=EditorialAuthorityType.VIDEO_PROJECT,
-                authority_ref="video-project://project-1",
-                content_hash="e" * 64,
+                authority_type=EditorialAuthorityType.SECTION_COVERAGE_PLAN,
+                authority_ref=f"section-coverage-plan://{'2' * 64}",
+                content_hash="2" * 64,
             ),
         ],
         content_mode="STANDALONE",
@@ -108,6 +128,58 @@ def _proposal(**overrides: object) -> EditorialIdeaProposal:
     }
     values.update(overrides)
     return EditorialIdeaProposal.model_validate(values)
+
+
+def _current_proposal(**overrides: object) -> EditorialIdeaProposal:
+    values: dict[str, object] = {
+        "episode_reasoning": "Test the exception handoff as one decision boundary.",
+        "central_question": "Where does the exception handoff lose authority?",
+        "early_stakes_or_payoff": (
+            "An invisible handoff can ship an unreviewed external action."
+        ),
+        "original_thesis_or_position": (
+            "Keep human review at the external-action boundary."
+        ),
+        "visible_editorial_judgment": (
+            "The external action is the decisive review boundary."
+        ),
+        "memorable_payoff_framework_or_conclusion": (
+            "Use the external-action test before enabling recovery."
+        ),
+    }
+    values.update(overrides)
+    return _proposal(**values)
+
+
+def _timeline(*, functions: list[str], information_ids: list[str]) -> dict:
+    return {
+        "narration_unit_compilation": {
+            "narration_units": [
+                {
+                    "narration_unit_id": f"unit-{index}",
+                    "information_unit_ids": [information_id],
+                    "visual_function": function,
+                    "semantic_intent": "An authored meaning without transition authority.",
+                    "text": "Explain the already-authored meaning.",
+                    "importance": "CORE",
+                    "factual_risk": "LOW",
+                }
+                for index, (function, information_id) in enumerate(
+                    zip(functions, information_ids, strict=True), start=1
+                )
+            ]
+        },
+        "timed_narration_unit_bindings": {
+            "bindings": [
+                {
+                    "narration_unit_id": f"unit-{index}",
+                    "actual_start_ms": (index - 1) * 4_000,
+                    "actual_end_ms": index * 4_000,
+                }
+                for index in range(1, len(functions) + 1)
+            ]
+        },
+    }
 
 
 def _coverage_plan(deltas: list[str]) -> SectionCoveragePlan:
@@ -174,6 +246,63 @@ def test_authorship_contract_is_format_neutral_and_hash_bound() -> None:
     tampered["content_hash"] = "0" * 64
     with pytest.raises(ValueError, match="EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH"):
         EditorialAuthorshipContract.model_validate(tampered)
+
+
+def test_current_authorship_requires_exact_authority_composition() -> None:
+    contract = _contract()
+    assert tuple(item.authority_type for item in contract.authored_authorities) == (
+        CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES
+    )
+    contract.require_current_authority()
+
+    missing = _contract_values()
+    missing["authored_authorities"] = [
+        item
+        for item in missing["authored_authorities"]
+        if item["authority_type"] != EditorialAuthorityType.PROJECT_ADMISSION
+    ]
+    with pytest.raises(
+        ValueError, match="EDITORIAL_AUTHORSHIP_AUTHORITY_COMPOSITION_INVALID"
+    ):
+        EditorialAuthorshipContract.build(**missing)
+
+    arbitrary = _contract_values()
+    arbitrary["authored_authorities"] = arbitrary["authored_authorities"][:3]
+    with pytest.raises(
+        ValueError, match="EDITORIAL_AUTHORSHIP_AUTHORITY_COMPOSITION_INVALID"
+    ):
+        EditorialAuthorshipContract.build(**arbitrary)
+
+
+def test_current_authorship_rejects_duplicate_required_role() -> None:
+    values = _contract_values()
+    values["authored_authorities"].append(
+        {
+            "authority_type": EditorialAuthorityType.VIDEO_PROJECT,
+            "authority_ref": "video-project://project-duplicate",
+            "content_hash": "9" * 64,
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="EDITORIAL_AUTHORSHIP_AUTHORITY_ROLE_CARDINALITY_INVALID",
+    ):
+        EditorialAuthorshipContract.build(**values)
+
+
+def test_source_authority_cannot_fill_required_authored_role() -> None:
+    values = _contract_values()
+    values["authored_authorities"][0] = {
+        "authority_type": EditorialAuthorityType.SOURCE_EVIDENCE,
+        "authority_ref": "evidence://not-authorship",
+        "content_hash": "8" * 64,
+    }
+
+    with pytest.raises(
+        ValueError, match="EDITORIAL_AUTHORSHIP_CHILD_AUTHORITY_TYPE_INVALID"
+    ):
+        EditorialAuthorshipContract.build(**values)
 
 
 def test_hold_and_no_visual_change_are_valid_stable_outcomes() -> None:
@@ -257,7 +386,9 @@ def test_source_and_authored_authority_refs_cannot_overlap() -> None:
             content_hash="a" * 64,
         )
     ]
-    with pytest.raises(ValueError, match="EDITORIAL_AUTHORSHIP_SOURCE_AUTHORITY_OVERLAP"):
+    with pytest.raises(
+        ValueError, match="EDITORIAL_AUTHORSHIP_SOURCE_AUTHORITY_OVERLAP"
+    ):
         EditorialAuthorshipContract.build(**values)
 
 
@@ -363,20 +494,34 @@ def test_presentation_authority_must_be_typed_hash_bound_authorship() -> None:
 def test_transitive_child_hash_drift_invalidates_old_contract_identity() -> None:
     contract = _contract()
     values = _contract_values()
-    project_authority = values["authored_authorities"][-1]
+    project_authority = next(
+        item
+        for item in values["authored_authorities"]
+        if item["authority_type"] == EditorialAuthorityType.VIDEO_PROJECT
+    )
     project_authority["content_hash"] = "f" * 64
     rebound = EditorialAuthorshipContract.build(**values)
 
-    assert rebound.authored_authorities[-1].authority_ref == (
-        contract.authored_authorities[-1].authority_ref
+    rebound_project = next(
+        item
+        for item in rebound.authored_authorities
+        if item.authority_type == EditorialAuthorityType.VIDEO_PROJECT
     )
+    contract_project = next(
+        item
+        for item in contract.authored_authorities
+        if item.authority_type == EditorialAuthorityType.VIDEO_PROJECT
+    )
+    assert rebound_project.authority_ref == (contract_project.authority_ref)
     assert rebound.content_hash != contract.content_hash
 
     tampered = contract.model_dump(mode="json")
-    tampered["authored_authorities"][-1]["content_hash"] = "f" * 64
-    with pytest.raises(
-        ValueError, match="EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH"
-    ):
+    next(
+        item
+        for item in tampered["authored_authorities"]
+        if item["authority_type"] == EditorialAuthorityType.VIDEO_PROJECT
+    )["content_hash"] = "f" * 64
+    with pytest.raises(ValueError, match="EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH"):
         EditorialAuthorshipContract.model_validate(tampered)
 
 
@@ -399,6 +544,20 @@ def test_legacy_contract_remains_readable_but_cannot_be_new_authority() -> None:
     assert legacy.has_transitive_authority_binding is False
     with pytest.raises(ValueError, match="EDITORIAL_AUTHORSHIP_LEGACY_BUILD_FORBIDDEN"):
         EditorialAuthorshipContract.build(**body)
+    with pytest.raises(
+        ValueError, match="EDITORIAL_AUTHORSHIP_CURRENT_AUTHORITY_REQUIRED"
+    ):
+        _ = legacy.presentation_authority
+
+
+def test_tampered_in_memory_contract_cannot_mint_presentation_authority() -> None:
+    contract = _contract()
+    authorities = list(contract.authored_authorities)
+    authorities[0] = authorities[0].model_copy(update={"content_hash": "0" * 64})
+    tampered = contract.model_copy(update={"authored_authorities": authorities})
+
+    with pytest.raises(ValueError, match="EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH"):
+        _ = tampered.presentation_authority
 
 
 def test_stable_outcome_matches_runtime_and_has_no_duration_limit() -> None:
@@ -456,6 +615,104 @@ def test_new_proposal_requires_complete_exact_card_d_values() -> None:
     assert set(proposal.required_evidence_binding_fields) > set(
         _proposal().required_evidence_binding_fields
     )
+
+
+def test_card_d_project_intent_verifier_accepts_concrete_distinct_values() -> None:
+    assert _card_d_project_intent_reasons(_current_proposal()) == ()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        (
+            {"visible_editorial_judgment": "This is important for the viewer."},
+            "EDITORIAL_CARD_D_VISIBLE_JUDGMENT_GENERIC",
+        ),
+        (
+            {
+                "memorable_payoff_framework_or_conclusion": (
+                    "You will understand approval recovery."
+                )
+            },
+            "EDITORIAL_CARD_D_MEMORABLE_PAYOFF_GENERIC",
+        ),
+        (
+            {"visible_editorial_judgment": "Choose review before an external action."},
+            "EDITORIAL_CARD_D_JUDGMENT_RELABELED",
+        ),
+        (
+            {
+                "original_thesis_or_position": "Frame the boundary as an operational decision."
+            },
+            "EDITORIAL_CARD_D_THESIS_RELABELED",
+        ),
+        (
+            {"early_stakes_or_payoff": "Operators can miss a hidden handoff."},
+            "EDITORIAL_CARD_D_STAKES_RELABELED",
+        ),
+        (
+            {"memorable_payoff_framework_or_conclusion": ("A reusable boundary test.")},
+            "EDITORIAL_CARD_D_PAYOFF_VIEWER_VALUE_RELABELED",
+        ),
+        (
+            {
+                "memorable_payoff_framework_or_conclusion": (
+                    "Recognize the accountable handoff."
+                )
+            },
+            "EDITORIAL_CARD_D_PAYOFF_LEARNING_OUTCOME_RELABELED",
+        ),
+    ],
+)
+def test_card_d_project_intent_verifier_blocks_generic_or_relabelled_values(
+    overrides: dict[str, object], reason: str
+) -> None:
+    proposal = _current_proposal(**overrides)
+    assert reason in _card_d_project_intent_reasons(proposal)
+
+
+def test_stale_specificity_receipt_cannot_bypass_current_verifier() -> None:
+    candidate = type(
+        "Candidate",
+        (),
+        {
+            "editorial_specificity_receipt": {
+                "gate_version": "editorial-specificity-gate.v1",
+                "state": "PASS",
+            }
+        },
+    )()
+
+    assert EDITORIAL_SPECIFICITY_GATE_VERSION == "editorial-specificity-gate.v2"
+    assert EditorialSpecificityService(None).current_pass(candidate) is False
+
+
+def test_active_v2_timeline_cannot_infer_transition_authority() -> None:
+    units = narration_units_from_frozen_timeline(
+        _timeline(
+            functions=["EXPLANATORY_CONTEXT", "BOUNDARY_COMPARISON", "CONCLUSION"],
+            information_ids=["same", "different", "last"],
+        )
+    )
+
+    assert [item.transition_semantic_reason for item in units] == [
+        "UNAUTHORED_TECHNICAL_CUT",
+        "UNAUTHORED_TECHNICAL_CUT",
+        "UNAUTHORED_TECHNICAL_CUT",
+    ]
+
+
+def test_technical_or_provider_split_cannot_create_semantic_transition() -> None:
+    units = narration_units_from_frozen_timeline(
+        _timeline(
+            functions=["BOUNDARY_COMPARISON", "BOUNDARY_COMPARISON"],
+            information_ids=["same", "same"],
+        )
+    )
+
+    assert {item.transition_semantic_reason for item in units} == {
+        "UNAUTHORED_TECHNICAL_CUT"
+    }
 
 
 def test_generic_headings_cannot_become_reasoning_spine() -> None:

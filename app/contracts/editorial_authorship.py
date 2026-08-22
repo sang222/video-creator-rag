@@ -80,6 +80,18 @@ _AUTHORED_CHILD_AUTHORITY_TYPES = frozenset(
         EditorialAuthorityType.SECTION_COVERAGE_PLAN,
     }
 )
+# Current Card D production has one closed authority composition.  Keeping the
+# canonical roles here prevents callers from treating an arbitrary collection
+# of otherwise allowed child types as project authorship.
+CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES = (
+    EditorialAuthorityType.VIDEO_PROJECT,
+    EditorialAuthorityType.PROJECT_ADMISSION,
+    EditorialAuthorityType.CHANNEL_PROFILE,
+    EditorialAuthorityType.EDITORIAL_PROPOSAL,
+    EditorialAuthorityType.EDITORIAL_SPECIFICITY_RECEIPT,
+    EditorialAuthorityType.TOPIC_DEFINITION,
+    EditorialAuthorityType.SECTION_COVERAGE_PLAN,
+)
 _AUTHORITY_REF_PREFIXES = {
     EditorialAuthorityType.VIDEO_PROJECT: "video-project://",
     EditorialAuthorityType.PROJECT_ADMISSION: "project-admission://",
@@ -228,9 +240,8 @@ class EditorialAuthorshipContract(_StrictFrozen):
         if any(not value.strip() for value in text_fields):
             raise ValueError("EDITORIAL_AUTHORSHIP_VALUE_MISSING")
         legacy_mode = bool(self.source_evidence_refs or self.authored_authority_refs)
-        typed_mode = bool(
-            self.source_evidence_authorities or self.authored_authorities
-        )
+        typed_mode = bool(self.source_evidence_authorities or self.authored_authorities)
+        authored_types: list[EditorialAuthorityType] | None = None
         if legacy_mode and typed_mode:
             raise ValueError("EDITORIAL_AUTHORSHIP_DUAL_LINEAGE_AUTHORITY_FORBIDDEN")
         if legacy_mode:
@@ -244,10 +255,7 @@ class EditorialAuthorshipContract(_StrictFrozen):
             source_refs = self.source_evidence_refs
             authored_refs = self.authored_authority_refs
         else:
-            if (
-                not self.source_evidence_authorities
-                or len(self.authored_authorities) < 3
-            ):
+            if not self.source_evidence_authorities or not self.authored_authorities:
                 raise ValueError("EDITORIAL_AUTHORSHIP_TRANSITIVE_LINEAGE_REQUIRED")
             if any(
                 item.authority_type != EditorialAuthorityType.SOURCE_EVIDENCE
@@ -259,12 +267,22 @@ class EditorialAuthorshipContract(_StrictFrozen):
                 for item in self.authored_authorities
             ):
                 raise ValueError("EDITORIAL_AUTHORSHIP_CHILD_AUTHORITY_TYPE_INVALID")
-            source_refs = [item.authority_ref for item in self.source_evidence_authorities]
+            authored_types = [item.authority_type for item in self.authored_authorities]
+            source_refs = [
+                item.authority_ref for item in self.source_evidence_authorities
+            ]
             authored_refs = [item.authority_ref for item in self.authored_authorities]
         if len(source_refs) != len(set(source_refs)) or len(authored_refs) != len(
             set(authored_refs)
         ):
             raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_REF_DUPLICATE")
+        if authored_types is not None:
+            if len(authored_types) != len(set(authored_types)):
+                raise ValueError(
+                    "EDITORIAL_AUTHORSHIP_AUTHORITY_ROLE_CARDINALITY_INVALID"
+                )
+            if set(authored_types) != set(CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES):
+                raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_COMPOSITION_INVALID")
         if set(source_refs).intersection(authored_refs):
             raise ValueError("EDITORIAL_AUTHORSHIP_SOURCE_AUTHORITY_OVERLAP")
         if _normalized_text(self.channel_promise) == _normalized_text(
@@ -293,9 +311,7 @@ class EditorialAuthorshipContract(_StrictFrozen):
 
     @classmethod
     def build(cls, **values: Any) -> "EditorialAuthorshipContract":
-        if values.get("source_evidence_refs") or values.get(
-            "authored_authority_refs"
-        ):
+        if values.get("source_evidence_refs") or values.get("authored_authority_refs"):
             raise ValueError("EDITORIAL_AUTHORSHIP_LEGACY_BUILD_FORBIDDEN")
         accepted_fields = set(cls.model_fields) - {"content_hash"}
         if unknown_fields := set(values) - accepted_fields:
@@ -304,7 +320,9 @@ class EditorialAuthorshipContract(_StrictFrozen):
             )
         values.setdefault("schema_version", EDITORIAL_AUTHORSHIP_LAW_VERSION)
         values.setdefault("source_role", "EVIDENCE")
-        values.setdefault("viewer_facing_presentation", ViewerFacingAuthorshipLaw.build())
+        values.setdefault(
+            "viewer_facing_presentation", ViewerFacingAuthorshipLaw.build()
+        )
         values["viewer_facing_presentation"] = ViewerFacingAuthorshipLaw.model_validate(
             values["viewer_facing_presentation"]
         )
@@ -327,6 +345,7 @@ class EditorialAuthorshipContract(_StrictFrozen):
 
     @property
     def presentation_authority(self) -> EditorialAuthorityBinding:
+        self.require_current_authority()
         return EditorialAuthorityBinding(
             authority_type=EditorialAuthorityType.EDITORIAL_AUTHORSHIP_CONTRACT,
             authority_ref=f"editorial-authorship://{self.content_hash}",
@@ -334,8 +353,28 @@ class EditorialAuthorshipContract(_StrictFrozen):
         )
 
     def verify_integrity(self) -> None:
+        ViewerFacingAuthorshipLaw.model_validate(
+            self.viewer_facing_presentation.model_dump(mode="json")
+        )
+        for binding in (
+            *self.source_evidence_authorities,
+            *self.authored_authorities,
+        ):
+            EditorialAuthorityBinding.model_validate(binding.model_dump(mode="json"))
         if self.content_hash != _semantic_hash(_authorship_contract_body(self)):
             raise ValueError("EDITORIAL_AUTHORSHIP_CONTRACT_HASH_MISMATCH")
+
+    def require_current_authority(self) -> None:
+        """Verify integrity and the exact current typed authority composition."""
+
+        self.verify_integrity()
+        if not self.has_transitive_authority_binding:
+            raise ValueError("EDITORIAL_AUTHORSHIP_CURRENT_AUTHORITY_REQUIRED")
+        authored_types = [item.authority_type for item in self.authored_authorities]
+        if len(authored_types) != len(set(authored_types)):
+            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_ROLE_CARDINALITY_INVALID")
+        if set(authored_types) != set(CURRENT_AUTHORSHIP_REQUIRED_AUTHORITY_TYPES):
+            raise ValueError("EDITORIAL_AUTHORSHIP_AUTHORITY_COMPOSITION_INVALID")
 
 
 # Explicit aliases make the law discoverable under the language used by later
@@ -393,9 +432,10 @@ def validate_viewer_facing_presentation(
             != EditorialAuthorityType.EDITORIAL_AUTHORSHIP_CONTRACT
         ):
             raise ValueError("EDITORIAL_PRESENTATION_AUTHORITY_TYPE_INVALID")
-        if outcome in {"HOLD", "NO_VISUAL_CHANGE"} and decision.get(
-            "actual_presentation_change"
-        ) is True:
+        if (
+            outcome in {"HOLD", "NO_VISUAL_CHANGE"}
+            and decision.get("actual_presentation_change") is True
+        ):
             raise ValueError("STABLE_PRESENTATION_OUTCOME_RUNTIME_MISMATCH")
 
 

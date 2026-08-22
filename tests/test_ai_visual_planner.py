@@ -15,6 +15,7 @@ from app.services.ai_visual_planner import (
     AIVideoPromptCompiler,
     MotionIntentPlanner,
     UnifiedAIVisualPlanner,
+    _resolve_pre_authored_transition,
 )
 from app.services.native_motion_compiler import NativeMotionCompiler
 
@@ -150,6 +151,46 @@ def test_long_semantic_block_splits_presentation_windows_and_reuses_one_asset_sl
         )
 
 
+def test_technical_window_splits_only_create_neutral_cuts() -> None:
+    style, _, compilation = _plan(
+        _unit(
+            "unit-technical-split",
+            0,
+            30_000,
+            semantic_group_key="one-authored-meaning",
+            transition_semantic_reason="TOPIC_SHIFT",
+        )
+    )
+    grammar = VideoMotionGrammar.production_default(
+        grammar_id="technical-split-grammar",
+        style_bible_hash=style.content_hash,
+    )
+    planner = MotionIntentPlanner()
+    projections = [
+        planner.project(
+            scene_plan=scene,
+            style_bible=style,
+            motion_grammar=grammar,
+            primary_asset_ref=f"artifact://ai-image/{index}",
+            primary_asset_hash=f"{index + 1:064x}",
+            previous_projection=None,
+            next_scene_plan=(
+                compilation.scenes[index + 1]
+                if index + 1 < len(compilation.scenes)
+                else None
+            ),
+        )
+        for index, scene in enumerate(compilation.scenes)
+    ]
+
+    assert len(projections) == 3
+    assert {item.transition_in for item in projections} == {"cut"}
+    assert {item.transition_out for item in projections} == {"cut"}
+    assert {item.transition_semantic_reason for item in projections} == {
+        "UNAUTHORED_TECHNICAL_CUT"
+    }
+
+
 def test_group_first_split_preserves_ordered_source_partition_and_unit_bindings():
     _, policy, compilation = _plan(
         _unit("unit-001", 0, 7_000, semantic_group_key="one-world"),
@@ -215,8 +256,7 @@ def test_repeated_semantics_do_not_gain_hash_or_id_based_variation():
     assert len({item.transition_in for item in projections[1:]}) == 1
     assert len({item.transition_out for item in projections[:-1]}) == 1
     assert all(
-        "non-authorizing realization note"
-        in item.motion_semantic_reason.casefold()
+        "non-authorizing realization note" in item.motion_semantic_reason.casefold()
         for item in projections
     )
     assert "scene-plan-semantic://" not in "".join(
@@ -255,9 +295,7 @@ def test_route_selection_is_semantic_and_motion_required_never_downgrades():
 
 
 def test_hold_realization_is_static_even_when_long() -> None:
-    style, _, compilation = _plan(
-        _unit("long-hold", 0, 12_000, visual_function="HOLD")
-    )
+    style, _, compilation = _plan(_unit("long-hold", 0, 12_000, visual_function="HOLD"))
     grammar = VideoMotionGrammar.production_default(
         grammar_id="long-hold-grammar",
         style_bible_hash=style.content_hash,
@@ -303,7 +341,7 @@ def test_hold_cannot_be_realized_as_intrinsic_video_change() -> None:
         )
 
 
-def test_conclusion_keeps_explicit_semantic_transition() -> None:
+def test_active_planner_does_not_treat_last_scene_as_conclusion_authority() -> None:
     style, _, compilation = _plan(
         _unit("setup", 0, 4_000),
         _unit(
@@ -335,8 +373,21 @@ def test_conclusion_keeps_explicit_semantic_transition() -> None:
         previous_projection=first,
     )
 
-    assert first.transition_out == "fade_black"
-    assert conclusion.transition_in == "fade_black"
+    assert first.transition_out == "cut"
+    assert conclusion.transition_in == "cut"
+    assert conclusion.transition_out == "cut"
+    assert conclusion.transition_semantic_reason == "UNAUTHORED_TECHNICAL_CUT"
+
+
+def test_conclusion_resolver_semantics_are_stable_and_have_no_ordinal_input() -> None:
+    style = _style_bible()
+    grammar = VideoMotionGrammar.production_default(
+        grammar_id="authored-conclusion-resolver",
+        style_bible_hash=style.content_hash,
+    )
+
+    assert _resolve_pre_authored_transition("CONCLUSION", grammar) == "fade_black"
+    assert _resolve_pre_authored_transition("CONCLUSION", grammar) == "fade_black"
 
 
 def test_motion_required_blocks_when_video_authority_is_unavailable():

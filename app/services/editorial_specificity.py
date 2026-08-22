@@ -19,7 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import ValidationFailureError
-from app.db.models.m5 import EditorialIdeaCandidate, EditorialResearchRun, SearchDemandEvidence
+from app.db.models.m5 import (
+    EditorialIdeaCandidate,
+    EditorialResearchRun,
+    SearchDemandEvidence,
+)
 from app.db.models.script_qualification import EditorialTopicDefinition
 from app.services.config_registry import content_hash
 
@@ -30,7 +34,7 @@ EDITORIAL_EVIDENCE_TEXT_NORMALIZATION_VERSION = (
     "editorial-evidence-text-normalization.v1"
 )
 EDITORIAL_FROZEN_EVIDENCE_SPAN_VERSION = "editorial-frozen-evidence-span.v1"
-EDITORIAL_SPECIFICITY_GATE_VERSION = "editorial-specificity-gate.v1"
+EDITORIAL_SPECIFICITY_GATE_VERSION = "editorial-specificity-gate.v2"
 MAX_EDITORIAL_IDEA_PROPOSALS_PER_RESEARCH = 3
 MAX_EDITORIAL_IDEA_SYNTHESIS_CALLS_PER_REPLENISHMENT = 1
 MAX_FROZEN_EVIDENCE_SPANS_PER_SOURCE = 12
@@ -61,8 +65,7 @@ CARD_D_AUTHORSHIP_EVIDENCE_BINDING_FIELDS = frozenset(
     }
 )
 REQUIRED_EVIDENCE_BINDING_FIELDS = (
-    LEGACY_REQUIRED_EVIDENCE_BINDING_FIELDS
-    | CARD_D_AUTHORSHIP_EVIDENCE_BINDING_FIELDS
+    LEGACY_REQUIRED_EVIDENCE_BINDING_FIELDS | CARD_D_AUTHORSHIP_EVIDENCE_BINDING_FIELDS
 )
 
 _SOURCE_CLASSES = {
@@ -71,8 +74,17 @@ _SOURCE_CLASSES = {
     "NARROW_TOPIC_CAPABLE": 2,
 }
 _GENERIC_TITLES = {
-    "api", "apis", "model", "models", "documentation", "developers",
-    "openai api", "openai developers", "responses", "guides", "reference",
+    "api",
+    "apis",
+    "model",
+    "models",
+    "documentation",
+    "developers",
+    "openai api",
+    "openai developers",
+    "responses",
+    "guides",
+    "reference",
 }
 _GENERIC_ANGLE_MARKERS = (
     "bounded standalone walkthrough",
@@ -98,10 +110,41 @@ _GENERIC_VIEWER_MARKERS = (
     "instead of a broad product overview",
     "what to verify next",
 )
+_GENERIC_CARD_D_JUDGMENT_MARKERS = (
+    "this is important",
+    "this is a good choice",
+    "consider the options",
+    "use best practices",
+    "make the right choice",
+)
+_GENERIC_CARD_D_PAYOFF_MARKERS = (
+    "you will understand",
+    "viewers will understand",
+    "the viewer will understand",
+    "learn about",
+    "a useful takeaway",
+)
 _GENERIC_FUNCTION_WORDS = {
-    "documentation", "document", "docs", "source", "official", "overview",
-    "understand", "review", "verify", "scope", "assumptions", "information",
-    "video", "viewer", "users", "teams", "small", "use", "using", "learn",
+    "documentation",
+    "document",
+    "docs",
+    "source",
+    "official",
+    "overview",
+    "understand",
+    "review",
+    "verify",
+    "scope",
+    "assumptions",
+    "information",
+    "video",
+    "viewer",
+    "users",
+    "teams",
+    "small",
+    "use",
+    "using",
+    "learn",
 }
 _EVIDENCE_WHITESPACE = re.compile(r"\s+")
 
@@ -185,7 +228,9 @@ def derive_frozen_evidence_spans(
     """Construct bounded, stable spans without fetching or interpreting text."""
 
     spans: list[FrozenEvidenceSpan] = []
-    for start, end in _bounded_text_segments(content_excerpt)[:MAX_FROZEN_EVIDENCE_SPANS_PER_SOURCE]:
+    for start, end in _bounded_text_segments(content_excerpt)[
+        :MAX_FROZEN_EVIDENCE_SPANS_PER_SOURCE
+    ]:
         exact_text = content_excerpt[start:end]
         normalized_text_hash = content_hash(normalize_frozen_evidence_text(exact_text))
         span_id = content_hash(
@@ -257,7 +302,9 @@ class EditorialIdeaProposal(BaseModel):
     scope_inclusions: list[str] = Field(min_length=1, max_length=12)
     scope_exclusions: list[str] = Field(min_length=1, max_length=12)
     primary_evidence_refs: list[dict[str, Any]] = Field(min_length=1, max_length=4)
-    supporting_evidence_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=6)
+    supporting_evidence_refs: list[dict[str, Any]] = Field(
+        default_factory=list, max_length=6
+    )
     # Every material viewer-facing statement is anchored to a short exact span
     # retained in the source snapshot.  The gate verifies these spans locally.
     evidence_bindings: list[dict[str, Any]] = Field(min_length=1, max_length=16)
@@ -376,8 +423,109 @@ def _ref_id(value: dict[str, Any]) -> str:
 
 
 def _concrete_editorial_function(value: Any) -> bool:
-    words = [word for word in _normalized(value).split() if word not in _GENERIC_FUNCTION_WORDS]
+    words = [
+        word
+        for word in _normalized(value).split()
+        if word not in _GENERIC_FUNCTION_WORDS
+    ]
     return len(set(words)) >= 2
+
+
+def _card_d_project_intent_reasons(
+    proposal: EditorialIdeaProposal,
+) -> tuple[str, ...]:
+    """Deterministically reject obvious Card D self-certification failures.
+
+    This qualifies project intent structure, distinctness, and minimum role
+    specificity.  It deliberately does not claim that the final script or
+    rendered ending realizes the intent.
+    """
+
+    if not proposal.has_exact_card_d_authorship:
+        return ("EDITORIAL_CARD_D_AUTHORSHIP_VALUES_REQUIRED",)
+
+    episode = str(proposal.episode_reasoning)
+    question = str(proposal.central_question)
+    stakes = str(proposal.early_stakes_or_payoff)
+    thesis = str(proposal.original_thesis_or_position)
+    judgment = str(proposal.visible_editorial_judgment)
+    payoff = str(proposal.memorable_payoff_framework_or_conclusion)
+    normalized_roles = {
+        "episode": _normalized(episode),
+        "question": _normalized(question),
+        "stakes": _normalized(stakes),
+        "thesis": _normalized(thesis),
+        "judgment": _normalized(judgment),
+        "payoff": _normalized(payoff),
+    }
+    reasons: list[str] = []
+    if len(set(normalized_roles.values())) != len(normalized_roles):
+        reasons.append("EDITORIAL_CARD_D_ROLES_NOT_DISTINCT")
+
+    weaker_values = {
+        "title": _normalized(proposal.proposed_title),
+        "angle": _normalized(proposal.proposed_angle),
+        "audience_problem": _normalized(proposal.specific_audience_problem),
+        "legacy_question_or_thesis": _normalized(proposal.central_question_or_thesis),
+        "learning_outcome": _normalized(proposal.learning_outcome),
+        "viewer_value": _normalized(proposal.viewer_value),
+        "decision_value": _normalized(proposal.decision_value),
+    }
+    if normalized_roles["episode"] in {
+        weaker_values["title"],
+        weaker_values["angle"],
+        weaker_values["legacy_question_or_thesis"],
+    }:
+        reasons.append("EDITORIAL_CARD_D_EPISODE_REASONING_RELABELED")
+    if normalized_roles["question"] in {
+        weaker_values["title"],
+        weaker_values["angle"],
+        weaker_values["legacy_question_or_thesis"],
+        normalized_roles["thesis"],
+        normalized_roles["judgment"],
+        normalized_roles["payoff"],
+    }:
+        reasons.append("EDITORIAL_CARD_D_CENTRAL_QUESTION_RELABELED")
+    if normalized_roles["stakes"] == weaker_values["audience_problem"]:
+        reasons.append("EDITORIAL_CARD_D_STAKES_RELABELED")
+    if normalized_roles["thesis"] == weaker_values["angle"]:
+        reasons.append("EDITORIAL_CARD_D_THESIS_RELABELED")
+    if normalized_roles["judgment"] == weaker_values["decision_value"]:
+        reasons.append("EDITORIAL_CARD_D_JUDGMENT_RELABELED")
+    if normalized_roles["payoff"] == weaker_values["viewer_value"]:
+        reasons.append("EDITORIAL_CARD_D_PAYOFF_VIEWER_VALUE_RELABELED")
+    if normalized_roles["payoff"] == weaker_values["learning_outcome"]:
+        reasons.append("EDITORIAL_CARD_D_PAYOFF_LEARNING_OUTCOME_RELABELED")
+
+    if not _concrete_editorial_function(episode):
+        reasons.append("EDITORIAL_CARD_D_EPISODE_REASONING_GENERIC")
+    question_text = question.casefold().strip()
+    if not _concrete_editorial_function(question) or not (
+        question_text.endswith("?")
+        or re.match(r"^(what|why|how|where|when|which|who)\b", question_text)
+    ):
+        reasons.append("EDITORIAL_CARD_D_CENTRAL_QUESTION_GENERIC")
+    if not _concrete_editorial_function(stakes):
+        reasons.append("EDITORIAL_CARD_D_STAKES_GENERIC")
+    if not _concrete_editorial_function(thesis):
+        reasons.append("EDITORIAL_CARD_D_THESIS_GENERIC")
+    if (
+        not _concrete_editorial_function(judgment)
+        or any(
+            marker in normalized_roles["judgment"]
+            for marker in _GENERIC_CARD_D_JUDGMENT_MARKERS
+        )
+    ):
+        reasons.append("EDITORIAL_CARD_D_VISIBLE_JUDGMENT_GENERIC")
+    if (
+        not _concrete_editorial_function(payoff)
+        or any(
+            marker in normalized_roles["payoff"]
+            for marker in _GENERIC_CARD_D_PAYOFF_MARKERS
+        )
+    ):
+        reasons.append("EDITORIAL_CARD_D_MEMORABLE_PAYOFF_GENERIC")
+    return tuple(sorted(set(reasons)))
 
 
 class EditorialIdeaSynthesisService:
@@ -464,10 +612,15 @@ class EditorialIdeaSynthesisService:
                 f"editorial-idea-synthesis:{EDITORIAL_IDEA_SYNTHESIS_VERSION}:{research_run.id}"
             ),
         )
-        if response.status != "SUCCESS" or not isinstance(response.structured_output, dict):
+        if response.status != "SUCCESS" or not isinstance(
+            response.structured_output, dict
+        ):
             raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_PROVIDER_BLOCKED")
         raw_proposals = response.structured_output.get("proposals")
-        if not isinstance(raw_proposals, list) or len(raw_proposals) > MAX_EDITORIAL_IDEA_PROPOSALS_PER_RESEARCH:
+        if (
+            not isinstance(raw_proposals, list)
+            or len(raw_proposals) > MAX_EDITORIAL_IDEA_PROPOSALS_PER_RESEARCH
+        ):
             raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_OUTPUT_INVALID")
         proposals: list[EditorialIdeaProposal] = []
         invalid_count = 0
@@ -476,7 +629,9 @@ class EditorialIdeaSynthesisService:
             if not isinstance(raw, dict):
                 invalid_count += 1
                 invalid_reason_counts["EDITORIAL_IDEA_SYNTHESIS_OUTPUT_INVALID"] = (
-                    invalid_reason_counts.get("EDITORIAL_IDEA_SYNTHESIS_OUTPUT_INVALID", 0)
+                    invalid_reason_counts.get(
+                        "EDITORIAL_IDEA_SYNTHESIS_OUTPUT_INVALID", 0
+                    )
                     + 1
                 )
                 continue
@@ -490,7 +645,9 @@ class EditorialIdeaSynthesisService:
                     if isinstance(ref, dict)
                 }
                 if not ref_ids or not ref_ids.issubset(source_class_by_id):
-                    raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_EVIDENCE_REF_INVALID")
+                    raise ValidationFailureError(
+                        "EDITORIAL_IDEA_SYNTHESIS_EVIDENCE_REF_INVALID"
+                    )
                 strongest_class = max(
                     (source_class_by_id[item] for item in ref_ids),
                     key=lambda item: _SOURCE_CLASSES[item],
@@ -507,7 +664,9 @@ class EditorialIdeaSynthesisService:
                     "proposal_schema_version": EDITORIAL_IDEA_PROPOSAL_SCHEMA,
                     "source_specificity_class": strongest_class,
                     "content_mode": content_mode,
-                    "series_binding": series_binding if content_mode == "SERIES_EPISODE" else None,
+                    "series_binding": series_binding
+                    if content_mode == "SERIES_EPISODE"
+                    else None,
                 }
                 normalized.pop("proposal_hash", None)
                 proposal = EditorialIdeaProposal.model_validate(normalized)
@@ -540,12 +699,16 @@ class EditorialIdeaSynthesisService:
             "execution_mode": "ONE_BOUNDED_ADDITIONAL_LLM_CALL",
             "max_calls": MAX_EDITORIAL_IDEA_SYNTHESIS_CALLS_PER_REPLENISHMENT,
             "provider_route_attempt_id": str(response.route_attempt_id),
-            "provider_attempt_id": str(response.provider_attempt_id) if response.provider_attempt_id else None,
+            "provider_attempt_id": str(response.provider_attempt_id)
+            if response.provider_attempt_id
+            else None,
             "llm_run_snapshot_id": str(response.llm_run_snapshot_id),
             "source_pack_hash": content_hash(source_pack),
             "proposal_count": len(proposals),
             "invalid_proposal_count": invalid_count,
-            "invalid_proposal_reason_counts": dict(sorted(invalid_reason_counts.items())),
+            "invalid_proposal_reason_counts": dict(
+                sorted(invalid_reason_counts.items())
+            ),
             "proposals": [item.model_dump(mode="json") for item in proposals],
         }
         receipt["receipt_hash"] = content_hash(receipt)
@@ -576,7 +739,7 @@ class EditorialIdeaSynthesisService:
         source_pack: list[dict[str, Any]],
     ) -> str:
         return (
-            "Return JSON only with {\"proposals\": [...]}, containing zero to three "
+            'Return JSON only with {"proposals": [...]}, containing zero to three '
             "EditorialIdeaProposal objects. A source is evidence, never an automatic "
             "video title or idea. Propose only a concrete mechanism, workflow, constraint, "
             "tradeoff, capability boundary, risk, or viewer decision explicitly supported "
@@ -626,10 +789,14 @@ class EditorialIdeaSynthesisService:
                 raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID")
             field = str(binding.get("field") or "")
             if field not in REQUIRED_EVIDENCE_BINDING_FIELDS:
-                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_FIELD_INVALID")
+                raise ValidationFailureError(
+                    "EDITORIAL_IDEA_SYNTHESIS_BINDING_FIELD_INVALID"
+                )
             span_ids = binding.get("supporting_span_ids")
             if not isinstance(span_ids, list) or not span_ids:
-                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_SPAN_IDS_REQUIRED")
+                raise ValidationFailureError(
+                    "EDITORIAL_IDEA_SYNTHESIS_BINDING_SPAN_IDS_REQUIRED"
+                )
             seen: set[str] = set()
             for raw_span_id in span_ids:
                 span_id = str(raw_span_id or "")
@@ -661,29 +828,48 @@ class EditorialIdeaSynthesisService:
         expected_mode: str,
         expected_series_binding: dict[str, Any] | None,
     ) -> None:
+        if card_d_reasons := _card_d_project_intent_reasons(proposal):
+            raise ValidationFailureError(
+                "EDITORIAL_IDEA_SYNTHESIS_CARD_D_QUALIFICATION_FAILED:"
+                + ",".join(card_d_reasons)
+            )
         if proposal.content_mode != expected_mode:
             raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_MODE_MISMATCH")
-        if expected_mode == "SERIES_EPISODE" and proposal.series_binding != expected_series_binding:
-            raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_SERIES_BINDING_MISMATCH")
+        if (
+            expected_mode == "SERIES_EPISODE"
+            and proposal.series_binding != expected_series_binding
+        ):
+            raise ValidationFailureError(
+                "EDITORIAL_IDEA_SYNTHESIS_SERIES_BINDING_MISMATCH"
+            )
         ref_ids = {
             _ref_id(ref)
-            for ref in [*proposal.primary_evidence_refs, *proposal.supporting_evidence_refs]
+            for ref in [
+                *proposal.primary_evidence_refs,
+                *proposal.supporting_evidence_refs,
+            ]
         }
         if not ref_ids or not ref_ids.issubset(source_class_by_id):
-            raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_EVIDENCE_REF_INVALID")
+            raise ValidationFailureError(
+                "EDITORIAL_IDEA_SYNTHESIS_EVIDENCE_REF_INVALID"
+            )
         strongest_class = max(
             (source_class_by_id[item] for item in ref_ids),
             key=lambda item: _SOURCE_CLASSES[item],
         )
         if proposal.source_specificity_class != strongest_class:
-            raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_SOURCE_CLASS_MISMATCH")
+            raise ValidationFailureError(
+                "EDITORIAL_IDEA_SYNTHESIS_SOURCE_CLASS_MISMATCH"
+            )
         binding_fields: set[str] = set()
         for binding in proposal.evidence_bindings:
             if not isinstance(binding, dict):
                 raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID")
             field = str(binding.get("field") or "")
             if field not in REQUIRED_EVIDENCE_BINDING_FIELDS:
-                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_FIELD_INVALID")
+                raise ValidationFailureError(
+                    "EDITORIAL_IDEA_SYNTHESIS_BINDING_FIELD_INVALID"
+                )
             evidence_id = str(binding.get("evidence_id") or "")
             quote = str(binding.get("quoted_text") or "").strip()
             if (
@@ -691,9 +877,7 @@ class EditorialIdeaSynthesisService:
                 or evidence_id not in frozen_source_by_id
                 or not quote
             ):
-                raise ValidationFailureError(
-                    "EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID"
-                )
+                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID")
             span_id = str(binding.get("span_id") or "")
             if span_id:
                 span = frozen_span_by_id.get(span_id)
@@ -756,7 +940,10 @@ class EditorialSpecificityService:
                 reasons=reasons,
             )
         else:
-            self._mapping_reasons(candidate=candidate, topic=topic, proposal=proposal, reasons=reasons)
+            self._mapping_reasons(
+                candidate=candidate, topic=topic, proposal=proposal, reasons=reasons
+            )
+            reasons.extend(_card_d_project_intent_reasons(proposal))
             self._evidence_reasons(
                 proposal=proposal,
                 evidence=evidence,
@@ -911,7 +1098,10 @@ class EditorialSpecificityService:
         by_id = {str(item.id): _snapshot(item) for item in evidence}
         proposal_ids = {
             _ref_id(item)
-            for item in [*proposal.primary_evidence_refs, *proposal.supporting_evidence_refs]
+            for item in [
+                *proposal.primary_evidence_refs,
+                *proposal.supporting_evidence_refs,
+            ]
         }
         if not proposal_ids or not proposal_ids.issubset(by_id):
             reasons.append("EDITORIAL_PROPOSAL_EVIDENCE_INSUFFICIENT")
@@ -949,14 +1139,20 @@ class EditorialSpecificityService:
         angle = _normalized(proposal.proposed_angle)
         if any(marker in angle for marker in _GENERIC_ANGLE_MARKERS):
             reasons.extend(
-                ["EDITORIAL_ANGLE_GENERIC_WALKTHROUGH", "EDITORIAL_ANGLE_REUSABLE_TEMPLATE"]
+                [
+                    "EDITORIAL_ANGLE_GENERIC_WALKTHROUGH",
+                    "EDITORIAL_ANGLE_REUSABLE_TEMPLATE",
+                ]
             )
         if "source summary" in angle or "documentation says" in angle:
             reasons.append("EDITORIAL_ANGLE_SOURCE_SUMMARY")
         question = _normalized(proposal.central_question_or_thesis)
         if any(marker in question for marker in _GENERIC_QUESTION_MARKERS):
             reasons.extend(
-                ["EDITORIAL_QUESTION_GENERIC_DOCUMENTATION_REVIEW", "EDITORIAL_QUESTION_NOT_DECISION_RELEVANT"]
+                [
+                    "EDITORIAL_QUESTION_GENERIC_DOCUMENTATION_REVIEW",
+                    "EDITORIAL_QUESTION_NOT_DECISION_RELEVANT",
+                ]
             )
         outcome = _normalized(proposal.learning_outcome)
         if any(marker in outcome for marker in _GENERIC_OUTCOME_MARKERS):
@@ -996,12 +1192,18 @@ class EditorialSpecificityService:
         angle = _normalized(candidate.proposed_angle)
         if any(marker in angle for marker in _GENERIC_ANGLE_MARKERS):
             reasons.extend(
-                ["EDITORIAL_ANGLE_GENERIC_WALKTHROUGH", "EDITORIAL_ANGLE_REUSABLE_TEMPLATE"]
+                [
+                    "EDITORIAL_ANGLE_GENERIC_WALKTHROUGH",
+                    "EDITORIAL_ANGLE_REUSABLE_TEMPLATE",
+                ]
             )
         question = _normalized(topic.central_question_or_thesis)
         if any(marker in question for marker in _GENERIC_QUESTION_MARKERS):
             reasons.extend(
-                ["EDITORIAL_QUESTION_GENERIC_DOCUMENTATION_REVIEW", "EDITORIAL_QUESTION_NOT_DECISION_RELEVANT"]
+                [
+                    "EDITORIAL_QUESTION_GENERIC_DOCUMENTATION_REVIEW",
+                    "EDITORIAL_QUESTION_NOT_DECISION_RELEVANT",
+                ]
             )
         outcome = _normalized(topic.learning_outcome)
         if any(marker in outcome for marker in _GENERIC_OUTCOME_MARKERS):
@@ -1017,7 +1219,10 @@ class EditorialSpecificityService:
                 "EDITORIAL_PROPOSAL_EVIDENCE_INSUFFICIENT",
             ]
         )
-        if "DISCOVERY_ONLY" in source_classes or "BROAD_TOPIC_CAPABLE" in source_classes:
+        if (
+            "DISCOVERY_ONLY" in source_classes
+            or "BROAD_TOPIC_CAPABLE" in source_classes
+        ):
             reasons.append("EDITORIAL_SOURCE_TOO_BROAD_FOR_PROPOSAL")
 
 
@@ -1038,19 +1243,49 @@ class SpecificityCleanupAction:
 class EditorialSpecificityMaintenanceService:
     """Plan and apply retroactive cleanup without deleting durable lineage."""
 
-    _ACTIVE_STAGES = {"GREENLIT", "SELECTED_FOR_SLOT", "IN_PRODUCTION", "FINAL_REVIEW_READY"}
+    _ACTIVE_STAGES = {
+        "GREENLIT",
+        "SELECTED_FOR_SLOT",
+        "IN_PRODUCTION",
+        "FINAL_REVIEW_READY",
+    }
     _ACTIVE_QUALIFICATION_STATES = {
-        "RESERVED", "WRITER_DISPATCHED", "SCRIPT_GENERATED", "STRUCTURAL_CHECKED",
-        "CLAIM_INVENTORY_CHECKED", "GROUNDING_CHECKED", "VERIFIER_DISPATCHED",
-        "EDITORIAL_CHECKED", "MEMORY_CHECKED", "REPAIRABLE_BLOCK", "REPAIR_DISPATCHED",
-        "REVERIFYING", "WRITER_IN_PROGRESS", "VERIFIER_IN_PROGRESS",
-        "WRITER_SUBMIT_PENDING", "VERIFIER_SUBMIT_PENDING", "RECOVERY_AUTHORIZED",
+        "RESERVED",
+        "WRITER_DISPATCHED",
+        "SCRIPT_GENERATED",
+        "STRUCTURAL_CHECKED",
+        "CLAIM_INVENTORY_CHECKED",
+        "GROUNDING_CHECKED",
+        "VERIFIER_DISPATCHED",
+        "EDITORIAL_CHECKED",
+        "MEMORY_CHECKED",
+        "REPAIRABLE_BLOCK",
+        "REPAIR_DISPATCHED",
+        "REVERIFYING",
+        "WRITER_IN_PROGRESS",
+        "VERIFIER_IN_PROGRESS",
+        "WRITER_SUBMIT_PENDING",
+        "VERIFIER_SUBMIT_PENDING",
+        "RECOVERY_AUTHORIZED",
     }
     _ACTIVE_WORKFLOW_STATES = {
-        "PLANNING_PENDING", "PLANNING_RUNNING", "ASSIGNMENT_READY", "RESEARCH_PENDING",
-        "RESEARCH_RUNNING", "PACKAGE_PENDING", "PACKAGE_RUNNING", "READY_FOR_PRODUCTION",
-        "MEDIA_PENDING", "MEDIA_RUNNING", "RENDER_PENDING", "RENDER_RUNNING", "QC_PENDING",
-        "QC_RUNNING", "ARCHIVE_PENDING", "ARCHIVE_RUNNING", "PAUSED_AFTER_NATIVE_RENDER",
+        "PLANNING_PENDING",
+        "PLANNING_RUNNING",
+        "ASSIGNMENT_READY",
+        "RESEARCH_PENDING",
+        "RESEARCH_RUNNING",
+        "PACKAGE_PENDING",
+        "PACKAGE_RUNNING",
+        "READY_FOR_PRODUCTION",
+        "MEDIA_PENDING",
+        "MEDIA_RUNNING",
+        "RENDER_PENDING",
+        "RENDER_RUNNING",
+        "QC_PENDING",
+        "QC_RUNNING",
+        "ARCHIVE_PENDING",
+        "ARCHIVE_RUNNING",
+        "PAUSED_AFTER_NATIVE_RENDER",
     }
 
     def __init__(self, session: Session) -> None:
@@ -1075,10 +1310,14 @@ class EditorialSpecificityMaintenanceService:
                 EditorialIdeaCandidate.policy_snapshot_id == policy_snapshot_id
             )
         actions: list[SpecificityCleanupAction] = []
-        for candidate in self.session.scalars(query.order_by(EditorialIdeaCandidate.created_at, EditorialIdeaCandidate.id)):
+        for candidate in self.session.scalars(
+            query.order_by(EditorialIdeaCandidate.created_at, EditorialIdeaCandidate.id)
+        ):
             topic = self.session.scalar(
                 select(EditorialTopicDefinition)
-                .where(EditorialTopicDefinition.editorial_idea_candidate_id == candidate.id)
+                .where(
+                    EditorialTopicDefinition.editorial_idea_candidate_id == candidate.id
+                )
                 .order_by(EditorialTopicDefinition.topic_definition_version.desc())
             )
             evaluation = (
@@ -1090,12 +1329,18 @@ class EditorialSpecificityMaintenanceService:
                     reason_codes=("EDITORIAL_TOPIC_DEFINITION_MISSING",),
                     evidence_refs=(),
                     proposal_hash=content_hash(
-                        {"candidate_hash": candidate.canonical_hash, "missing_topic": True}
+                        {
+                            "candidate_hash": candidate.canonical_hash,
+                            "missing_topic": True,
+                        }
                     ),
                     gate_version=EDITORIAL_SPECIFICITY_GATE_VERSION,
                     evaluation_hash=content_hash(
-                        {"candidate_id": str(candidate.id), "missing_topic": True,
-                         "gate_version": EDITORIAL_SPECIFICITY_GATE_VERSION}
+                        {
+                            "candidate_id": str(candidate.id),
+                            "missing_topic": True,
+                            "gate_version": EDITORIAL_SPECIFICITY_GATE_VERSION,
+                        }
                     ),
                 )
             )
@@ -1110,7 +1355,9 @@ class EditorialSpecificityMaintenanceService:
                 if isinstance(ref, dict) and ref.get("ref")
             )
             if evaluation is not None and evaluation.state == "PASS":
-                action: Literal["KEEP", "REJECT", "PRESERVE_CONFLICT", "PRESERVE_NON_GREENLIT"] = "KEEP"
+                action: Literal[
+                    "KEEP", "REJECT", "PRESERVE_CONFLICT", "PRESERVE_NON_GREENLIT"
+                ] = "KEEP"
             elif conflicts:
                 action = "PRESERVE_CONFLICT"
             elif candidate.stage == "GREENLIT":
@@ -1122,7 +1369,9 @@ class EditorialSpecificityMaintenanceService:
                     candidate_id=candidate.id,
                     title=candidate.proposed_title,
                     angle=candidate.proposed_angle,
-                    central_question_or_thesis=(topic.central_question_or_thesis if topic else None),
+                    central_question_or_thesis=(
+                        topic.central_question_or_thesis if topic else None
+                    ),
                     learning_outcome=(topic.learning_outcome if topic else None),
                     source_urls=source_urls,
                     territory_key=candidate.editorial_territory_key,
@@ -1133,7 +1382,9 @@ class EditorialSpecificityMaintenanceService:
             )
         return actions
 
-    def apply(self, *, actions: list[SpecificityCleanupAction], actor: Any) -> list[SpecificityCleanupAction]:
+    def apply(
+        self, *, actions: list[SpecificityCleanupAction], actor: Any
+    ) -> list[SpecificityCleanupAction]:
         """Apply only reviewed GREENLIT→REJECTED legal transitions."""
 
         from app.contracts.m5 import EditorialIdeaCandidateTransition
@@ -1154,7 +1405,9 @@ class EditorialSpecificityMaintenanceService:
                     replace(
                         action,
                         action="PRESERVE_CONFLICT",
-                        conflict_reason_codes=tuple(self._active_authority_conflicts(candidate)),
+                        conflict_reason_codes=tuple(
+                            self._active_authority_conflicts(candidate)
+                        ),
                     )
                 )
                 continue
@@ -1189,9 +1442,13 @@ class EditorialSpecificityMaintenanceService:
                 "learning_outcome": action.learning_outcome,
                 "source_urls": list(action.source_urls),
                 "novelty_territory_key": action.territory_key,
-                "specificity_result": action.specificity.state if action.specificity else "BLOCK",
+                "specificity_result": action.specificity.state
+                if action.specificity
+                else "BLOCK",
                 "specificity_reason_codes": list(
-                    action.specificity.reason_codes if action.specificity else ("EDITORIAL_TOPIC_DEFINITION_MISSING",)
+                    action.specificity.reason_codes
+                    if action.specificity
+                    else ("EDITORIAL_TOPIC_DEFINITION_MISSING",)
                 ),
                 "proposed_maintenance_action": action.action,
                 "active_authority_conflicts": list(action.conflict_reason_codes),
@@ -1199,7 +1456,9 @@ class EditorialSpecificityMaintenanceService:
             for action in actions
         ]
 
-    def _active_authority_conflicts(self, candidate: EditorialIdeaCandidate) -> list[str]:
+    def _active_authority_conflicts(
+        self, candidate: EditorialIdeaCandidate
+    ) -> list[str]:
         from app.db.models.launch_cadence import LongFormPublishSlot
         from app.db.models.m5 import ProjectAdmissionDecision
         from app.db.models.production_workflow import ProductionWorkflowRun
@@ -1218,13 +1477,17 @@ class EditorialSpecificityMaintenanceService:
             .where(ScriptQualificationRun.editorial_idea_candidate_id == candidate.id)
             .order_by(ScriptQualificationRun.created_at.desc())
         )
-        if qualification is not None and qualification.state in self._ACTIVE_QUALIFICATION_STATES:
+        if (
+            qualification is not None
+            and qualification.state in self._ACTIVE_QUALIFICATION_STATES
+        ):
             reasons.append("EDITORIAL_SPECIFICITY_ACTIVE_QUALIFICATION_CONFLICT")
         if self.session.scalar(
             select(ProductionWorkflowRun.id).where(
                 ProductionWorkflowRun.project_admission_decision_id.in_(
                     select(ProjectAdmissionDecision.id).where(
-                        ProjectAdmissionDecision.editorial_idea_candidate_id == candidate.id,
+                        ProjectAdmissionDecision.editorial_idea_candidate_id
+                        == candidate.id,
                         ProjectAdmissionDecision.decision == "ADMIT",
                     )
                 ),

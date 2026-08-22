@@ -18,6 +18,7 @@ MotionNeed = Literal[
 VisualImportance = Literal["SUPPORTING", "STANDARD", "HIGH", "HERO"]
 FactualRisk = Literal["LOW", "MEDIUM", "HIGH"]
 TransitionSemanticReason = Literal[
+    "UNAUTHORED_TECHNICAL_CUT",
     "CONTINUATION",
     "NEW_STEP",
     "CONTRAST",

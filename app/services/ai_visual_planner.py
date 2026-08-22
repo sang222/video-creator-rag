@@ -94,10 +94,12 @@ def _maximum_scene_duration_ms(
     return min(function_maximum, policy.maximum_ai_video_presentation_ms)
 
 
-def _transition_for_reason(
+def _resolve_pre_authored_transition(
     reason: str,
     grammar: VideoMotionGrammar,
 ) -> TransitionPreset:
+    """Resolve a reason only after an upstream authority has authored it."""
+
     semantic_candidates: dict[str, tuple[TransitionPreset, ...]] = {
         "CONTINUATION": ("cut", "dissolve", "fade_soft"),
         "NEW_STEP": ("reveal_up", "slide_left", "cut"),
@@ -720,23 +722,13 @@ class MotionIntentPlanner:
     ) -> MotionIntentProjection:
         self._validate_authority(scene_plan, style_bible, motion_grammar)
         anchor, focal_point = _subject_anchor(scene_plan)
-        transition_in = _transition_for_reason(
-            scene_plan.transition_semantic_reason,
-            motion_grammar,
-        )
-        if previous_projection is None:
-            transition_in = "cut"
-        transition_out = (
-            _transition_for_reason(
-                next_scene_plan.transition_semantic_reason,
-                motion_grammar,
-            )
-            if next_scene_plan is not None
-            else _transition_for_reason(
-                scene_plan.transition_semantic_reason,
-                motion_grammar,
-            )
-        )
+        # The active V2 production input does not carry a sealed Card E
+        # PresentationSemanticIntent/TemporalSemanticBinding.  Scene order,
+        # grouping, visual function, and provider segmentation therefore have
+        # zero authority to create a semantic transition.  A CUT is only the
+        # neutral technical join between presentation windows.
+        transition_in: TransitionPreset = "cut"
+        transition_out: TransitionPreset = "cut"
         if scene_plan.production_route == "AI_VIDEO":
             camera_motion: CameraMotion = "STATIC"
             motion_preset = "video_intrinsic_preserve"
@@ -782,7 +774,7 @@ class MotionIntentPlanner:
             "presentation_end_ms": scene_plan.presentation_end_ms,
             "transition_in": transition_in,
             "transition_out": transition_out,
-            "transition_semantic_reason": scene_plan.transition_semantic_reason,
+            "transition_semantic_reason": "UNAUTHORED_TECHNICAL_CUT",
             "motion_semantic_reason": semantic_reason,
             "safe_area_constraints": [
                 "keep the primary subject inside the normalized safe crop region",

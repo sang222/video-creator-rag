@@ -1184,7 +1184,7 @@ def _production_editorial_authorship_gate(
             "EDITORIAL_AUTHORSHIP_TRANSITIVE_AUTHORITY_REQUIRED",
         )
     try:
-        contract.verify_integrity()
+        contract.require_current_authority()
     except ValueError:
         return _production_block(
             snapshot,
